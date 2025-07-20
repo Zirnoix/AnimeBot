@@ -317,6 +317,18 @@ async def check_new_episodes():
             await channel.send("🔔 Rappel d'épisode imminent :", embed=embed)
             notified.add(uid)
             save_json(NOTIFIED_FILE, list(notified))
+            
+@bot.event
+async def on_ready():
+    now = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
+    print(f"[✅ BOT DÉMARRÉ] AnimeBot actif depuis le {now}")
+    
+    channel = bot.get_channel(DISCORD_CHANNEL_ID)
+    if channel:
+        await channel.send(f"🤖 AnimeBot a redémarré ({now}) et est prêt à traquer les sorties !")
+
+    bot.loop.create_task(check_new_episodes())
+    bot.loop.create_task(send_daily_summary())
 
 @bot.event
 async def on_ready():
