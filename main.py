@@ -7,6 +7,10 @@ import asyncio
 import os
 import pytz
 from datetime import datetime, timedelta
+from datetime import datetime, timedelta
+
+start_time = datetime.utcnow()
+
 
 # Configuration initiale
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -178,6 +182,19 @@ async def next_episode(ctx):
     ep = min(episodes, key=lambda e: e["airingAt"])
     dt = datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE)
     await ctx.send(embed=build_embed(ep, dt))
+
+@bot.command(name="uptime")
+async def uptime(ctx):
+    now = datetime.utcnow()
+    uptime_duration = now - start_time
+
+    hours, remainder = divmod(int(uptime_duration.total_seconds()), 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    desc = f"🕒 **AnimeBot actif depuis :** {hours} heures, {minutes} minutes"
+    embed = discord.Embed(title="Uptime du bot", description=desc, color=0x2ecc71)
+    await ctx.send(embed=embed)
+
     
 @bot.command(name="journalier")
 async def journalier(ctx, mode: str = ""):
