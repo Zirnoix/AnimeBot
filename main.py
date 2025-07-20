@@ -25,8 +25,7 @@ CONFIG_FILE = "config.json"
 USER_SETTINGS_FILE = "user_settings.json"
 NOTIFIED_FILE = "notified.json"
 
-OWNER_ID = None
-
+OWNER_ID = 180389173985804288
 def load_json(file, default):
     if not os.path.exists(file):
         return default
