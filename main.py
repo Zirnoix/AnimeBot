@@ -116,21 +116,33 @@ def get_upcoming_episodes(username):
 
 # Commande !prochains en un seul embed
 @bot.command(name="prochains")
-async def prochains(ctx, mode: str = "10"):
+async def prochains(ctx, *args):
+    filter_genre = None
+    limit = 10
+
+    # Traitement des arguments : genre + nombre ou "all"
+    for arg in args:
+        if arg.isdigit():
+            limit = min(100, int(arg))
+        elif arg.lower() in ["all", "tout"]:
+            limit = 100
+        else:
+            filter_genre = arg.capitalize()
+
     episodes = get_upcoming_episodes(ANILIST_USERNAME)
     if not episodes:
         await ctx.send("Aucun épisode à venir.")
         return
 
-    try:
-        if mode.lower() in ["all", "tout"]:
-            max_items = 100
-        else:
-            max_items = min(100, int(mode))
-    except:
-        max_items = 10
+    # Filtrer par genre si applicable
+    if filter_genre:
+        episodes = [ep for ep in episodes if filter_genre in ep.get("genres", [])]
 
-    episodes = sorted(episodes, key=lambda e: e["airingAt"])[:max_items]
+    if not episodes:
+        await ctx.send(f"Aucun épisode trouvé pour le genre **{filter_genre}**.")
+        return
+
+    episodes = sorted(episodes, key=lambda e: e["airingAt"])[:limit]
     pages = []
     group_size = 5
 
@@ -138,7 +150,7 @@ async def prochains(ctx, mode: str = "10"):
         group = episodes[i:i+group_size]
         embed = discord.Embed(
             title=f"📅 Prochains épisodes — Page {len(pages)+1}",
-            description="Voici les épisodes à venir :",
+            description=f"Voici les épisodes à venir{f' pour le genre **{filter_genre}**' if filter_genre else ''} :",
             color=discord.Color.blurple()
         )
         for ep in group:
@@ -156,16 +168,24 @@ async def prochains(ctx, mode: str = "10"):
         @discord.ui.button(label="⬅️", style=discord.ButtonStyle.secondary)
         async def prev(self, i, b):
             self.index = max(0, self.index - 1)
-            pages[self.index].title = f"📅 Prochains épisodes — Page {self.index+1}"
+            pages[self.index].title = f"📅 Prochains épisodes — Page {self.index+1}/{len(pages)}"
             await i.response.edit_message(embed=pages[self.index], view=self)
+
         @discord.ui.button(label="➡️", style=discord.ButtonStyle.secondary)
         async def next(self, i, b):
             self.index = min(len(pages)-1, self.index + 1)
-            pages[self.index].title = f"📅 Prochains épisodes — Page {self.index+1}"
+            pages[self.index].title = f"📅 Prochains épisodes — Page {self.index+1}/{len(pages)}"
             await i.response.edit_message(embed=pages[self.index], view=self)
 
-    pages[0].title = f"📅 Prochains épisodes — Page 1"
-    await ctx.send(embed=pages[0], view=Paginator())
+        @discord.ui.button(label="❌ Fermer", style=discord.ButtonStyle.danger)
+        async def close(self, i, b):
+            await i.message.delete()
+
+    if not pages:
+        await ctx.send("Aucun épisode à afficher.")
+    else:
+        pages[0].title = f"📅 Prochains épisodes — Page 1/{len(pages)}"
+        await ctx.send(embed=pages[0], view=Paginator())
 
 
 
@@ -230,24 +250,79 @@ async def aujourdhui(ctx):
 async def planning(ctx):
     episodes = get_upcoming_episodes(ANILIST_USERNAME)
     if not episodes:
-        await ctx.send("Aucun épisode prévu.")
+        await ctx.send("Aucun planning disponible.")
         return
-    group = {}
-    for ep in episodes:
-        dt = datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE)
-        day = jours_fr[dt.strftime("%A")]
-        group.setdefault(day, []).append((ep, dt))
-    ordered_days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-    for jour in ordered_days:
-        if jour not in group:
-            continue
-        liste = group[jour]
-        embed = discord.Embed(title=f"🗓️ {jour}", color=discord.Color.orange())
-        for ep, dt in liste:
-            emoji = genre_emoji(ep["genres"])
-            embed.add_field(name=f"{emoji} {ep['title']} — Ép {ep['episode']}", value=dt.strftime("%H:%M"), inline=False)
-        await ctx.send(embed=embed)
 
+    weekdays = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+    planning = {day: [] for day in weekdays}
+
+    for ep in episodes:
+        day = datetime.fromtimestamp(ep['airingAt']).strftime('%A')
+        fr_day = {
+            'Monday': 'Lundi', 'Tuesday': 'Mardi', 'Wednesday': 'Mercredi',
+            'Thursday': 'Jeudi', 'Friday': 'Vendredi', 'Saturday': 'Samedi', 'Sunday': 'Dimanche'
+        }[day]
+        dt = datetime.fromtimestamp(ep['airingAt']).strftime("%H:%M")
+        planning[fr_day].append(f"• {ep['title']} — Ép. {ep['episode']} ({dt})")
+
+    for day in weekdays:
+        if planning[day]:
+            embed = discord.Embed(title=f"📅 Planning du {day}", description="\n".join(planning[day]), color=0x1abc9c)
+            await ctx.send(embed=embed)
+            
+@bot.command(name="suggest")
+async def suggest(ctx):
+    query = '''
+    query ($name: String) {
+      MediaListCollection(userName: $name, type: ANIME) {
+        lists {
+          entries {
+            media {
+              title {
+                romaji
+              }
+              genres
+              averageScore
+            }
+          }
+        }
+      }
+    }
+    '''
+    variables = {'name': ANILIST_USERNAME}
+    url = 'https://graphql.anilist.co'
+    response = requests.post(url, json={'query': query, 'variables': variables})
+    data = response.json()
+
+    all_entries = []
+    genre_count = {}
+    for lst in data['data']['MediaListCollection']['lists']:
+        for entry in lst['entries']:
+            media = entry['media']
+            all_entries.append(media)
+            for genre in media['genres']:
+                genre_count[genre] = genre_count.get(genre, 0) + 1
+
+    if not all_entries:
+        await ctx.send("Impossible de générer une suggestion.")
+        return
+
+    top_genre = max(genre_count.items(), key=lambda x: x[1])[0]
+    filtered = [m for m in all_entries if top_genre in m['genres'] and m.get('averageScore')]
+
+    if not filtered:
+        await ctx.send("Aucune recommandation trouvée.")
+        return
+
+    best = sorted(filtered, key=lambda m: m['averageScore'], reverse=True)[0]
+    title = best['title']['romaji']
+    score = best['averageScore']
+    embed = discord.Embed(
+        title="🎯 Suggestion d’anime",
+        description=f"Je te recommande **{title}** !\n⭐ Moyenne : {score}/100\n🎭 Genre dominant : {top_genre}",
+        color=0xe67e22
+    )
+    await ctx.send(embed=embed)
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(
