@@ -7,7 +7,6 @@ import asyncio
 import os
 import pytz
 from datetime import datetime, timedelta
-from datetime import datetime, timedelta
 
 start_time = datetime.utcnow()
 
