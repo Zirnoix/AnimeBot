@@ -411,32 +411,22 @@ async def check_new_episodes():
 @bot.event
 async def on_ready():
     now = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
-    print(f"[✅ BOT DÉMARRÉ] AnimeBot actif depuis le {now}")
-    
-    channel = bot.get_channel(DISCORD_CHANNEL_ID)
-    if channel:
-        await channel.send(f"🤖 AnimeBot a redémarré ({now}) et est prêt à traquer les sorties !")
-
-    bot.loop.create_task(check_new_episodes())
-    bot.loop.create_task(send_daily_summary())
-
-@bot.event
-async def on_ready():
-    print(f"✅ {bot.user.name} est connecté.")
-
-    # Tâches de fond
-    if not hasattr(bot, "daily_summary_task"):
-        bot.daily_summary_task = asyncio.create_task(send_daily_summaries())
-
-    if not hasattr(bot, "episode_alert_task"):
-        bot.episode_alert_task = asyncio.create_task(check_new_episodes())
+    print(f"[✅ BOT DÉMARRÉ] {bot.user.name} actif depuis le {now}")
 
     try:
         channel = bot.get_channel(DISCORD_CHANNEL_ID)
         if channel:
-            await channel.send("🤖 AnimeBot prêt à traquer les sorties d’épisodes !")
+            await channel.send(f"🤖 AnimeBot a redémarré ({now}) et est prêt à traquer les sorties !")
     except:
         pass
+
+    # Tâches de fond : sécurisées pour ne pas être lancées deux fois
+    if not hasattr(bot, "episode_alert_task"):
+        bot.episode_alert_task = asyncio.create_task(check_new_episodes())
+
+    if not hasattr(bot, "daily_summary_task"):
+        bot.daily_summary_task = asyncio.create_task(send_daily_summaries())
+
 
 
 async def send_daily_summaries():
