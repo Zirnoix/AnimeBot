@@ -323,26 +323,63 @@ async def suggest(ctx):
         color=0xe67e22
     )
     await ctx.send(embed=embed)
+    
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(
-        title="📘 Commandes disponibles",
-        description="Voici toutes les commandes que tu peux utiliser avec AnimeBot :",
-        color=discord.Color.blue()
+        title="📖 Commandes disponibles",
+        description="Voici toutes les commandes d'AnimeBot",
+        color=discord.Color.purple()
     )
 
-    embed.add_field(name="📅 !prochains", value="Liste paginée des épisodes à venir", inline=False)
-    embed.add_field(name="⏭️ !next", value="Affiche le prochain épisode à sortir", inline=False)
-    embed.add_field(name="📆 !aujourdhui", value="Affiche les épisodes qui sortent aujourd’hui", inline=False)
-    embed.add_field(name="🗓️ !planning", value="Planning complet de la semaine (trié par jour)", inline=False)
+    embed.add_field(
+        name="🗓️ Prochains épisodes",
+        value=(
+            "`!prochains` – Affiche les 10 épisodes à venir\n"
+            "`!prochains all` ou `!prochains 25` – Jusqu'à 100 épisodes\n"
+            "`!prochains action` – Filtrer par genre\n"
+            "`!prochains romance 20` – Filtrer genre + nombre"
+        ),
+        inline=False
+    )
 
-    embed.add_field(name="🔔 !setalert <minutes>", value="Change ton délai de rappel (ex: 15min avant la sortie)", inline=False)
-    embed.add_field(name="📬 !journalier [on/off]", value="Active ou désactive le résumé privé chaque matin", inline=False)
-    embed.add_field(name="📩 !reminder [on/off]", value="Active ou désactive les rappels privés pour chaque sortie", inline=False)
+    embed.add_field(
+        name="📅 Planning & résumés",
+        value=(
+            "`!planning` – Planning des sorties de la semaine\n"
+            "`!journalier` – Animes du jour uniquement\n"
+            "`!next` – Le prochain épisode à sortir"
+        ),
+        inline=False
+    )
 
-    embed.add_field(name="📌 !setchannel", value="Définit le canal où les alertes s’affichent (réservé à toi)", inline=False)
+    embed.add_field(
+        name="🎯 Personnalisation",
+        value=(
+            "`!reminder on/off` – Activer ou désactiver les rappels DM\n"
+            "`!setalert <heure>` – Heure du résumé (ex: `!setalert 09:00`)"
+        ),
+        inline=False
+    )
 
-    embed.set_footer(text="AnimeBot développé avec ❤️")
+    embed.add_field(
+        name="🎨 Autres outils",
+        value=(
+            "`!genres` – Voir les genres que tu suis\n"
+            "`!suggest` – Recommande un anime selon ta liste\n"
+            "`!stats` – Donne quelques stats de ton AniList"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="⚙️ Utilitaire",
+        value="`!uptime` – Voir depuis quand le bot est en ligne",
+        inline=False
+    )
+
+    embed.set_footer(text="AnimeBot – connecté à ton AniList ❤️")
+
     await ctx.send(embed=embed)
 
 
@@ -413,20 +450,24 @@ async def on_ready():
     now = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
     print(f"[✅ BOT DÉMARRÉ] {bot.user.name} actif depuis le {now}")
 
-    try:
-        channel = bot.get_channel(DISCORD_CHANNEL_ID)
+    # Récupération du bon channel depuis la config
+    config = get_config()
+    channel_id = config.get("channel_id")
+    if channel_id:
+        channel = bot.get_channel(channel_id)
         if channel:
-            await channel.send(f"🤖 AnimeBot a redémarré ({now}) et est prêt à traquer les sorties !")
-    except:
-        pass
+            try:
+                await channel.send(f"🤖 AnimeBot a redémarré ({now}) et est prêt à traquer les sorties !")
+            except:
+                pass
 
-    # Tâches de fond : sécurisées pour ne pas être lancées deux fois
-    if not hasattr(bot, "episode_alert_task"):
-        bot.episode_alert_task = asyncio.create_task(check_new_episodes())
-
+    # Tâche 1 : résumé quotidien
     if not hasattr(bot, "daily_summary_task"):
         bot.daily_summary_task = asyncio.create_task(send_daily_summaries())
 
+    # Tâche 2 : alertes épisodes
+    if not hasattr(bot, "episode_alert_task"):
+        bot.episode_alert_task = asyncio.create_task(check_new_episodes())
 
 
 async def send_daily_summaries():
