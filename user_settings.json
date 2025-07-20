@@ -1,0 +1,7 @@
+{
+  "180389173985804288": {
+    "alert_minutes": 30,
+    "reminder": true,
+    "daily_summary": true
+  }
+}
