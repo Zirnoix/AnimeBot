@@ -445,39 +445,61 @@ async def planning(ctx):
 
 @bot.command(name="animequiz")
 async def anime_quiz(ctx):
-    anime = None
-    for _ in range(5):  # Essaie jusqu’à 5 fois
-        page = random.randint(1, 500)
-        query = f'''
-        query {{
-          Page(perPage: 1, page: {page}) {{
-            media(type: ANIME, isAdult: false, sort: SCORE_DESC) {{
-              id
-              title {{
-                romaji
-                english
-                native
-              }}
-              description(asHtml: false)
-            }}
-          }}
-        }}
-        '''
-        response = requests.post(
-            "https://graphql.anilist.co",
-            json={"query": query},
-            headers={"Content-Type": "application/json"}
-        )
-        if response.status_code == 200:
-            data = response.json()
-            anime_list = data["data"]["Page"]["media"]
-            if anime_list:
-                anime = anime_list[0]
-                break
+    query = '''
+    query {
+      Page(perPage: 1, page: %d) {
+        media(type: ANIME, isAdult: false, sort: SCORE_DESC) {
+          id
+          title {
+            romaji
+            english
+            native
+          }
+          description(asHtml: false)
+        }
+      }
+    ''' % random.randint(1, 500)
 
-    if not anime:
-        await ctx.send("❌ Impossible de trouver un anime.")
+    response = requests.post(
+        "https://graphql.anilist.co",
+        json={"query": query},
+        headers={"Content-Type": "application/json"}
+    )
+
+    if response.status_code != 200:
+        await ctx.send("❌ Erreur lors de la récupération de l’anime.")
         return
+
+    data = response.json()
+    anime = data["data"]["Page"]["media"][0]
+    description = anime.get("description", "Pas de description disponible.").split(".")[0] + "."
+
+    embed = discord.Embed(
+        title="🧠 Anime Quiz",
+        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
+        color=discord.Color.orange()
+    )
+    await ctx.send(embed=embed)
+
+    correct_titles = title_variants(anime["title"])
+
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel
+
+    try:
+        msg = await bot.wait_for("message", timeout=20.0, check=check)
+        guess = normalize(msg.content)
+
+        if guess in correct_titles:
+            await ctx.send("✅ Bonne réponse !")
+            scores = load_scores()
+            user_id = str(ctx.author.id)
+            scores[user_id] = scores.get(user_id, 0) + 1
+            save_scores(scores)
+        else:
+            await ctx.send(f"❌ Mauvaise réponse. C’était **{anime['title']['romaji']}**.")
+    except asyncio.TimeoutError:
+        await ctx.send(f"⏰ Temps écoulé ! La réponse était **{anime['title']['romaji']}**.")
 
 
 @bot.command(name="suggest")
