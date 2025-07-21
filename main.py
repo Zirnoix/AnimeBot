@@ -7,6 +7,12 @@ import asyncio
 import os
 import pytz
 from datetime import datetime, timedelta
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
+
+ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18)
+ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+
 
 start_time = datetime.utcnow()
 
