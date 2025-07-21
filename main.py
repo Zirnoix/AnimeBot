@@ -579,17 +579,30 @@ async def quiztop(ctx):
         await ctx.send("🏆 Aucun score enregistré pour l’instant.")
         return
 
+    # Nouveau système de titres tous les 5 points
     def get_title(score):
-        if score >= 15:
-            return "🧠 Légende"
-        elif score >= 10:
-            return "🔥 Otaku"
-        elif score >= 6:
+        if score >= 50:
+            return "🧠 Grand Sage"
+        elif score >= 45:
+            return "👑 Champion du quiz"
+        elif score >= 40:
+            return "🌟 Stratège de l'anime"
+        elif score >= 35:
+            return "🎯 Expert en animation"
+        elif score >= 30:
+            return "🎬 Analyste Otaku"
+        elif score >= 25:
+            return "🔥 Fan Hardcore"
+        elif score >= 20:
+            return "📺 Binge-watcheur"
+        elif score >= 15:
             return "💡 Connaisseur"
-        elif score >= 3:
-            return "📺 Amateur"
+        elif score >= 10:
+            return "📘 Passionné"
+        elif score >= 5:
+            return "🌱 Débutant prometteur"
         else:
-            return "🌱 Débutant"
+            return "🔰 Nouveau joueur"
 
     leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
     desc = ""
@@ -600,7 +613,7 @@ async def quiztop(ctx):
             title = get_title(score)
             desc += f"{i}. **{user.display_name}** — {score} pts {title}\n"
         except:
-            continue  # Si utilisateur introuvable
+            continue  # Utilisateur introuvable
 
     embed = discord.Embed(
         title="🏆 Classement Anime Quiz",
