@@ -282,18 +282,162 @@ async def quiztop(ctx):
     )
     await ctx.send(embed=embed)
 
-@bot.command(name="topanime")
-async def topanime(ctx):
-    query = '''
-    query {
-      Page(perPage: 10, sort: SCORE_DESC) {
-        media(type: ANIME, isAdult: false) {
-          title { romaji }
+@bot.command(name="animebattle")
+async def anime_battle(ctx, opponent: discord.Member):
+    if opponent.bot:
+        await ctx.send("🤖 Tu ne peux pas défier un bot.")
+        return
+
+    players = [ctx.author, opponent]
+    scores = {p.id: 0 for p in players}
+
+    await ctx.send(f"🎮 Duel entre **{players[0].display_name}** et **{players[1].display_name}** ! 3 questions à venir...")
+
+    for round_num in range(1, 4):
+        await ctx.send(f"🧠 Question {round_num}/3...")
+
+        # Requête aléatoire
+        page = random.randint(1, 500)
+        query = f'''
+        query {{
+          Page(perPage: 1, page: {page}) {{
+            media(type: ANIME, isAdult: false, sort: SCORE_DESC) {{
+              title {{ romaji english native }}
+              description(asHtml: false)
+            }}
+          }}
+        }}
+        '''
+        data = query_anilist(query)
+        if not data:
+            await ctx.send("❌ Erreur lors de la récupération.")
+            return
+
+        anime = data["data"]["Page"]["media"][0]
+        desc = anime["description"].split(".")[0] + "."
+        correct_titles = title_variants(anime["title"])
+
+        embed = discord.Embed(
+            title=f"❓ Devinez l’anime",
+            description=f"**Description :**\n{desc}\n\n*15 secondes pour répondre !*",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed)
+
+        def check(m):
+            return m.author in players and normalize(m.content) in correct_titles
+
+        try:
+            msg = await bot.wait_for("message", timeout=15.0, check=check)
+            scores[msg.author.id] += 1
+            await ctx.send(f"✅ Bonne réponse par **{msg.author.display_name}** !")
+        except asyncio.TimeoutError:
+            await ctx.send(f"⏰ Personne n’a trouvé. Réponse : **{anime['title']['romaji']}**")
+
+    # Résultat final
+    p1, p2 = players
+    s1, s2 = scores[p1.id], scores[p2.id]
+    if s1 == s2:
+        result = "🤝 Égalité parfaite !"
+    else:
+        winner = p1 if s1 > s2 else p2
+        result = f"🏆 Victoire de **{winner.display_name}** ({s1} - {s2})"
+
+    await ctx.send(result)
+
+@bot.command(name="todayinhistory")
+async def todayinhistory(ctx):
+    day = datetime.now().day
+    month = datetime.now().month
+
+    query = f'''
+    query {{
+      Page(perPage: 1, sort: START_DATE_DESC) {{
+        media(type: ANIME, startDate_like: "%-{month:02d}-{day:02d}") {{
+          title {{ romaji }}
+          startDate {{ year }}
           siteUrl
-          averageScore
+        }}
+      }}
+    }}
+    '''
+    data = query_anilist(query)
+    if not data or not data["data"]["Page"]["media"]:
+        await ctx.send("❌ Aucun événement marquant trouvé pour aujourd’hui.")
+        return
+
+    anime = data["data"]["Page"]["media"][0]
+    title = anime["title"]["romaji"]
+    year = anime["startDate"]["year"]
+    url = anime["siteUrl"]
+
+    embed = discord.Embed(
+        title="📅 Ce jour-là dans l'histoire de l'anime",
+        description=f"En **{year}**, *[{title}]({url})* sortait le **{day}/{month}** !",
+        color=discord.Color.blue()
+    )
+    await ctx.send(embed=embed)
+
+import matplotlib.pyplot as plt
+
+@bot.command(name="mychart")
+async def mychart(ctx, username: str):
+    query = '''
+    query ($name: String) {
+      User(name: $name) {
+        statistics {
+          anime {
+            genres {
+              genre
+              count
+            }
+          }
         }
       }
     }
+    '''
+    data = query_anilist(query, {"name": username})
+    if not data:
+        await ctx.send("❌ Erreur lors de la récupération.")
+        return
+
+    genres = data["data"]["User"]["statistics"]["anime"]["genres"]
+    genres = sorted(genres, key=lambda g: g["count"], reverse=True)[:8]
+
+    labels = [g["genre"] for g in genres]
+    sizes = [g["count"] for g in genres]
+
+    plt.figure(figsize=(6, 6))
+    plt.pie(sizes, labels=labels, autopct='%1.1f%%')
+    plt.title(f"Genres préférés de {username}")
+
+    path = f"/tmp/{username}_chart.png"
+    plt.savefig(path)
+    plt.close()
+
+    await ctx.send(file=discord.File(path))
+
+@bot.command(name="topanime")
+async def topanime(ctx):
+    # Saison actuelle automatique
+    now = datetime.now()
+    month = now.month
+    year = now.year
+    if month in [12, 1, 2]: season = "WINTER"
+    elif month in [3, 4, 5]: season = "SPRING"
+    elif month in [6, 7, 8]: season = "SUMMER"
+    else: season = "FALL"
+
+    query = f'''
+    query {{
+      Page(perPage: 10) {{
+        media(season: {season}, seasonYear: {year}, type: ANIME, isAdult: false, sort: SCORE_DESC) {{
+          title {{ romaji }}
+          averageScore
+          siteUrl
+        }}
+      }}
+    }}
     '''
     data = query_anilist(query)
     if not data:
@@ -305,8 +449,9 @@ async def topanime(ctx):
     for i, anime in enumerate(entries, 1):
         desc += f"{i}. [{anime['title']['romaji']}]({anime['siteUrl']}) – ⭐ {anime['averageScore']}\n"
 
-    embed = discord.Embed(title="🎯 Top 10 des animés (score)", description=desc, color=discord.Color.purple())
+    embed = discord.Embed(title="🔥 Top 10 animés de la saison", description=desc, color=discord.Color.gold())
     await ctx.send(embed=embed)
+
 
 @bot.command(name="seasonal")
 async def seasonal(ctx):
@@ -547,30 +692,48 @@ async def planning(ctx):
 
 @bot.command(name="animequiz")
 async def anime_quiz(ctx):
-    query = '''
-    query {
-      Page(perPage: 1, page: %d) {
-        media(type: ANIME, isAdult: false, sort: SCORE_DESC) {
-          id
-          title {
-            romaji
-            english
-            native
-          }
-          description(asHtml: false)
-        }
-      }
-    ''' % random.randint(1, 500)
+    anime = None
+    for _ in range(5):
+        page = random.randint(1, 500)
+        query = f'''
+        query {{
+          Page(perPage: 1, page: {page}) {{
+            media(type: ANIME, isAdult: false, sort: SCORE_DESC) {{
+              id
+              title {{ romaji english native }}
+              description(asHtml: false)
+            }}
+          }}
+        }}
+        '''
+        data = query_anilist(query)
+        if data and data["data"]["Page"]["media"]:
+            anime = data["data"]["Page"]["media"][0]
+            break
 
-    response = requests.post(
-        "https://graphql.anilist.co",
-        json={"query": query},
-        headers={"Content-Type": "application/json"}
-    )
-
-    if response.status_code != 200:
-        await ctx.send("❌ Erreur lors de la récupération de l’anime.")
+    if not anime:
+        await ctx.send("❌ Aucun anime trouvé après plusieurs essais.")
         return
+
+    description = anime.get("description", "Pas de description.").split(".")[0] + "."
+    embed = discord.Embed(
+        title="🧠 Anime Quiz",
+        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
+        color=discord.Color.orange()
+    )
+    await ctx.send(embed=embed)
+
+    correct_titles = title_variants(anime["title"])
+
+    def check(m):
+        return m.author == ctx.author and normalize(m.content) in correct_titles
+
+    try:
+        msg = await bot.wait_for("message", timeout=20.0, check=check)
+        await ctx.send("✅ Bonne réponse !")
+    except asyncio.TimeoutError:
+        await ctx.send(f"⏰ Temps écoulé ! C’était **{anime['title']['romaji']}**.")
+
 
     data = response.json()
     anime = data["data"]["Page"]["media"][0]
