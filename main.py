@@ -720,7 +720,7 @@ async def planning(ctx):
 
 @bot.command(name="animequiz")
 async def anime_quiz(ctx):
-    await ctx.send("🎮 Génération d’une question...")
+    await ctx.send("🎮 Préparation du quiz...")
 
     anime = None
     for _ in range(10):
@@ -732,6 +732,7 @@ async def anime_quiz(ctx):
               id
               title {{ romaji english native }}
               description(asHtml: false)
+              coverImage {{ large }}
             }}
           }}
         }}
@@ -744,15 +745,28 @@ async def anime_quiz(ctx):
             continue
 
     if not anime:
-        await ctx.send("❌ Impossible de récupérer un anime.")
+        await ctx.send("❌ Aucun anime trouvé.")
         return
 
-    description = anime.get("description", "").split(".")[0] + "."
+    # Description
+    raw_description = anime.get("description", "Pas de description.").split(".")[0] + "."
+    try:
+        from deep_translator import GoogleTranslator
+        description = GoogleTranslator(source='auto', target='fr').translate(raw_description)
+    except:
+        description = raw_description  # fallback si la traduction échoue
+
     embed = discord.Embed(
         title="🧠 Anime Quiz",
         description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
         color=discord.Color.orange()
     )
+
+    # Ajoute image
+    cover = anime.get("coverImage", {}).get("large")
+    if cover:
+        embed.set_thumbnail(url=cover)
+
     await ctx.send(embed=embed)
 
     correct_titles = title_variants(anime["title"])
