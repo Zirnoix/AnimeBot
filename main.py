@@ -6,14 +6,14 @@ import json
 import asyncio
 import os
 import pytz
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 
 ImageFont.truetype("fonts/DejaVuSans.ttf", 18)
 ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 24)
 
-start_time = datetime.utcnow()
+start_time = datetime.now(timezone.utc)
 
 
 # Configuration initiale
