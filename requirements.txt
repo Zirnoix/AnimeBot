@@ -3,3 +3,4 @@ requests
 pytz
 pillow
 matplotlib
+deep-translator
