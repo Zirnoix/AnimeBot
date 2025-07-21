@@ -10,9 +10,8 @@ from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 
-ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18)
-ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
-
+ImageFont.truetype("fonts/DejaVuSans.ttf", 18)
+ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 24)
 
 start_time = datetime.utcnow()
 
@@ -193,6 +192,87 @@ async def prochains(ctx, *args):
         pages[0].title = f"📅 Prochains épisodes — Page 1/{len(pages)}"
         await ctx.send(embed=pages[0], view=Paginator())
 
+@bot.command(name="linkanilist")
+async def link_anilist(ctx, username: str):
+    user_links[ctx.author.id] = username
+    await ctx.send(f"✅ Ton profil Anilist a bien été lié à **{username}**.")
+
+@bot.command(name="mystats")
+async def mystats(ctx):
+    username = user_links.get(ctx.author.id)
+    if not username:
+        await ctx.send("❌ Tu n'as pas encore lié ton compte Anilist. Utilise `!linkanilist <pseudo>`.")
+        return
+    await stats(ctx, username=username)  # Appelle la commande `!stats`
+
+# Commande pour voir les stats
+@bot.command(name="stats")
+async def stats(ctx, username: str):
+    query = '''
+    query ($name: String) {
+      User(name: $name) {
+        name
+        avatar {
+          large
+        }
+        bannerImage
+        statistics {
+          anime {
+            count
+            minutesWatched
+            meanScore
+            genres {
+              genre
+              count
+            }
+          }
+        }
+        siteUrl
+      }
+    }
+    '''
+    variables = {"name": username}
+    url = "https://graphql.anilist.co"
+    response = requests.post(url, json={"query": query, "variables": variables})
+
+    if response.status_code != 200 or not response.json().get("data", {}).get("User"):
+        await ctx.send("❌ Utilisateur introuvable ou erreur Anilist.")
+        return
+
+    data = response.json()["data"]["User"]
+    stats = data["statistics"]["anime"]
+    genres = stats["genres"]
+    favorite_genre = sorted(genres, key=lambda g: g["count"], reverse=True)[0]["genre"] if genres else "N/A"
+    days = round(stats["minutesWatched"] / 1440, 1)
+
+    # Téléchargement des images
+    avatar = Image.open(BytesIO(requests.get(data["avatar"]["large"]).content)).resize((128, 128)).convert("RGBA")
+    banner_url = data["bannerImage"] or "https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-oJxzcFvSTFZg.jpg"
+    banner = Image.open(BytesIO(requests.get(banner_url).content)).resize((800, 300)).convert("RGBA")
+
+    # Création de la carte
+    card = Image.new("RGBA", (800, 300), (0, 0, 0, 255))
+    card.paste(banner, (0, 0))
+    card.paste(avatar, (30, 86), avatar)
+
+    # Dessin des textes
+    draw = ImageDraw.Draw(card)
+    font_title = ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 24)
+    font_text = ImageFont.truetype("fonts/DejaVuSans.ttf", 18)
+
+    draw.text((180, 30), f"{data['name']}", font=font_title, fill="white")
+    draw.text((180, 80), f"🎬 Animés vus : {stats['count']}", font=font_text, fill="white")
+    draw.text((180, 110), f"🕒 Temps total : {days} jours", font=font_text, fill="white")
+    draw.text((180, 140), f"⭐ Score moyen : {round(stats['meanScore'], 1)}", font=font_text, fill="white")
+    draw.text((180, 170), f"💖 Genre préféré : {favorite_genre}", font=font_text, fill="white")
+    draw.text((180, 220), f"🔗 {data['siteUrl']}", font=font_text, fill="white")
+
+    # Sauvegarder l’image
+    image_path = f"/tmp/profile_{username}.png"
+    card.save(image_path)
+
+    with open(image_path, "rb") as f:
+        await ctx.send(file=discord.File(f, filename=f"{username}_stats.png"))
 
 
 
@@ -373,7 +453,9 @@ async def help_command(ctx):
         value=(
             "`!genres` – Voir les genres que tu suis\n"
             "`!suggest` – Recommande un anime selon ta liste\n"
-            "`!stats` – Donne quelques stats de ton AniList"
+            "`!stats <pseudo>` – Affiche une carte de profil Anilist stylisée"
+            "`!linkanilist <pseudo>` - Lie ton profil Discord à un compte Anilist"
+            "`!mystats` - Affiche ton profil Anilist lié automatiquement"
         ),
         inline=False
     )
