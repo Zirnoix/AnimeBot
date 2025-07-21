@@ -6,9 +6,24 @@ import json
 import asyncio
 import os
 import pytz
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
+
+# 📁 Chargement des préférences utilisateur
+PREFERENCES_FILE = "preferences.json"
+
+def load_json(filename):
+    if not os.path.exists(filename):
+        return {}
+    with open(filename, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_json(filename, data):
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+preferences = load_json(PREFERENCES_FILE)
 
 ImageFont.truetype("fonts/DejaVuSans.ttf", 18)
 ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 24)
