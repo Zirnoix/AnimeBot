@@ -445,13 +445,6 @@ async def planning(ctx):
 
 @bot.command(name="animequiz")
 async def anime_quiz(ctx):
-    embed = discord.Embed(
-        title="🧠 Anime Quiz",
-        description=f"🎮 *Devine l’anime à partir de sa description...*\n\n**Description :**\n{description}\n\n*Tu as 20 secondes pour répondre.*",
-        color=discord.Color.orange()
-    )
-
-
     query = '''
     query {
       Page(perPage: 1, page: %d) {
@@ -505,7 +498,6 @@ async def anime_quiz(ctx):
             save_scores(scores)
         else:
             await ctx.send(f"❌ Mauvaise réponse. C’était **{anime['title']['romaji']}**.")
-
     except asyncio.TimeoutError:
         await ctx.send(f"⏰ Temps écoulé ! La réponse était **{anime['title']['romaji']}**.")
 
