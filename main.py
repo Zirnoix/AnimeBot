@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands, tasks
 import requests
 import json
+import random
 import asyncio
 import os
 import pytz
@@ -12,6 +13,18 @@ from io import BytesIO
 
 # 📁 Chargement des préférences utilisateur
 PREFERENCES_FILE = "preferences.json"
+
+QUIZ_SCORES_FILE = "quiz_scores.json"
+
+def load_scores():
+    if not os.path.exists(QUIZ_SCORES_FILE):
+        return {}
+    with open(QUIZ_SCORES_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_scores(scores):
+    with open(QUIZ_SCORES_FILE, "w", encoding="utf-8") as f:
+        json.dump(scores, f, indent=2, ensure_ascii=False)
 
 def load_json(filename):
     if not os.path.exists(filename):
@@ -411,60 +424,125 @@ async def planning(ctx):
         if planning[day]:
             embed = discord.Embed(title=f"📅 Planning du {day}", description="\n".join(planning[day]), color=0x1abc9c)
             await ctx.send(embed=embed)
-            
-@bot.command(name="suggest")
-async def suggest(ctx):
+
+@bot.command(name="animequiz")
+async def anime_quiz(ctx):
+    scores = load_scores()
+
     query = '''
-    query ($name: String) {
-      MediaListCollection(userName: $name, type: ANIME) {
-        lists {
-          entries {
-            media {
-              title {
-                romaji
-              }
-              genres
-              averageScore
-            }
+    query {
+      Page(perPage: 50, page: %d) {
+        media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
+          title {
+            romaji
+          }
+          description(asHtml: false)
+          coverImage {
+            large
           }
         }
       }
     }
-    '''
-    variables = {'name': ANILIST_USERNAME}
-    url = 'https://graphql.anilist.co'
-    response = requests.post(url, json={'query': query, 'variables': variables})
-    data = response.json()
+    ''' % random.randint(1, 10)
 
-    all_entries = []
-    genre_count = {}
-    for lst in data['data']['MediaListCollection']['lists']:
-        for entry in lst['entries']:
-            media = entry['media']
-            all_entries.append(media)
-            for genre in media['genres']:
-                genre_count[genre] = genre_count.get(genre, 0) + 1
+    response = requests.post('https://graphql.anilist.co', json={'query': query})
+    results = response.json().get("data", {}).get("Page", {}).get("media", [])
 
-    if not all_entries:
-        await ctx.send("Impossible de générer une suggestion.")
+    if not results:
+        await ctx.send("❌ Impossible de récupérer un quiz actuellement.")
         return
 
-    top_genre = max(genre_count.items(), key=lambda x: x[1])[0]
-    filtered = [m for m in all_entries if top_genre in m['genres'] and m.get('averageScore')]
+    anime = random.choice(results)
+    title = anime['title']['romaji']
+    description = anime.get("description", "Aucune description disponible.")
+    if len(description) > 300:
+        description = description[:300].rsplit(" ", 1)[0] + "..."
 
-    if not filtered:
-        await ctx.send("Aucune recommandation trouvée.")
-        return
-
-    best = sorted(filtered, key=lambda m: m['averageScore'], reverse=True)[0]
-    title = best['title']['romaji']
-    score = best['averageScore']
     embed = discord.Embed(
-        title="🎯 Suggestion d’anime",
-        description=f"Je te recommande **{title}** !\n⭐ Moyenne : {score}/100\n🎭 Genre dominant : {top_genre}",
-        color=0xe67e22
+        title="🧩 Anime Quiz — Devine le titre !",
+        description=f"*{description}*\n\nRéponds dans le chat dans les 30 secondes !",
+        color=discord.Color.orange()
     )
+    embed.set_image(url=anime['coverImage']['large'])
+
     await ctx.send(embed=embed)
+
+    def check(m):
+        return m.channel == ctx.channel and m.author == ctx.author
+
+    try:
+        msg = await bot.wait_for("message", check=check, timeout=30)
+        if title.lower() in msg.content.lower():
+            await ctx.send(f"✅ Bonne réponse ! C'était bien **{title}**.")
+            uid = str(ctx.author.id)
+            scores[uid] = scores.get(uid, 0) + 1
+            save_scores(scores)
+        else:
+            await ctx.send(f"❌ Mauvaise réponse ! C'était **{title}**.")
+    except asyncio.TimeoutError:
+        await ctx.send(f"⏱️ Temps écoulé ! La bonne réponse était **{title}**.")
+        
+@bot.command(name="quizscore")
+async def quiz_score(ctx, member: discord.Member = None):
+    member = member or ctx.author
+    scores = load_scores()
+    uid = str(member.id)
+    score = scores.get(uid, 0)
+    await ctx.send(f"🏅 **{member.display_name}** a un score de **{score}** au quiz.")
+
+
+@bot.command(name="suggest")
+async def suggest(ctx, *, genre: str = None):
+    genre = genre.capitalize() if genre else None
+    query = '''
+    query ($genre: String, $page: Int) {
+      Page(perPage: 50, page: $page) {
+        media(type: ANIME, genre_in: [$genre], sort: POPULARITY_DESC, isAdult: false) {
+          title {
+            romaji
+          }
+          siteUrl
+          coverImage {
+            large
+          }
+          episodes
+          format
+        }
+      }
+    }
+    '''
+
+    page = random.randint(1, 10)
+    variables = {"genre": genre, "page": page}
+
+    response = requests.post(
+        'https://graphql.anilist.co',
+        json={"query": query, "variables": variables}
+    )
+
+    data = response.json()
+    results = data.get("data", {}).get("Page", {}).get("media", [])
+    if not results:
+        await ctx.send("Aucune suggestion trouvée.")
+        return
+
+    suggestions = random.sample(results, min(5, len(results)))
+    embed = discord.Embed(
+        title=f"🎲 Suggestions d'animés{' — Genre: ' + genre if genre else ''}",
+        description="Voici quelques animés que tu pourrais aimer :",
+        color=discord.Color.purple()
+    )
+
+    for anime in suggestions:
+        embed.add_field(
+            name=anime['title']['romaji'],
+            value=f"[Voir sur AniList]({anime['siteUrl']})\n🎞️ Format : {anime['format']} — 📺 Épisodes : {anime['episodes'] or '??'}",
+            inline=False
+        )
+
+    embed.set_footer(text="Utilise !suggest <genre> pour filtrer (ex: !suggest Action)")
+    await ctx.send(embed=embed)
+
     
 @bot.command(name="help")
 async def help_command(ctx):
@@ -508,7 +586,8 @@ async def help_command(ctx):
         name="🎨 Autres outils",
         value=(
             "`!genres` – Voir les genres que tu suis\n"
-            "`!suggest` – Recommande un anime selon ta liste\n"
+            "`!suggest` – Recommande un anime \n"
+            "`!suggest <genre>` – Recommande un anime par genre souhaité \n"
             "`!stats <pseudo>` – Affiche une carte de profil Anilist stylisée\n"
             "`!linkanilist <pseudo>` - Lie ton profil Discord à un compte Anilist\n"
             "`!mystats` - Affiche ton profil Anilist lié automatiquement\n"
