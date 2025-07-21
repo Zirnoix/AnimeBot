@@ -585,7 +585,7 @@ async def quiztop(ctx):
         await ctx.send("🏆 Aucun score enregistré pour l’instant.")
         return
 
-    # Nouveau système de titres tous les 5 points
+    # Titres évolutifs par score (tous les 5 points)
     def get_title(score):
         if score >= 50:
             return "🧠 Grand Sage"
@@ -619,7 +619,7 @@ async def quiztop(ctx):
             title = get_title(score)
             desc += f"{i}. **{user.display_name}** — {score} pts {title}\n"
         except:
-            continue  # Utilisateur introuvable
+            continue  # Si l'utilisateur n'existe plus
 
     embed = discord.Embed(
         title="🏆 Classement Anime Quiz",
@@ -627,6 +627,7 @@ async def quiztop(ctx):
         color=discord.Color.gold()
     )
     await ctx.send(embed=embed)
+
 
 @bot.command(name="animebattle")
 async def anime_battle(ctx, adversaire: discord.Member = None):
