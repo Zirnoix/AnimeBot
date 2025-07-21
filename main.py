@@ -30,6 +30,21 @@ CONFIG_FILE = "config.json"
 USER_SETTINGS_FILE = "user_settings.json"
 NOTIFIED_FILE = "notified.json"
 
+LINKS_FILE = "user_links.json"
+
+# Charger les liens existants
+if os.path.exists(LINKS_FILE):
+    with open(LINKS_FILE, "r", encoding="utf-8") as f:
+        user_links = json.load(f)
+        # Convert keys to integers (json keys are always strings)
+        user_links = {int(k): v for k, v in user_links.items()}
+else:
+    user_links = {}
+
+def save_user_links():
+    with open(LINKS_FILE, "w", encoding="utf-8") as f:
+        json.dump(user_links, f, ensure_ascii=False, indent=2)
+
 OWNER_ID = 180389173985804288
 def load_json(file, default):
     if not os.path.exists(file):
@@ -195,7 +210,18 @@ async def prochains(ctx, *args):
 @bot.command(name="linkanilist")
 async def link_anilist(ctx, username: str):
     user_links[ctx.author.id] = username
+    save_user_links()
     await ctx.send(f"✅ Ton profil Anilist a bien été lié à **{username}**.")
+
+@bot.command(name="unlink")
+async def unlink(ctx):
+    if ctx.author.id in user_links:
+        del user_links[ctx.author.id]
+        save_user_links()
+        await ctx.send("🗑️ Ton lien Anilist a été supprimé.")
+    else:
+        await ctx.send("❌ Aucun lien trouvé pour ton compte.")
+
 
 @bot.command(name="mystats")
 async def mystats(ctx):
@@ -456,6 +482,7 @@ async def help_command(ctx):
             "`!stats <pseudo>` – Affiche une carte de profil Anilist stylisée"
             "`!linkanilist <pseudo>` - Lie ton profil Discord à un compte Anilist"
             "`!mystats` - Affiche ton profil Anilist lié automatiquement"
+            "`!unlink` - Supprime ton lien avec un compte Anilist"
         ),
         inline=False
     )
