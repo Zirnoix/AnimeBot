@@ -24,6 +24,9 @@ def save_json(filename, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 preferences = load_json(PREFERENCES_FILE)
+def save_preferences():
+    save_json(PREFERENCES_FILE, preferences)
+
 
 ImageFont.truetype("fonts/DejaVuSans.ttf", 18)
 ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 24)
@@ -537,7 +540,7 @@ async def setalert(ctx, time_str: str):
         user_id = str(ctx.author.id)
         preferences.setdefault(user_id, {})
         preferences[user_id]["alert_time"] = f"{hour:02d}:{minute:02d}"
-        save_preferences()
+        save_json(PREFERENCES_FILE, preferences)
 
         await ctx.send(f"✅ Alerte quotidienne définie à **{hour:02d}:{minute:02d}**.")
     except ValueError:
