@@ -45,6 +45,17 @@ def save_scores(scores):
     with open(QUIZ_SCORES_FILE, "w", encoding="utf-8") as f:
         json.dump(scores, f, indent=2, ensure_ascii=False)
 
+def load_links():
+    try:
+        with open("linked_users.json", "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_links(data):
+    with open("linked_users.json", "w") as f:
+        json.dump(data, f, indent=2)
+
 def query_anilist(query: str, variables: dict = None):
     try:
         response = requests.post(
@@ -269,10 +280,12 @@ async def prochains(ctx, *args):
         await ctx.send(embed=pages[0], view=Paginator())
 
 @bot.command(name="linkanilist")
-async def link_anilist(ctx, username: str):
-    user_links[ctx.author.id] = username
-    save_user_links()
-    await ctx.send(f"✅ Ton profil Anilist a bien été lié à **{username}**.")
+async def linkanilist(ctx, pseudo: str):
+    data = load_links()
+    user_id = str(ctx.author.id)
+    data[user_id] = pseudo
+    save_links(data)
+    await ctx.send(f"✅ Ton compte Anilist **{pseudo}** a bien été lié à ton profil Discord.")
 
 @bot.command(name="quiztop")
 async def quiztop(ctx):
@@ -608,21 +621,25 @@ async def search_anime(ctx, *, title: str):
 
 @bot.command(name="unlink")
 async def unlink(ctx):
-    if ctx.author.id in user_links:
-        del user_links[ctx.author.id]
-        save_user_links()
-        await ctx.send("🗑️ Ton lien Anilist a été supprimé.")
+    data = load_links()
+    user_id = str(ctx.author.id)
+    if user_id in data:
+        del data[user_id]
+        save_links(data)
+        await ctx.send("🔗 Ton compte a bien été délié.")
     else:
-        await ctx.send("❌ Aucun lien trouvé pour ton compte.")
+        await ctx.send("❌ Tu n’avais pas encore de compte lié.")
 
 
 @bot.command(name="mystats")
 async def mystats(ctx):
-    username = user_links.get(ctx.author.id)
-    if not username:
-        await ctx.send("❌ Tu n'as pas encore lié ton compte Anilist. Utilise `!linkanilist <pseudo>`.")
+    data = load_links()
+    user_id = str(ctx.author.id)
+    pseudo = data.get(user_id)
+    if not pseudo:
+        await ctx.send("❌ Tu dois d'abord lier ton compte avec `!linkanilist <pseudo>`")
         return
-    await stats(ctx, username=username)  # Appelle la commande `!stats`
+    await stats(ctx, pseudo)  # Appelle la commande stats classique
 
 # Commande pour voir les stats
 @bot.command(name="stats")
