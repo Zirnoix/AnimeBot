@@ -13,15 +13,6 @@ from io import BytesIO
 import unicodedata
 import matplotlib.pyplot as plt
 
-last = data.get(user_id, {}).get("last_completed")
-if last:
-    last_time = datetime.fromisoformat(last)
-    if datetime.now() - last_time < timedelta(days=7):
-        next_time = last_time + timedelta(days=7)
-        wait_days = (next_time - datetime.now()).days + 1
-        await ctx.send(f"⏳ Tu as déjà validé ton défi cette semaine.\nTu pourras le refaire dans **{wait_days} jour(s)**.")
-        return
-
 
 def normalize(text):
     if not text:
@@ -363,8 +354,16 @@ async def weekly(ctx, sub=None):
     user_id = str(ctx.author.id)
     data = load_weekly()
 
-    # Sous-commande "complete"
     if sub == "complete":
+        last = data.get(user_id, {}).get("last_completed")
+        if last:
+            from datetime import datetime, timedelta
+            last_time = datetime.fromisoformat(last)
+            if datetime.now() - last_time < timedelta(days=7):
+                next_time = last_time + timedelta(days=7)
+                wait_days = (next_time - datetime.now()).days + 1
+                await ctx.send(f"⏳ Tu as déjà validé ton défi cette semaine.\nTu pourras le refaire dans **{wait_days} jour(s)**.")
+                return
         if user_id not in data or not data[user_id].get("active"):
             await ctx.send("❌ Tu n’as pas de défi en cours.")
             return
