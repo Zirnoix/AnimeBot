@@ -639,55 +639,14 @@ async def on_ready():
             except:
                 pass
 
-    # Tâche 1 : résumé quotidien
-    if not hasattr(bot, "daily_summary_task"):
-        bot.daily_summary_task = asyncio.create_task(send_daily_summaries())
+    # ✅ Tâche 1 : résumé quotidien
+    if not send_daily_summaries.is_running():
+        send_daily_summaries.start()
 
-    # Tâche 2 : alertes épisodes
+    # ✅ Tâche 2 : alertes épisodes
     if not check_new_episodes.is_running():
         check_new_episodes.start()
 
-
-
-async def send_daily_summaries():
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        now = datetime.now(TIMEZONE)
-        if now.hour == 7 and now.minute < 5:  # entre 7h00 et 7h04
-            episodes = get_upcoming_episodes(ANILIST_USERNAME)
-            for uid, settings in user_settings.items():
-                if not settings.get("daily_summary", False):
-                    continue
-                user = await bot.fetch_user(int(uid))
-                if user is None:
-                    continue
-                today_eps = []
-                for ep in episodes:
-                    dt = datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE)
-                    if dt.date() == now.date():
-                        today_eps.append((ep, dt))
-
-                if not today_eps:
-                    continue
-
-                embed = discord.Embed(
-                    title="📆 Épisodes du jour",
-                    description=f"Voici ce qui sort aujourd’hui ({now.strftime('%d/%m/%Y')}) :",
-                    color=discord.Color.green()
-                )
-                for ep, dt in today_eps:
-                    emoji = genre_emoji(ep["genres"])
-                    embed.add_field(
-                        name=f"{emoji} {ep['title']} — Épisode {ep['episode']}",
-                        value=f"🕒 {dt.strftime('%H:%M')}",
-                        inline=False
-                    )
-                try:
-                    await user.send(embed=embed)
-                except discord.Forbidden:
-                    print(f"❌ Impossible d’envoyer le résumé quotidien à {user.name}")
-
-        await asyncio.sleep(300)
 
 
 # Lancer le bot
