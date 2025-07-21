@@ -594,7 +594,8 @@ async def on_ready():
 
     # Tâche 2 : alertes épisodes
     if not check_new_episodes.is_running():
-    check_new_episodes.start()
+        check_new_episodes.start()
+
 
 
 async def send_daily_summaries():
