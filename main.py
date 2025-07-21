@@ -973,14 +973,14 @@ async def help_command(ctx):
         }
     ]
 
-    for section in help_sections:
+    for i, section in enumerate(help_sections):
         embed = discord.Embed(
             title="📖 Commandes disponibles",
             description="AnimeBot – Ton assistant AniList personnalisé",
             color=discord.Color.purple()
         )
         embed.add_field(name=section["title"], value=section["content"], inline=False)
-        embed.set_footer(text="Utilise les boutons ⬅️ ➡️ pour naviguer • ❌ pour fermer")
+        embed.set_footer(text=f"Page {i+1}/{len(help_sections)} • Utilise ⬅️ ➡️ pour naviguer • ❌ pour fermer")
         pages.append(embed)
 
     class HelpPaginator(discord.ui.View):
