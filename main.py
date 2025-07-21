@@ -491,9 +491,9 @@ async def help_command(ctx):
         value=(
             "`!genres` – Voir les genres que tu suis\n"
             "`!suggest` – Recommande un anime selon ta liste\n"
-            "`!stats <pseudo>` – Affiche une carte de profil Anilist stylisée"
-            "`!linkanilist <pseudo>` - Lie ton profil Discord à un compte Anilist"
-            "`!mystats` - Affiche ton profil Anilist lié automatiquement"
+            "`!stats <pseudo>` – Affiche une carte de profil Anilist stylisée\n"
+            "`!linkanilist <pseudo>` - Lie ton profil Discord à un compte Anilist\n"
+            "`!mystats` - Affiche ton profil Anilist lié automatiquement\n"
             "`!unlink` - Supprime ton lien avec un compte Anilist"
         ),
         inline=False
