@@ -791,13 +791,6 @@ def get_title(level):
             break
     return result
 
-
-embed.add_field(
-    name="🎮 Niveau & XP",
-    value=f"Lv. {level} – {xp}/{xp_needed} XP\nTitre : **{get_title(level)}**",
-    inline=False
-)
-
     scores = load_scores()
     user_id = str(ctx.author.id)
 
