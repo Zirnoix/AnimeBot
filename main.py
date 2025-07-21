@@ -822,7 +822,7 @@ def get_title(level):
         ),
         color=discord.Color.orange()
     )
-    await ctx.send(embed=embed)
+
 
 @bot.command(name="todayinhistory")
 async def todayinhistory(ctx):
