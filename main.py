@@ -1117,8 +1117,8 @@ async def check_new_episodes():
 @bot.event
 async def on_ready():
     now = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
-    print(f"[✅ BOT DÉMARRÉ] {bot.user.name} actif depuis le {now}")
-    print(f"BOT ACTIVÉ — ID : {bot.user.id}")  # 👈 ici c'est bon
+    print(f"[BOOT 🟢] {bot.user.name} prêt — ID: {bot.user.id} à {now}")
+
     
     # Récupération du bon channel depuis la config
     config = get_config()
@@ -1127,7 +1127,7 @@ async def on_ready():
         channel = bot.get_channel(channel_id)
         if channel:
             try:
-                await channel.send(f"🤖 AnimeBot a redémarré ({now}) et est prêt à traquer les sorties !")
+                await channel.send(f"🤖 AnimeBot a démarré et est prêt à traquer les sorties !")
             except:
                 pass
 
