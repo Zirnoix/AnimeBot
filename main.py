@@ -312,18 +312,26 @@ async def quiztop(ctx):
     await ctx.send(embed=embed)
 
 @bot.command(name="animebattle")
-async def anime_battle(ctx, opponent: discord.Member):
-    if opponent.bot:
+async def anime_battle(ctx, adversaire: discord.Member = None):
+    if adversaire is None:
+        await ctx.send("❌ Tu dois mentionner un adversaire : `!animebattle @pseudo`")
+        return
+
+    if adversaire.bot:
         await ctx.send("🤖 Tu ne peux pas défier un bot.")
         return
 
-    await ctx.send(f"🎮 Duel entre **{ctx.author.display_name}** et **{opponent.display_name}** !")
+    if adversaire == ctx.author:
+        await ctx.send("🙃 Tu ne peux pas te défier toi-même.")
+        return
 
-    players = [ctx.author, opponent]
-    scores = {p.id: 0 for p in players}
+    await ctx.send(f"🎮 Duel entre **{ctx.author.display_name}** et **{adversaire.display_name}** lancé !")
 
-    for round_num in range(1, 4):
-        await ctx.send(f"❓ Question {round_num}/3...")
+    joueurs = [ctx.author, adversaire]
+    scores = {p.id: 0 for p in joueurs}
+
+    for numero in range(1, 4):
+        await ctx.send(f"❓ Question {numero}/3...")
 
         anime = None
         for _ in range(10):
@@ -347,38 +355,45 @@ async def anime_battle(ctx, opponent: discord.Member):
                 continue
 
         if not anime:
-            await ctx.send("❌ Erreur lors de la récupération de l’anime.")
+            await ctx.send("❌ Impossible de récupérer un anime.")
             return
 
-        desc = anime["description"].split(".")[0] + "."
+        # Traduction de la description
+        raw_desc = anime.get("description", "Pas de description.").split(".")[0] + "."
+        try:
+            from deep_translator import GoogleTranslator
+            desc = GoogleTranslator(source='auto', target='fr').translate(raw_desc)
+        except:
+            desc = raw_desc
+
         embed = discord.Embed(
             title="🧠 Devine l’anime",
-            description=f"**Description :**\n{desc}\n\n*15 secondes pour répondre.*",
+            description=f"**Description :**\n{desc}\n\n*15 secondes pour répondre !*",
             color=discord.Color.orange()
         )
         await ctx.send(embed=embed)
 
-        correct_titles = title_variants(anime["title"])
+        bonnes_reponses = title_variants(anime["title"])
 
         def check(m):
-            return m.author in players and normalize(m.content) in correct_titles
+            return m.author in joueurs and normalize(m.content) in bonnes_reponses
 
         try:
             msg = await bot.wait_for("message", timeout=15.0, check=check)
             scores[msg.author.id] += 1
-            await ctx.send(f"✅ Bonne réponse par **{msg.author.display_name}** !")
+            await ctx.send(f"✅ Bonne réponse de **{msg.author.display_name}** !")
         except asyncio.TimeoutError:
-            await ctx.send(f"⏰ Personne n’a trouvé. C’était **{anime['title']['romaji']}**")
+            await ctx.send(f"⏰ Temps écoulé. La bonne réponse était **{anime['title']['romaji']}**.")
 
-    p1, p2 = players
-    s1, s2 = scores[p1.id], scores[p2.id]
+    j1, j2 = joueurs
+    s1, s2 = scores[j1.id], scores[j2.id]
     if s1 == s2:
-        result = "🤝 Égalité parfaite !"
+        resultat = f"🤝 Égalité parfaite entre **{j1.display_name}** et **{j2.display_name}** ! ({s1} - {s2})"
     else:
-        winner = p1 if s1 > s2 else p2
-        result = f"🏆 Victoire de **{winner.display_name}** ({s1} - {s2})"
+        gagnant = j1 if s1 > s2 else j2
+        resultat = f"🏆 Victoire de **{gagnant.display_name}** ! Score final : {s1} - {s2}"
 
-    await ctx.send(result)
+    await ctx.send(resultat)
 
 @bot.command(name="myrank")
 async def myrank(ctx):
@@ -785,7 +800,6 @@ async def anime_quiz(ctx):
             media(type: ANIME, isAdult: false, sort: SCORE_DESC) {{
               id
               title {{ romaji english native }}
-              description(asHtml: false)
               coverImage {{ large }}
             }}
           }}
