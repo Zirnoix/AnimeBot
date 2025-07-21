@@ -234,6 +234,10 @@ async def mystats(ctx):
 # Commande pour voir les stats
 @bot.command(name="stats")
 async def stats(ctx, username: str):
+    import requests
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    from io import BytesIO
+
     query = '''
     query ($name: String) {
       User(name: $name) {
@@ -259,47 +263,55 @@ async def stats(ctx, username: str):
     '''
     variables = {"name": username}
     url = "https://graphql.anilist.co"
-    response = requests.post(url, json={"query": query, "variables": variables})
 
-    if response.status_code != 200 or not response.json().get("data", {}).get("User"):
-        await ctx.send("❌ Utilisateur introuvable ou erreur Anilist.")
+    try:
+        response = requests.post(url, json={"query": query, "variables": variables})
+        response.raise_for_status()
+        json_data = response.json()
+        user_data = json_data.get("data", {}).get("User", None)
+    except Exception:
+        await ctx.send("🚫 Erreur lors de la récupération des données Anilist.")
         return
 
-    data = response.json()["data"]["User"]
-    stats = data["statistics"]["anime"]
+    if not user_data:
+        await ctx.send(f"❌ Le pseudo **{username}** est introuvable sur Anilist.")
+        return
+
+    stats = user_data["statistics"]["anime"]
     genres = stats["genres"]
     favorite_genre = sorted(genres, key=lambda g: g["count"], reverse=True)[0]["genre"] if genres else "N/A"
     days = round(stats["minutesWatched"] / 1440, 1)
 
-    # Téléchargement des images
-    avatar = Image.open(BytesIO(requests.get(data["avatar"]["large"]).content)).resize((128, 128)).convert("RGBA")
-    banner_url = data["bannerImage"] or "https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-oJxzcFvSTFZg.jpg"
+    avatar = Image.open(BytesIO(requests.get(user_data["avatar"]["large"]).content)).resize((128, 128)).convert("RGBA")
+    banner_url = user_data["bannerImage"] or "https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-oJxzcFvSTFZg.jpg"
     banner = Image.open(BytesIO(requests.get(banner_url).content)).resize((800, 300)).convert("RGBA")
 
-    # Création de la carte
-    card = Image.new("RGBA", (800, 300), (0, 0, 0, 255))
-    card.paste(banner, (0, 0))
-    card.paste(avatar, (30, 86), avatar)
+    # Flou et overlay foncé
+    blur = banner.filter(ImageFilter.GaussianBlur(3))
+    overlay = Image.new("RGBA", blur.size, (0, 0, 0, 180))
+    card = Image.alpha_composite(blur, overlay)
 
-    # Dessin des textes
+    card.paste(avatar, (30, 86), avatar)
     draw = ImageDraw.Draw(card)
+
+    # Polices
     font_title = ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 24)
     font_text = ImageFont.truetype("fonts/DejaVuSans.ttf", 18)
 
-    draw.text((180, 30), f"{data['name']}", font=font_title, fill="white")
+    # Contenu stylisé
+    draw.text((180, 30), f"👤 {user_data['name']}", font=font_title, fill="white")
     draw.text((180, 80), f"🎬 Animés vus : {stats['count']}", font=font_text, fill="white")
     draw.text((180, 110), f"🕒 Temps total : {days} jours", font=font_text, fill="white")
     draw.text((180, 140), f"⭐ Score moyen : {round(stats['meanScore'], 1)}", font=font_text, fill="white")
     draw.text((180, 170), f"💖 Genre préféré : {favorite_genre}", font=font_text, fill="white")
-    draw.text((180, 220), f"🔗 {data['siteUrl']}", font=font_text, fill="white")
+    draw.text((180, 220), f"🔗 {user_data['siteUrl']}", font=font_text, fill="white")
 
-    # Sauvegarder l’image
-    image_path = f"/tmp/profile_{username}.png"
+    # Sauvegarde
+    image_path = f"/tmp/{username}_profile.png"
     card.save(image_path)
 
     with open(image_path, "rb") as f:
         await ctx.send(file=discord.File(f, filename=f"{username}_stats.png"))
-
 
 
 # Commandes supplémentaires
