@@ -745,7 +745,7 @@ async def anime_quiz(ctx):
     description = anime.get("description", "Pas de description.").split(".")[0] + "."
     embed = discord.Embed(
         title="🧠 Anime Quiz",
-        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'a*
+        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*"
 
 
 
