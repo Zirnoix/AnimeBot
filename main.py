@@ -492,55 +492,65 @@ async def quiz_score(ctx, member: discord.Member = None):
 
 
 @bot.command(name="suggest")
-async def suggest(ctx, *, genre: str = None):
-    genre = genre.capitalize() if genre else None
+async def suggest(ctx, genre: str = None):
     query = '''
-    query ($genre: String, $page: Int) {
-      Page(perPage: 50, page: $page) {
-        media(type: ANIME, genre_in: [$genre], sort: POPULARITY_DESC, isAdult: false) {
-          title {
-            romaji
+    query ($name: String) {
+      MediaListCollection(userName: $name, type: ANIME, status: PLANNING) {
+        lists {
+          entries {
+            media {
+              title {
+                romaji
+              }
+              genres
+              coverImage {
+                large
+              }
+              siteUrl
+            }
           }
-          siteUrl
-          coverImage {
-            large
-          }
-          episodes
-          format
         }
       }
     }
     '''
 
-    page = random.randint(1, 10)
-    variables = {"genre": genre, "page": page}
+    variables = {
+        "name": ANILIST_USERNAME
+    }
 
-    response = requests.post(
-        'https://graphql.anilist.co',
-        json={"query": query, "variables": variables}
-    )
-
+    response = requests.post('https://graphql.anilist.co', json={'query': query, 'variables': variables})
     data = response.json()
-    results = data.get("data", {}).get("Page", {}).get("media", [])
-    if not results:
-        await ctx.send("Aucune suggestion trouvée.")
+
+    # On récupère tous les animés dans la liste "à regarder"
+    entries = []
+    try:
+        for l in data["data"]["MediaListCollection"]["lists"]:
+            entries.extend(l["entries"])
+    except Exception:
+        await ctx.send("❌ Impossible de récupérer ta liste Anilist.")
         return
 
-    suggestions = random.sample(results, min(5, len(results)))
+    # Filtrage par genre si demandé
+    if genre:
+        genre = genre.capitalize()
+        entries = [e for e in entries if genre in e["media"]["genres"]]
+
+    if not entries:
+        await ctx.send("❌ Aucun animé trouvé dans ta liste correspondante.")
+        return
+
+    # Sélection aléatoire
+    choice = random.choice(entries)
+    media = choice["media"]
+
     embed = discord.Embed(
-        title=f"🎲 Suggestions d'animés{' — Genre: ' + genre if genre else ''}",
-        description="Voici quelques animés que tu pourrais aimer :",
-        color=discord.Color.purple()
+        title=f"🎲 Suggestion : {media['title']['romaji']}",
+        description=f"📚 [Voir sur AniList]({media['siteUrl']})",
+        color=discord.Color.blurple()
     )
+    embed.set_image(url=media["coverImage"]["large"])
+    embed.set_footer(text=f"Genres : {', '.join(media['genres'])}")
 
-    for anime in suggestions:
-        embed.add_field(
-            name=anime['title']['romaji'],
-            value=f"[Voir sur AniList]({anime['siteUrl']})\n🎞️ Format : {anime['format']} — 📺 Épisodes : {anime['episodes'] or '??'}",
-            inline=False
-        )
-
-    embed.set_footer(text="Utilise !suggest <genre> pour filtrer (ex: !suggest Action)")
     await ctx.send(embed=embed)
 
     
