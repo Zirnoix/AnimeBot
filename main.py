@@ -593,8 +593,8 @@ async def on_ready():
         bot.daily_summary_task = asyncio.create_task(send_daily_summaries())
 
     # Tâche 2 : alertes épisodes
-    if not hasattr(bot, "episode_alert_task"):
-        bot.episode_alert_task = asyncio.create_task(check_new_episodes())
+    if not check_new_episodes.is_running():
+    check_new_episodes.start()
 
 
 async def send_daily_summaries():
