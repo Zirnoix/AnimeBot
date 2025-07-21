@@ -71,8 +71,6 @@ preferences = load_json(PREFERENCES_FILE)
 def save_preferences():
     save_json(PREFERENCES_FILE, preferences)
 
-print(f"BOT ACTIVÉ — ID : {bot.user.id}")
-
 ImageFont.truetype("fonts/DejaVuSans.ttf", 18)
 ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 24)
 
@@ -1043,7 +1041,8 @@ async def check_new_episodes():
 async def on_ready():
     now = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
     print(f"[✅ BOT DÉMARRÉ] {bot.user.name} actif depuis le {now}")
-
+    print(f"BOT ACTIVÉ — ID : {bot.user.id}")  # 👈 ici c'est bon
+    
     # Récupération du bon channel depuis la config
     config = get_config()
     channel_id = config.get("channel_id")
