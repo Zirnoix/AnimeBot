@@ -301,41 +301,48 @@ async def anime_battle(ctx, opponent: discord.Member):
         await ctx.send("🤖 Tu ne peux pas défier un bot.")
         return
 
+    await ctx.send(f"🎮 Duel entre **{ctx.author.display_name}** et **{opponent.display_name}** !")
+
     players = [ctx.author, opponent]
     scores = {p.id: 0 for p in players}
 
-    await ctx.send(f"🎮 Duel entre **{players[0].display_name}** et **{players[1].display_name}** ! 3 questions à venir...")
-
     for round_num in range(1, 4):
-        await ctx.send(f"🧠 Question {round_num}/3...")
+        await ctx.send(f"❓ Question {round_num}/3...")
 
-        # Requête aléatoire
-        page = random.randint(1, 500)
-        query = f'''
-        query {{
-          Page(perPage: 1, page: {page}) {{
-            media(type: ANIME, isAdult: false, sort: SCORE_DESC) {{
-              title {{ romaji english native }}
-              description(asHtml: false)
+        anime = None
+        for _ in range(10):
+            page = random.randint(1, 500)
+            query = f'''
+            query {{
+              Page(perPage: 1, page: {page}) {{
+                media(type: ANIME, isAdult: false, sort: SCORE_DESC) {{
+                  id
+                  title {{ romaji english native }}
+                  description(asHtml: false)
+                }}
+              }}
             }}
-          }}
-        }}
-        '''
-        data = query_anilist(query)
-        if not data:
-            await ctx.send("❌ Erreur lors de la récupération.")
+            '''
+            data = query_anilist(query)
+            try:
+                anime = data["data"]["Page"]["media"][0]
+                break
+            except:
+                continue
+
+        if not anime:
+            await ctx.send("❌ Erreur lors de la récupération de l’anime.")
             return
 
-        anime = data["data"]["Page"]["media"][0]
         desc = anime["description"].split(".")[0] + "."
-        correct_titles = title_variants(anime["title"])
-
         embed = discord.Embed(
-            title=f"❓ Devinez l’anime",
-            description=f"**Description :**\n{desc}\n\n*15 secondes pour répondre !*",
+            title="🧠 Devine l’anime",
+            description=f"**Description :**\n{desc}\n\n*15 secondes pour répondre.*",
             color=discord.Color.orange()
         )
         await ctx.send(embed=embed)
+
+        correct_titles = title_variants(anime["title"])
 
         def check(m):
             return m.author in players and normalize(m.content) in correct_titles
@@ -345,9 +352,8 @@ async def anime_battle(ctx, opponent: discord.Member):
             scores[msg.author.id] += 1
             await ctx.send(f"✅ Bonne réponse par **{msg.author.display_name}** !")
         except asyncio.TimeoutError:
-            await ctx.send(f"⏰ Personne n’a trouvé. Réponse : **{anime['title']['romaji']}**")
+            await ctx.send(f"⏰ Personne n’a trouvé. C’était **{anime['title']['romaji']}**")
 
-    # Résultat final
     p1, p2 = players
     s1, s2 = scores[p1.id], scores[p2.id]
     if s1 == s2:
@@ -714,8 +720,10 @@ async def planning(ctx):
 
 @bot.command(name="animequiz")
 async def anime_quiz(ctx):
+    await ctx.send("🎮 Génération d’une question...")
+
     anime = None
-    for _ in range(10):  # Essaye jusqu’à 10 fois
+    for _ in range(10):
         page = random.randint(1, 500)
         query = f'''
         query {{
@@ -729,26 +737,34 @@ async def anime_quiz(ctx):
         }}
         '''
         data = query_anilist(query)
-        if (
-            data
-            and data.get("data")
-            and data["data"].get("Page")
-            and data["data"]["Page"].get("media")
-            and data["data"]["Page"]["media"]
-        ):
+        try:
             anime = data["data"]["Page"]["media"][0]
             break
+        except:
+            continue
 
     if not anime:
-        await ctx.send("❌ Aucun anime trouvé après plusieurs essais.")
+        await ctx.send("❌ Impossible de récupérer un anime.")
         return
 
-    description = anime.get("description", "Pas de description.").split(".")[0] + "."
+    description = anime.get("description", "").split(".")[0] + "."
     embed = discord.Embed(
         title="🧠 Anime Quiz",
         description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
         color=discord.Color.orange()
     )
+    await ctx.send(embed=embed)
+
+    correct_titles = title_variants(anime["title"])
+
+    def check(m):
+        return m.author == ctx.author and normalize(m.content) in correct_titles
+
+    try:
+        msg = await bot.wait_for("message", timeout=20.0, check=check)
+        await ctx.send(f"✅ Bonne réponse, **{ctx.author.display_name}** !")
+    except asyncio.TimeoutError:
+        await ctx.send(f"⏰ Temps écoulé ! C’était **{anime['title']['romaji']}**.")
 
 
 
