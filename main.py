@@ -570,7 +570,7 @@ async def duelstats(ctx, opponent: discord.Member = None):
     )
 
     embed.add_field(name="🎬 Animés vus", value=f"{s1['count']} vs {s2['count']} {who_wins(s1['count'], s2['count'])}", inline=False)
-    embed.add_field(name="⭐ Score moyen", value=f"{s1['score']} vs {s2['score']} {who_wins(s1['score']
+    embed.add_field(name="⭐ Score moyen", value=f"{s1['score']} vs {s2['score']} {who_wins(s1['score'], s2['score'])}", inline=False)
 
 @bot.command(name="quiztop")
 async def quiztop(ctx):
