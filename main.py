@@ -512,12 +512,22 @@ async def help_command(ctx):
 
     
 @bot.command(name="setalert")
-async def setalert(ctx, minutes: int):
-    uid = str(ctx.author.id)
-    user_settings.setdefault(uid, {})
-    user_settings[uid]["alert_minutes"] = minutes
-    save_json(USER_SETTINGS_FILE, user_settings)
-    await ctx.send(f"⏱️ Délai de rappel personnalisé défini à **{minutes} minutes** avant la sortie.")
+async def setalert(ctx, time_str: str):
+    try:
+        hour, minute = map(int, time_str.split(":"))
+        if not (0 <= hour < 24 and 0 <= minute < 60):
+            raise ValueError
+
+        # Tu stockes l'heure dans ton système de préférences
+        user_id = str(ctx.author.id)
+        preferences.setdefault(user_id, {})
+        preferences[user_id]["alert_time"] = f"{hour:02d}:{minute:02d}"
+        save_preferences()
+
+        await ctx.send(f"✅ Alerte quotidienne définie à **{hour:02d}:{minute:02d}**.")
+    except ValueError:
+        await ctx.send("❌ Format invalide. Utilise `!setalert HH:MM` (ex: `!setalert 08:30`).")
+
     
 @bot.command(name="reminder")
 async def reminder(ctx, mode: str = ""):
@@ -546,6 +556,47 @@ async def setchannel(ctx):
     config["channel_id"] = ctx.channel.id
     save_config(config)
     await ctx.send(f"✅ Ce canal a été défini pour les notifications.")
+
+@tasks.loop(minutes=1)
+async def send_daily_summaries():
+    now = datetime.now(TIMEZONE)
+    current_time = now.strftime("%H:%M")
+    current_day = now.strftime("%A")
+
+    for user_id, prefs in preferences.items():
+        if not prefs.get("reminder", True):
+            continue  # L'utilisateur a désactivé les reminders
+
+        alert_time = prefs.get("alert_time", "08:00")
+        if current_time != alert_time:
+            continue  # Ce n’est pas encore l’heure
+
+        episodes = get_upcoming_episodes(ANILIST_USERNAME)
+        episodes_today = [ep for ep in episodes if
+                          datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE).strftime("%A") == current_day]
+
+        if not episodes_today:
+            continue
+
+        try:
+            user = await bot.fetch_user(int(user_id))
+            embed = discord.Embed(
+                title="📺 Résumé du jour",
+                description=f"Voici les épisodes à regarder ce **{jours_fr.get(current_day, current_day)}** !",
+                color=discord.Color.green()
+            )
+            for ep in sorted(episodes_today, key=lambda e: e['airingAt']):
+                dt = datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE)
+                emoji = genre_emoji(ep["genres"])
+                embed.add_field(
+                    name=f"{emoji} {ep['title']} — Épisode {ep['episode']}",
+                    value=f"🕒 {dt.strftime('%H:%M')}",
+                    inline=False
+                )
+
+            await user.send(embed=embed)
+        except Exception as e:
+            print(f"[Erreur DM résumé pour {user_id}] {e}")
 
 @tasks.loop(minutes=5)
 async def check_new_episodes():
