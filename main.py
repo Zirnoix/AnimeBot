@@ -13,6 +13,15 @@ from io import BytesIO
 import unicodedata
 import matplotlib.pyplot as plt
 
+last = data.get(user_id, {}).get("last_completed")
+if last:
+    last_time = datetime.fromisoformat(last)
+    if datetime.now() - last_time < timedelta(days=7):
+        next_time = last_time + timedelta(days=7)
+        wait_days = (next_time - datetime.now()).days + 1
+        await ctx.send(f"⏳ Tu as déjà validé ton défi cette semaine.\nTu pourras le refaire dans **{wait_days} jour(s)**.")
+        return
+
 
 def normalize(text):
     if not text:
@@ -52,15 +61,15 @@ def get_xp_bar(xp, total, length=10):
     empty = length - filled
     return "▰" * filled + "▱" * empty
 
-def load_monthly():
+def load_weekly():
     try:
-        with open("monthly.json", "r") as f:
+        with open("weekly.json", "r") as f:
             return json.load(f)
     except:
         return {}
 
-def save_monthly(data):
-    with open("monthly.json", "w") as f:
+def save_weekly(data):
+    with open("weekly.json", "w") as f:
         json.dump(data, f, indent=2)
 
 def load_scores():
@@ -349,10 +358,10 @@ async def prochains(ctx, *args):
         pages[0].title = f"📅 Prochains épisodes — Page 1/{len(pages)}"
         await ctx.send(embed=pages[0], view=Paginator())
 
-@bot.command(name="monthly")
-async def monthly(ctx, sub=None):
+@bot.command(name="weekly")
+async def weekly(ctx, sub=None):
     user_id = str(ctx.author.id)
-    data = load_monthly()
+    data = load_weekly()
 
     # Sous-commande "complete"
     if sub == "complete":
@@ -365,13 +374,14 @@ async def monthly(ctx, sub=None):
         history.append({"description": challenge["description"], "completed": True})
         data[user_id]["history"] = history
         data[user_id]["active"] = None
-        save_monthly(data)
+        save_weekly(data)
+        add_xp(ctx.author.id, amount=25)
         await ctx.send(f"✅ Défi terminé : **{challenge['description']}** ! Bien joué 🎉")
         return
 
     # Proposer un nouveau défi
     if user_id in data and data[user_id].get("active"):
-        await ctx.send(f"📌 Tu as déjà un défi mensuel :\n**{data[user_id]['active']['description']}**\nTape `!monthly complete` quand tu l’as terminé.")
+        await ctx.send(f"📌 Tu as déjà un défi mensuel :\n**{data[user_id]['active']['description']}**\nTape `!weekly complete` quand tu l’as terminé.")
         return
 
     # Liste d’objectifs possibles
@@ -393,8 +403,8 @@ async def monthly(ctx, sub=None):
         "active": {"description": chosen},
         "history": data.get(user_id, {}).get("history", [])
     }
-    save_monthly(data)
-    await ctx.send(f"📅 Ton défi du mois :\n**{chosen}**\nQuand tu as terminé, tape `!monthly complete`.")
+    save_weekly(data)
+    await ctx.send(f"📅 Ton défi du mois :\n**{chosen}**\nQuand tu as terminé, tape `!weekly complete`.")
 
 @bot.command(name="linkanilist")
 async def linkanilist(ctx, pseudo: str):
@@ -513,7 +523,7 @@ async def challenge_complete(ctx, subcommand=None, note: int = None):
     data[user_id]["history"] = history
     data[user_id]["active"] = None
     save_challenges(data)
-
+    add_xp(ctx.author.id, amount=15)
     await ctx.send(f"✅ Bien joué **{ctx.author.display_name}** ! Tu as terminé **{active['title']}** avec la note **{note}/10** 🎉")
 
 @bot.command(name="duelstats")
@@ -710,7 +720,9 @@ async def anime_battle(ctx, adversaire: discord.Member = None):
         resultat = f"🤝 Égalité parfaite entre **{j1.display_name}** et **{j2.display_name}** ! ({s1} - {s2})"
     else:
         gagnant = j1 if s1 > s2 else j2
+        add_xp(gagnant.id, amount=20)
         resultat = f"🏆 Victoire de **{gagnant.display_name}** ! Score final : {s1} - {s2}"
+
 
     await ctx.send(resultat)
 
@@ -1386,14 +1398,14 @@ async def help_command(ctx):
             "title": "🎮 Jeux & Quiz",
             "fields": [
                 ("🧠 Quiz & Duels", "`!animequiz`, `!animebattle`, `!quiztop`, `!duelstats`"),
-                ("🏆 Niveaux & Classements", "`!myrank`, `!level`, `!title`, `!stats`")
+                ("🏆 Niveaux & Classements", "`!myrank`, `!stats`")
             ]
         },
         {
             "title": "🎯 Défis & Challenges",
             "fields": [
                 ("🎯 Défis Anime", "`!anichallenge`, `!challenge complete`"),
-                ("📅 Challenge mensuel", "`!monthly`, `!monthly complete`")
+                ("📅 Challenge mensuel", "`!weekly`, `!weekly complete`")
             ]
         },
         {
