@@ -71,6 +71,7 @@ preferences = load_json(PREFERENCES_FILE)
 def save_preferences():
     save_json(PREFERENCES_FILE, preferences)
 
+print(f"BOT ACTIVÉ — ID : {bot.user.id}")
 
 ImageFont.truetype("fonts/DejaVuSans.ttf", 18)
 ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 24)
@@ -765,7 +766,7 @@ async def anime_quiz(ctx):
     # Ajoute image
     cover = anime.get("coverImage", {}).get("large")
     if cover:
-        embed.set_thumbnail(url=cover)
+        embed.set_image(url=cover)
 
     await ctx.send(embed=embed)
 
