@@ -262,6 +262,108 @@ async def link_anilist(ctx, username: str):
     save_user_links()
     await ctx.send(f"✅ Ton profil Anilist a bien été lié à **{username}**.")
 
+@bot.command(name="quiztop")
+async def quiztop(ctx):
+    scores = load_scores()
+    if not scores:
+        await ctx.send("🏆 Aucun score enregistré pour l’instant.")
+        return
+
+    leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
+    desc = ""
+    for i, (uid, score) in enumerate(leaderboard, 1):
+        user = await bot.fetch_user(int(uid))
+        desc += f"{i}. **{user.display_name}** – {score} pts\n"
+
+    embed = discord.Embed(
+        title="🏆 Classement Anime Quiz",
+        description=desc,
+        color=discord.Color.gold()
+    )
+    await ctx.send(embed=embed)
+
+@bot.command(name="topanime")
+async def topanime(ctx):
+    query = '''
+    query {
+      Page(perPage: 10, sort: SCORE_DESC) {
+        media(type: ANIME, isAdult: false) {
+          title { romaji }
+          siteUrl
+          averageScore
+        }
+      }
+    }
+    '''
+    data = query_anilist(query)
+    if not data:
+        await ctx.send("❌ Impossible de récupérer le top.")
+        return
+
+    entries = data["data"]["Page"]["media"]
+    desc = ""
+    for i, anime in enumerate(entries, 1):
+        desc += f"{i}. [{anime['title']['romaji']}]({anime['siteUrl']}) – ⭐ {anime['averageScore']}\n"
+
+    embed = discord.Embed(title="🎯 Top 10 des animés (score)", description=desc, color=discord.Color.purple())
+    await ctx.send(embed=embed)
+
+@bot.command(name="seasonal")
+async def seasonal(ctx):
+    query = '''
+    query {
+      Page(perPage: 10) {
+        media(type: ANIME, seasonYear: 2025, season: SUMMER, sort: POPULARITY_DESC) {
+          title { romaji }
+          siteUrl
+        }
+      }
+    }
+    '''
+    data = query_anilist(query)
+    if not data:
+        await ctx.send("❌ Erreur AniList.")
+        return
+
+    entries = data["data"]["Page"]["media"]
+    desc = ""
+    for anime in entries:
+        desc += f"• [{anime['title']['romaji']}]({anime['siteUrl']})\n"
+
+    embed = discord.Embed(title="🌸 Animes de la saison (été 2025)", description=desc, color=discord.Color.green())
+    await ctx.send(embed=embed)
+
+@bot.command(name="search")
+async def search_anime(ctx, *, title: str):
+    query = '''
+    query ($search: String) {
+      Media(search: $search, type: ANIME) {
+        title { romaji }
+        description(asHtml: false)
+        siteUrl
+        coverImage { large }
+        averageScore
+      }
+    }
+    '''
+    variables = {"search": title}
+    data = query_anilist(query, variables)
+    if not data or not data.get("data", {}).get("Media"):
+        await ctx.send("❌ Aucun anime trouvé.")
+        return
+
+    anime = data["data"]["Media"]
+    desc = anime["description"].split(".")[0] + "."
+
+    embed = discord.Embed(
+        title=f"🔍 {anime['title']['romaji']}",
+        description=f"{desc}\n\n⭐ Score moyen : {anime['averageScore']}",
+        color=discord.Color.blue(),
+        url=anime["siteUrl"]
+    )
+    embed.set_image(url=anime["coverImage"]["large"])
+    await ctx.send(embed=embed)
+
 @bot.command(name="unlink")
 async def unlink(ctx):
     if ctx.author.id in user_links:
@@ -589,7 +691,29 @@ async def help_command(ctx):
         value=(
             "`!planning` – Planning des sorties de la semaine\n"
             "`!journalier` – Animes du jour uniquement\n"
+            "`!aujourdhui` – Affiche les épisodes diffusés aujourd’hui\n"
             "`!next` – Le prochain épisode à sortir"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🎮 Mini-jeux",
+        value=(
+            "`!animequiz` – Devine l’anime à partir d’une description\n"
+            "`!quiztop` – Classement des meilleurs joueurs du quiz"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔍 Recherche & recommandations",
+        value=(
+            "`!search <titre>` – Recherche un anime par nom\n"
+            "`!suggest` – Recommande un anime de ta liste\n"
+            "`!suggest <genre>` – Recommande un anime par genre\n"
+            "`!topanime` – Top 10 des animés les mieux notés\n"
+            "`!seasonal` – Animes de la saison en cours"
         ),
         inline=False
     )
@@ -604,30 +728,25 @@ async def help_command(ctx):
     )
 
     embed.add_field(
-        name="🎨 Autres outils",
+        name="📊 Statistiques & profil",
         value=(
-            "`!genres` – Voir les genres que tu suis\n"
-            "`!suggest` – Recommande un anime \n"
-            "`!suggest <genre>` – Recommande un anime par genre souhaité \n"
             "`!stats <pseudo>` – Affiche une carte de profil Anilist stylisée\n"
-            "`!linkanilist <pseudo>` - Lie ton profil Discord à un compte Anilist\n"
-            "`!mystats` - Affiche ton profil Anilist lié automatiquement\n"
-            "`!unlink` - Supprime ton lien avec un compte Anilist"
+            "`!linkanilist <pseudo>` – Lie ton compte Discord à Anilist\n"
+            "`!mystats` – Ton profil Anilist automatiquement\n"
+            "`!unlink` – Supprime ton lien avec Anilist"
         ),
         inline=False
     )
 
     embed.add_field(
         name="⚙️ Utilitaire",
-        value="`!uptime` – Voir depuis quand le bot est en ligne",
+        value="`!uptime` – Depuis combien de temps le bot est actif",
         inline=False
     )
 
     embed.set_footer(text="AnimeBot – connecté à ton AniList ❤️")
 
     await ctx.send(embed=embed)
-
-
     
 @bot.command(name="setalert")
 async def setalert(ctx, time_str: str):
