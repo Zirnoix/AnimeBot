@@ -13,6 +13,7 @@ from io import BytesIO
 import unicodedata
 import matplotlib.pyplot as plt
 
+
 def normalize(text):
     if not text:
         return ""
@@ -45,6 +46,11 @@ def load_tracker():
 def save_tracker(data):
     with open("anitracker.json", "w") as f:
         json.dump(data, f, indent=2)
+
+def get_xp_bar(xp, total, length=10):
+    filled = int((xp / total) * length)
+    empty = length - filled
+    return "▰" * filled + "▱" * empty
 
 def load_monthly():
     try:
@@ -709,10 +715,24 @@ async def anime_battle(ctx, adversaire: discord.Member = None):
 @bot.command(name="myrank")
 async def myrank(ctx):
     levels = load_levels()
-lvl = levels.get(str(ctx.author.id), {"xp": 0, "level": 0})
-xp = lvl["xp"]
-level = lvl["level"]
-xp_needed = (level + 1) * 100
+    lvl = levels.get(str(ctx.author.id), {"xp": 0, "level": 0})
+    xp = lvl["xp"]
+    level = lvl["level"]
+    next_xp = (level + 1) * 100
+    bar = get_xp_bar(xp, next_xp)
+
+    embed = discord.Embed(
+        title=f"🏅 Rang de {ctx.author.display_name}",
+        color=discord.Color.purple()
+    )
+
+    embed.add_field(
+        name="🎮 Niveau & XP",
+        value=f"Lv. {level} – {xp}/{next_xp} XP\n`{bar}`\nTitre : **{get_title(level)}**",
+        inline=False
+    )
+
+    await ctx.send(embed=embed)
 
 # Système de titres fun
 def get_title(level):
