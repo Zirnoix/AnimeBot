@@ -44,6 +44,18 @@ def save_scores(scores):
     with open(QUIZ_SCORES_FILE, "w", encoding="utf-8") as f:
         json.dump(scores, f, indent=2, ensure_ascii=False)
 
+def query_anilist(query: str, variables: dict = None):
+    try:
+        response = requests.post(
+            "https://graphql.anilist.co",
+            json={"query": query, "variables": variables or {}},
+            headers={"Content-Type": "application/json"}
+        )
+        response.raise_for_status()
+        return response.json()
+    except:
+        return None
+
 def load_json(filename):
     if not os.path.exists(filename):
         return {}
@@ -419,7 +431,6 @@ async def mychart(ctx, username: str):
 
 @bot.command(name="topanime")
 async def topanime(ctx):
-    # Saison actuelle automatique
     now = datetime.now()
     month = now.month
     year = now.year
@@ -440,14 +451,24 @@ async def topanime(ctx):
     }}
     '''
     data = query_anilist(query)
-    if not data:
+
+    # Vérifications robustes
+    if (
+        not data
+        or not data.get("data")
+        or not data["data"].get("Page")
+        or not data["data"]["Page"].get("media")
+    ):
         await ctx.send("❌ Impossible de récupérer le top.")
         return
 
     entries = data["data"]["Page"]["media"]
     desc = ""
     for i, anime in enumerate(entries, 1):
-        desc += f"{i}. [{anime['title']['romaji']}]({anime['siteUrl']}) – ⭐ {anime['averageScore']}\n"
+        name = anime.get("title", {}).get("romaji", "Inconnu")
+        score = anime.get("averageScore", "??")
+        url = anime.get("siteUrl", "")
+        desc += f"{i}. [{name}]({url}) – ⭐ {score}\n"
 
     embed = discord.Embed(title="🔥 Top 10 animés de la saison", description=desc, color=discord.Color.gold())
     await ctx.send(embed=embed)
@@ -693,7 +714,7 @@ async def planning(ctx):
 @bot.command(name="animequiz")
 async def anime_quiz(ctx):
     anime = None
-    for _ in range(5):
+    for _ in range(10):  # Essaye jusqu’à 10 fois
         page = random.randint(1, 500)
         query = f'''
         query {{
@@ -707,7 +728,13 @@ async def anime_quiz(ctx):
         }}
         '''
         data = query_anilist(query)
-        if data and data["data"]["Page"]["media"]:
+        if (
+            data
+            and data.get("data")
+            and data["data"].get("Page")
+            and data["data"]["Page"].get("media")
+            and data["data"]["Page"]["media"]
+        ):
             anime = data["data"]["Page"]["media"][0]
             break
 
@@ -718,53 +745,8 @@ async def anime_quiz(ctx):
     description = anime.get("description", "Pas de description.").split(".")[0] + "."
     embed = discord.Embed(
         title="🧠 Anime Quiz",
-        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
-        color=discord.Color.orange()
-    )
-    await ctx.send(embed=embed)
+        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'a*
 
-    correct_titles = title_variants(anime["title"])
-
-    def check(m):
-        return m.author == ctx.author and normalize(m.content) in correct_titles
-
-    try:
-        msg = await bot.wait_for("message", timeout=20.0, check=check)
-        await ctx.send("✅ Bonne réponse !")
-    except asyncio.TimeoutError:
-        await ctx.send(f"⏰ Temps écoulé ! C’était **{anime['title']['romaji']}**.")
-
-
-    data = response.json()
-    anime = data["data"]["Page"]["media"][0]
-    description = anime.get("description", "Pas de description disponible.").split(".")[0] + "."
-
-    embed = discord.Embed(
-        title="🧠 Anime Quiz",
-        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
-        color=discord.Color.orange()
-    )
-    await ctx.send(embed=embed)
-
-    correct_titles = title_variants(anime["title"])
-
-    def check(m):
-        return m.author == ctx.author and m.channel == ctx.channel
-
-    try:
-        msg = await bot.wait_for("message", timeout=20.0, check=check)
-        guess = normalize(msg.content)
-
-        if guess in correct_titles:
-            await ctx.send("✅ Bonne réponse !")
-            scores = load_scores()
-            user_id = str(ctx.author.id)
-            scores[user_id] = scores.get(user_id, 0) + 1
-            save_scores(scores)
-        else:
-            await ctx.send(f"❌ Mauvaise réponse. C’était **{anime['title']['romaji']}**.")
-    except asyncio.TimeoutError:
-        await ctx.send(f"⏰ Temps écoulé ! La réponse était **{anime['title']['romaji']}**.")
 
 
 @bot.command(name="suggest")
