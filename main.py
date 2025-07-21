@@ -281,11 +281,28 @@ async def quiztop(ctx):
         await ctx.send("🏆 Aucun score enregistré pour l’instant.")
         return
 
+    def get_title(score):
+        if score >= 15:
+            return "🧠 Légende"
+        elif score >= 10:
+            return "🔥 Otaku"
+        elif score >= 6:
+            return "💡 Connaisseur"
+        elif score >= 3:
+            return "📺 Amateur"
+        else:
+            return "🌱 Débutant"
+
     leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
     desc = ""
+
     for i, (uid, score) in enumerate(leaderboard, 1):
-        user = await bot.fetch_user(int(uid))
-        desc += f"{i}. **{user.display_name}** – {score} pts\n"
+        try:
+            user = await bot.fetch_user(int(uid))
+            title = get_title(score)
+            desc += f"{i}. **{user.display_name}** — {score} pts {title}\n"
+        except:
+            continue  # Si utilisateur introuvable
 
     embed = discord.Embed(
         title="🏆 Classement Anime Quiz",
@@ -362,6 +379,44 @@ async def anime_battle(ctx, opponent: discord.Member):
         result = f"🏆 Victoire de **{winner.display_name}** ({s1} - {s2})"
 
     await ctx.send(result)
+
+@bot.command(name="myrank")
+async def myrank(ctx):
+    scores = load_scores()
+    user_id = str(ctx.author.id)
+
+    if user_id not in scores:
+        await ctx.send("❌ Tu n'as pas encore de score enregistré. Joue au `!animequiz` pour commencer !")
+        return
+
+    def get_title(score):
+        if score >= 15:
+            return "🧠 Légende"
+        elif score >= 10:
+            return "🔥 Otaku"
+        elif score >= 6:
+            return "💡 Connaisseur"
+        elif score >= 3:
+            return "📺 Amateur"
+        else:
+            return "🌱 Débutant"
+
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    rank = next((i + 1 for i, (uid, _) in enumerate(sorted_scores) if uid == user_id), None)
+    score = scores[user_id]
+    title = get_title(score)
+
+    embed = discord.Embed(
+        title=f"🎖️ Ton rang dans l'Anime Quiz",
+        description=(
+            f"**👤 Pseudo :** {ctx.author.display_name}\n"
+            f"**🏅 Rang :** #{rank} sur {len(sorted_scores)} joueurs\n"
+            f"**🔢 Score :** {score} points\n"
+            f"**🎯 Titre :** {title}"
+        ),
+        color=discord.Color.orange()
+    )
+    await ctx.send(embed=embed)
 
 @bot.command(name="todayinhistory")
 async def todayinhistory(ctx):
@@ -747,21 +802,20 @@ async def anime_quiz(ctx):
         await ctx.send("❌ Aucun anime trouvé.")
         return
 
-    # Description
+    # 📖 Description & traduction
     raw_description = anime.get("description", "Pas de description.").split(".")[0] + "."
     try:
         from deep_translator import GoogleTranslator
         description = GoogleTranslator(source='auto', target='fr').translate(raw_description)
     except:
-        description = raw_description  # fallback si la traduction échoue
+        description = raw_description  # fallback
 
+    # 🖼️ Embed
     embed = discord.Embed(
         title="🧠 Anime Quiz",
         description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
         color=discord.Color.orange()
     )
-
-    # Ajoute image
     cover = anime.get("coverImage", {}).get("large")
     if cover:
         embed.set_image(url=cover)
@@ -776,9 +830,15 @@ async def anime_quiz(ctx):
     try:
         msg = await bot.wait_for("message", timeout=20.0, check=check)
         await ctx.send(f"✅ Bonne réponse, **{ctx.author.display_name}** !")
+
+        # 🏆 Enregistrer le score
+        scores = load_scores()
+        user_id = str(ctx.author.id)
+        scores[user_id] = scores.get(user_id, 0) + 1
+        save_scores(scores)
+
     except asyncio.TimeoutError:
         await ctx.send(f"⏰ Temps écoulé ! C’était **{anime['title']['romaji']}**.")
-
 
 
 @bot.command(name="suggest")
@@ -846,84 +906,101 @@ async def suggest(ctx, genre: str = None):
     
 @bot.command(name="help")
 async def help_command(ctx):
-    embed = discord.Embed(
-        title="📖 Commandes disponibles",
-        description="Voici toutes les commandes d'AnimeBot",
-        color=discord.Color.purple()
-    )
+    pages = []
 
-    embed.add_field(
-        name="🗓️ Prochains épisodes",
-        value=(
-            "`!prochains` – Affiche les 10 épisodes à venir\n"
-            "`!prochains all` ou `!prochains 25` – Jusqu'à 100 épisodes\n"
-            "`!prochains action` – Filtrer par genre\n"
-            "`!prochains romance 20` – Filtrer genre + nombre"
-        ),
-        inline=False
-    )
+    help_sections = [
+        {
+            "title": "🗓️ Prochains épisodes",
+            "content": (
+                "`!prochains` – Affiche les 10 épisodes à venir\n"
+                "`!prochains all` ou `!prochains 25` – Jusqu'à 100 épisodes\n"
+                "`!prochains action` – Filtrer par genre\n"
+                "`!prochains romance 20` – Filtrer genre + nombre"
+            )
+        },
+        {
+            "title": "📅 Planning & résumés",
+            "content": (
+                "`!planning` – Planning des sorties de la semaine\n"
+                "`!journalier` – Activer/désactiver les résumés quotidiens\n"
+                "`!aujourdhui` – Épisodes diffusés aujourd’hui\n"
+                "`!next` – Le prochain épisode à sortir\n"
+                "`!setalert <heure>` – Heure du résumé (ex: `!setalert 09:00`)"
+            )
+        },
+        {
+            "title": "🎮 Mini-jeux & quiz",
+            "content": (
+                "`!animequiz` – Devine l’anime à partir d’une description\n"
+                "`!quiztop` – Classement des meilleurs joueurs\n"
+                "`!myrank` – Ton rang et ton score personnel\n"
+                "`!animebattle @joueur` – Duel quiz entre 2 membres"
+            )
+        },
+        {
+            "title": "🔍 Recherche & découvertes",
+            "content": (
+                "`!search <titre>` – Recherche un anime\n"
+                "`!suggest` – Recommande un anime de ta liste\n"
+                "`!suggest <genre>` – Par genre précis\n"
+                "`!topanime` – Top 10 animés actuels\n"
+                "`!seasonal` – Animes de la saison\n"
+                "`!todayinhistory` – Ce jour-là dans l’anime"
+            )
+        },
+        {
+            "title": "📊 Statistiques & profil",
+            "content": (
+                "`!stats <pseudo>` – Carte Anilist stylisée\n"
+                "`!mystats` – Ton profil lié\n"
+                "`!mychart <pseudo>` – Graphique des genres suivis"
+            )
+        },
+        {
+            "title": "🎯 Compte & préférences",
+            "content": (
+                "`!linkanilist <pseudo>` – Lier Anilist\n"
+                "`!unlink` – Supprimer ton lien\n"
+                "`!reminder on/off` – Rappels DM on/off"
+            )
+        },
+        {
+            "title": "⚙️ Utilitaire",
+            "content": (
+                "`!uptime` – Temps d’activité du bot\n"
+                "`!setchannel` – Définir le salon des alertes (admin)"
+            )
+        }
+    ]
 
-    embed.add_field(
-        name="📅 Planning & résumés",
-        value=(
-            "`!planning` – Planning des sorties de la semaine\n"
-            "`!journalier` – Animes du jour uniquement\n"
-            "`!aujourdhui` – Affiche les épisodes diffusés aujourd’hui\n"
-            "`!next` – Le prochain épisode à sortir"
-        ),
-        inline=False
-    )
+    for section in help_sections:
+        embed = discord.Embed(
+            title="📖 Commandes disponibles",
+            description="AnimeBot – Ton assistant AniList personnalisé",
+            color=discord.Color.purple()
+        )
+        embed.add_field(name=section["title"], value=section["content"], inline=False)
+        embed.set_footer(text="Utilise les boutons ⬅️ ➡️ pour naviguer • ❌ pour fermer")
+        pages.append(embed)
 
-    embed.add_field(
-        name="🎮 Mini-jeux",
-        value=(
-            "`!animequiz` – Devine l’anime à partir d’une description\n"
-            "`!quiztop` – Classement des meilleurs joueurs du quiz"
-        ),
-        inline=False
-    )
+    class HelpPaginator(discord.ui.View):
+        def __init__(self): super().__init__(timeout=120); self.index = 0
 
-    embed.add_field(
-        name="🔍 Recherche & recommandations",
-        value=(
-            "`!search <titre>` – Recherche un anime par nom\n"
-            "`!suggest` – Recommande un anime de ta liste\n"
-            "`!suggest <genre>` – Recommande un anime par genre\n"
-            "`!topanime` – Top 10 des animés les mieux notés\n"
-            "`!seasonal` – Animes de la saison en cours"
-        ),
-        inline=False
-    )
+        @discord.ui.button(label="⬅️", style=discord.ButtonStyle.secondary)
+        async def prev(self, interaction, button):
+            self.index = max(0, self.index - 1)
+            await interaction.response.edit_message(embed=pages[self.index], view=self)
 
-    embed.add_field(
-        name="🎯 Personnalisation",
-        value=(
-            "`!reminder on/off` – Activer ou désactiver les rappels DM\n"
-            "`!setalert <heure>` – Heure du résumé (ex: `!setalert 09:00`)"
-        ),
-        inline=False
-    )
+        @discord.ui.button(label="➡️", style=discord.ButtonStyle.secondary)
+        async def next(self, interaction, button):
+            self.index = min(len(pages) - 1, self.index + 1)
+            await interaction.response.edit_message(embed=pages[self.index], view=self)
 
-    embed.add_field(
-        name="📊 Statistiques & profil",
-        value=(
-            "`!stats <pseudo>` – Affiche une carte de profil Anilist stylisée\n"
-            "`!linkanilist <pseudo>` – Lie ton compte Discord à Anilist\n"
-            "`!mystats` – Ton profil Anilist automatiquement\n"
-            "`!unlink` – Supprime ton lien avec Anilist"
-        ),
-        inline=False
-    )
+        @discord.ui.button(label="❌ Fermer", style=discord.ButtonStyle.danger)
+        async def close(self, interaction, button):
+            await interaction.message.delete()
 
-    embed.add_field(
-        name="⚙️ Utilitaire",
-        value="`!uptime` – Depuis combien de temps le bot est actif",
-        inline=False
-    )
-
-    embed.set_footer(text="AnimeBot – connecté à ton AniList ❤️")
-
-    await ctx.send(embed=embed)
+    await ctx.send(embed=pages[0], view=HelpPaginator())
     
 @bot.command(name="setalert")
 async def setalert(ctx, time_str: str):
