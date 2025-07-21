@@ -35,6 +35,28 @@ PREFERENCES_FILE = "preferences.json"
 
 QUIZ_SCORES_FILE = "quiz_scores.json"
 
+def load_tracker():
+    try:
+        with open("anitracker.json", "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_tracker(data):
+    with open("anitracker.json", "w") as f:
+        json.dump(data, f, indent=2)
+
+def load_monthly():
+    try:
+        with open("monthly.json", "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_monthly(data):
+    with open("monthly.json", "w") as f:
+        json.dump(data, f, indent=2)
+
 def load_scores():
     if not os.path.exists(QUIZ_SCORES_FILE):
         return {}
@@ -67,6 +89,48 @@ def query_anilist(query: str, variables: dict = None):
         return response.json()
     except:
         return None
+
+def load_levels():
+    try:
+        with open("quiz_levels.json", "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_levels(data):
+    with open("quiz_levels.json", "w") as f:
+        json.dump(data, f, indent=2)
+
+def add_xp(user_id, amount=10):
+    user_id = str(user_id)
+    data = load_levels()
+    if user_id not in data:
+        data[user_id] = {"xp": 0, "level": 0}
+
+    data[user_id]["xp"] += amount
+    level = data[user_id]["level"]
+    xp_needed = (level + 1) * 100
+    leveled_up = False
+
+    while data[user_id]["xp"] >= xp_needed:
+        data[user_id]["xp"] -= xp_needed
+        data[user_id]["level"] += 1
+        leveled_up = True
+        xp_needed = (data[user_id]["level"] + 1) * 100
+
+    save_levels(data)
+    return leveled_up, data[user_id]["level"]
+
+def load_challenges():
+    try:
+        with open("challenges.json", "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_challenges(data):
+    with open("challenges.json", "w") as f:
+        json.dump(data, f, indent=2)
 
 def load_json(filename):
     if not os.path.exists(filename):
@@ -279,6 +343,53 @@ async def prochains(ctx, *args):
         pages[0].title = f"📅 Prochains épisodes — Page 1/{len(pages)}"
         await ctx.send(embed=pages[0], view=Paginator())
 
+@bot.command(name="monthly")
+async def monthly(ctx, sub=None):
+    user_id = str(ctx.author.id)
+    data = load_monthly()
+
+    # Sous-commande "complete"
+    if sub == "complete":
+        if user_id not in data or not data[user_id].get("active"):
+            await ctx.send("❌ Tu n’as pas de défi en cours.")
+            return
+
+        challenge = data[user_id]["active"]
+        history = data[user_id].get("history", [])
+        history.append({"description": challenge["description"], "completed": True})
+        data[user_id]["history"] = history
+        data[user_id]["active"] = None
+        save_monthly(data)
+        await ctx.send(f"✅ Défi terminé : **{challenge['description']}** ! Bien joué 🎉")
+        return
+
+    # Proposer un nouveau défi
+    if user_id in data and data[user_id].get("active"):
+        await ctx.send(f"📌 Tu as déjà un défi mensuel :\n**{data[user_id]['active']['description']}**\nTape `!monthly complete` quand tu l’as terminé.")
+        return
+
+    # Liste d’objectifs possibles
+    challenges = [
+        "Regarder 3 animes du genre Action",
+        "Finir un anime de +20 épisodes",
+        "Donner une note de 10 à un anime",
+        "Regarder un anime en cours de diffusion",
+        "Terminer une saison complète en une semaine",
+        "Découvrir un anime noté < 70 sur AniList",
+        "Regarder un anime de ton genre préféré",
+        "Essayer un anime d’un genre que tu n’aimes pas",
+        "Faire un duel avec un ami avec `!animebattle`",
+        "Compléter un challenge `!anichallenge`"
+    ]
+
+    chosen = random.choice(challenges)
+    data[user_id] = {
+        "active": {"description": chosen},
+        "history": data.get(user_id, {}).get("history", [])
+    }
+    save_monthly(data)
+    await ctx.send(f"📅 Ton défi du mois :\n**{chosen}**\nQuand tu as terminé, tape `!monthly complete`.")
+
 @bot.command(name="linkanilist")
 async def linkanilist(ctx, pseudo: str):
     data = load_links()
@@ -286,6 +397,180 @@ async def linkanilist(ctx, pseudo: str):
     data[user_id] = pseudo
     save_links(data)
     await ctx.send(f"✅ Ton compte AniList **{pseudo}** a été lié à ton profil Discord.")
+
+@bot.command(name="anichallenge")
+async def anichallenge(ctx):
+    import random
+    import requests
+
+    # Vérifie si un challenge est déjà en cours
+    data = load_challenges()
+    user_id = str(ctx.author.id)
+    if user_id in data and data[user_id].get("active"):
+        await ctx.send(f"📌 Tu as déjà un défi en cours : **{data[user_id]['active']['title']}**.\nUtilise `!challenge complete <note/10>` quand tu l’as terminé.")
+        return
+
+    # Requête AniList
+    for _ in range(10):
+        page = random.randint(1, 500)
+        query = f'''
+        query {{
+          Page(perPage: 1, page: {page}) {{
+            media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {{
+              id
+              title {{ romaji }}
+              siteUrl
+            }}
+          }}
+        }}
+        '''
+        url = "https://graphql.anilist.co"
+        try:
+            res = requests.post(url, json={"query": query})
+            anime = res.json()["data"]["Page"]["media"][0]
+            title = anime["title"]["romaji"]
+            site = anime["siteUrl"]
+            data[user_id] = {
+                "active": {"id": anime["id"], "title": title},
+                "history": data.get(user_id, {}).get("history", [])
+            }
+            save_challenges(data)
+            await ctx.send(f"🎯 Nouveau défi pour **{ctx.author.display_name}** :\n**{title}**\n🔗 {site}\n\nUne fois vu, fais `!challenge complete <note>`")
+            return
+        except:
+            continue
+
+    await ctx.send("❌ Impossible de récupérer un anime pour le challenge.")
+
+@bot.command(name="anitracker")
+async def anitracker(ctx, sub=None, *, title=None):
+    user_id = str(ctx.author.id)
+    data = load_tracker()
+
+    if sub == "list":
+        series = data.get(user_id, [])
+        if not series:
+            await ctx.send("📭 Tu ne suis aucun anime.")
+        else:
+            await ctx.send(f"📺 Animes suivis ({len(series)}):\n" + "\n".join(f"• {s}" for s in series))
+        return
+
+    if sub == "remove":
+        if not title:
+            await ctx.send("❌ Utilise : `!anitracker remove <titre>`")
+            return
+        series = data.get(user_id, [])
+        if title in series:
+            series.remove(title)
+            data[user_id] = series
+            save_tracker(data)
+            await ctx.send(f"🗑️ Tu ne suis plus **{title}**.")
+        else:
+            await ctx.send(f"❌ Tu ne suivais pas **{title}**.")
+        return
+
+    # Ajout d’un nouvel anime
+    if not title:
+        await ctx.send("❌ Utilise : `!anitracker <titre>` pour suivre un anime.")
+        return
+
+    series = data.get(user_id, [])
+    if title in series:
+        await ctx.send(f"📌 Tu suis déjà **{title}**.")
+        return
+
+    series.append(title)
+    data[user_id] = series
+    save_tracker(data)
+    await ctx.send(f"✅ Tu suivras **{title}**. Tu recevras un DM à chaque sortie d’épisode.")
+
+@bot.command(name="challenge")
+async def challenge_complete(ctx, subcommand=None, note: int = None):
+    if subcommand != "complete" or note is None:
+        await ctx.send("❌ Utilise : `!challenge complete <note sur 10>`")
+        return
+
+    data = load_challenges()
+    user_id = str(ctx.author.id)
+    if user_id not in data or "active" not in data[user_id]:
+        await ctx.send("❌ Tu n’as aucun défi en cours.")
+        return
+
+    active = data[user_id]["active"]
+    history = data[user_id]["history"]
+    history.append({
+        "title": active["title"],
+        "completed": True,
+        "score": note
+    })
+
+    data[user_id]["history"] = history
+    data[user_id]["active"] = None
+    save_challenges(data)
+
+    await ctx.send(f"✅ Bien joué **{ctx.author.display_name}** ! Tu as terminé **{active['title']}** avec la note **{note}/10** 🎉")
+
+@bot.command(name="duelstats")
+async def duelstats(ctx, opponent: discord.Member = None):
+    if opponent is None:
+        await ctx.send("❌ Utilise : `!duelstats @ami` pour comparer tes stats avec quelqu’un.")
+        return
+
+    data = load_links()
+    uid1 = str(ctx.author.id)
+    uid2 = str(opponent.id)
+
+    if uid1 not in data or uid2 not in data:
+        await ctx.send("❗ Les deux joueurs doivent avoir lié leur compte avec `!linkanilist`.")
+        return
+
+    # Récupération des deux pseudos Anilist
+    user1, user2 = data[uid1], data[uid2]
+
+    query = '''
+    query ($name: String) {
+      User(name: $name) {
+        statistics {
+          anime {
+            count
+            minutesWatched
+            meanScore
+            genres { genre count }
+          }
+        }
+      }
+    }
+    '''
+
+    try:
+        stats = {}
+        for u in [user1, user2]:
+            res = requests.post("https://graphql.anilist.co", json={"query": query, "variables": {"name": u}})
+            a = res.json()["data"]["User"]["statistics"]["anime"]
+            fav = sorted(a["genres"], key=lambda g: g["count"], reverse=True)[0]["genre"] if a["genres"] else "N/A"
+            stats[u] = {
+                "count": a["count"],
+                "score": round(a["meanScore"], 1),
+                "days": round(a["minutesWatched"] / 1440, 1),
+                "genre": fav
+            }
+
+    except:
+        await ctx.send("❌ Impossible de récupérer les statistiques Anilist.")
+        return
+
+    # Récupération
+    s1, s2 = stats[user1], stats[user2]
+
+    def who_wins(a, b): return "🟰 Égalité" if a == b else "🔼" if a > b else "🔽"
+
+    embed = discord.Embed(
+        title=f"📊 Duel de stats : {ctx.author.display_name} vs {opponent.display_name}",
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(name="🎬 Animés vus", value=f"{s1['count']} vs {s2['count']} {who_wins(s1['count'], s2['count'])}", inline=False)
+    embed.add_field(name="⭐ Score moyen", value=f"{s1['score']} vs {s2['score']} {who_wins(s1['score']
 
 @bot.command(name="quiztop")
 async def quiztop(ctx):
@@ -410,6 +695,74 @@ async def anime_battle(ctx, adversaire: discord.Member = None):
 
 @bot.command(name="myrank")
 async def myrank(ctx):
+    levels = load_levels()
+lvl = levels.get(str(ctx.author.id), {"xp": 0, "level": 0})
+xp = lvl["xp"]
+level = lvl["level"]
+xp_needed = (level + 1) * 100
+
+# Système de titres fun
+def get_title(level):
+    titles = [
+        (0, "🌱 Débutant"),
+        (2, "📘 Curieux"),
+        (4, "🎧 Binge-watcheur"),
+        (6, "🥢 Ramen addict"),
+        (8, "🧑‍🎓 Apprenti Weeb"),
+        (10, "🎮 Fan de Shonen"),
+        (12, "🎭 Explorateur de genres"),
+        (14, "📺 Watcher de l'extrême"),
+        (16, "🧠 Analyste amateur"),
+        (18, "🔥 Otaku confirmé"),
+        (20, "🪩 Esprit de convention"),
+        (22, "🧳 Voyageur du multigenre"),
+        (24, "🎙️ Dubbé en VOSTFR"),
+        (26, "📚 Encyclopedia animée"),
+        (28, "💥 Protagoniste secondaire"),
+        (30, "🎬 Critique d'élite"),
+        (32, "🗾 Stratège de planning"),
+        (34, "🐉 Dompteur de shonen"),
+        (36, "🧬 Théoricien d'univers"),
+        (38, "🧳 Itinérant du sakuga"),
+        (40, "🌠 Otaku ascendant"),
+        (43, "🎯 Tacticien de la hype"),
+        (46, "🛡️ Défenseur du bon goût"),
+        (50, "👑 Maître du classement MAL"),
+        (52, "🧩 Gardien du lore oublié"),
+        (55, "🌀 Téléporté dans un isekai"),
+        (58, "💫 Architecte de saison"),
+        (60, "📀 Possesseur de l’ultime DVD"),
+        (63, "🥷 Fan d’openings introuvables"),
+        (66, "🧛 Mi-humain, mi-anime"),
+        (70, "🎴 Détenteur de cartes rares"),
+        (74, "🪐 Légende du slice of life"),
+        (78, "🧝 Mage du genre romance"),
+        (82, "☄️ Héros du binge infini"),
+        (86, "🗡️ Gardien du storytelling"),
+        (90, "🔱 Titan de la narration"),
+        (91, "🔮 Prophète de la japanimation"),
+        (93, "🧙 Sage des opening 2000+"),
+        (95, "🕊️ Émissaire de Kyoto Animation"),
+        (97, "🕶️ Stratège d'univers partagés"),
+        (99, "👼 Incarnation de la passion"),
+        (100, "🧠 Le Grand Archiviste Suprême 🏆")
+    ]
+
+    result = "🌱 Débutant"
+    for lvl, name in titles:
+        if level >= lvl:
+            result = name
+        else:
+            break
+    return result
+
+
+embed.add_field(
+    name="🎮 Niveau & XP",
+    value=f"Lv. {level} – {xp}/{xp_needed} XP\nTitre : **{get_title(level)}**",
+    inline=False
+)
+
     scores = load_scores()
     user_id = str(ctx.author.id)
 
@@ -939,104 +1292,136 @@ async def suggest(ctx, genre: str = None):
 
     await ctx.send(embed=embed)
 
+@bot.command(name="planningvisuel")
+async def planningvisuel(ctx):
+    import calendar
+    from PIL import Image, ImageDraw, ImageFont
+    from datetime import datetime, timedelta
+    import pytz
+
+    # 📅 Récupération des épisodes à venir
+    episodes = get_upcoming_episodes(ANILIST_USERNAME)
+    TIMEZONE = pytz.timezone("Europe/Paris")
+    jours = list(calendar.day_name)
+    planning = {day: [] for day in jours}
+
+    for ep in episodes:
+        dt = datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE)
+        day = dt.strftime("%A")
+        planning[day].append({
+            "title": ep["title"],
+            "episode": ep["episode"],
+            "time": dt.strftime("%H:%M")
+        })
+
+    # 🖼️ Création de l’image
+    width, height = 800, 600
+    card = Image.new("RGB", (width, height), (30, 30, 40))
+    draw = ImageDraw.Draw(card)
+
+    # Polices
+    font_title = ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 28)
+    font_day = ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 22)
+    font_text = ImageFont.truetype("fonts/DejaVuSans.ttf", 18)
+
+    # En-tête
+    draw.text((20, 20), "Planning des épisodes – Semaine", font=font_title, fill="white")
+
+    # Placement
+    x, y = 40, 70
+    for day in jours:
+        draw.text((x, y), f"> {day}", font=font_day, fill="#ffdd77")
+        y += 30
+        for ep in planning[day][:4]:  # max 4 par jour
+            draw.text((x + 10, y), f"• {ep['title']} – Ep {ep['episode']} ({ep['time']})", font=font_text, fill="white")
+            y += 24
+        y += 30
+
+    # Sauvegarde et envoi
+    path = f"/tmp/planning_week.png"
+    card.save(path)
+
+    with open(path, "rb") as f:
+        await ctx.send(file=discord.File(f, filename="planning.png"))
+
     
 @bot.command(name="help")
 async def help_command(ctx):
-    pages = []
+    import asyncio
 
-    help_sections = [
+    pages = [
         {
-            "title": "🗓️ Prochains épisodes",
-            "content": (
-                "`!prochains` – Affiche les 10 épisodes à venir\n"
-                "`!prochains all` ou `!prochains 25` – Jusqu'à 100 épisodes\n"
-                "`!prochains action` – Filtrer par genre\n"
-                "`!prochains romance 20` – Filtrer genre + nombre"
-            )
+            "title": "📖 Commandes disponibles",
+            "fields": [
+                ("🗓️ Prochains épisodes", "`!prochains`, `!planning`, `!journalier`, `!next`"),
+                ("🎯 Personnalisation", "`!reminder`, `!setalert`, `!anitracker`, `!anitracker list`")
+            ]
         },
         {
-            "title": "📅 Planning & résumés",
-            "content": (
-                "`!planning` – Planning des sorties de la semaine\n"
-                "`!journalier` – Activer/désactiver les résumés quotidiens\n"
-                "`!aujourdhui` – Épisodes diffusés aujourd’hui\n"
-                "`!next` – Le prochain épisode à sortir\n"
-                "`!setalert <heure>` – Heure du résumé (ex: `!setalert 09:00`)"
-            )
+            "title": "🎮 Jeux & Quiz",
+            "fields": [
+                ("🧠 Quiz & Duels", "`!animequiz`, `!animebattle`, `!quiztop`, `!duelstats`"),
+                ("🏆 Niveaux & Classements", "`!myrank`, `!level`, `!title`, `!stats`")
+            ]
         },
         {
-            "title": "🎮 Mini-jeux & quiz",
-            "content": (
-                "`!animequiz` – Devine l’anime à partir d’une description\n"
-                "`!quiztop` – Classement des meilleurs joueurs\n"
-                "`!myrank` – Ton rang et ton score personnel\n"
-                "`!animebattle @joueur` – Duel quiz entre 2 membres"
-            )
+            "title": "🎯 Défis & Challenges",
+            "fields": [
+                ("🎯 Défis Anime", "`!anichallenge`, `!challenge complete`"),
+                ("📅 Challenge mensuel", "`!monthly`, `!monthly complete`")
+            ]
         },
         {
-            "title": "🔍 Recherche & découvertes",
-            "content": (
-                "`!search <titre>` – Recherche un anime\n"
-                "`!suggest` – Recommande un anime de ta liste\n"
-                "`!suggest <genre>` – Par genre précis\n"
-                "`!topanime` – Top 10 animés actuels\n"
-                "`!seasonal` – Animes de la saison\n"
-                "`!todayinhistory` – Ce jour-là dans l’anime"
-            )
+            "title": "📊 Stats & Profils",
+            "fields": [
+                ("🧬 Profils AniList", "`!linkanilist`, `!unlink`, `!mystats`, `!stats <pseudo>`"),
+                ("📈 Comparaisons", "`!duelstats @ami`, `!classementgenre <genre>`")
+            ]
         },
         {
-            "title": "📊 Statistiques & profil",
-            "content": (
-                "`!stats <pseudo>` – Carte Anilist stylisée\n"
-                "`!mystats` – Ton profil lié\n"
-                "`!mychart <pseudo>` – Graphique des genres suivis"
-            )
-        },
-        {
-            "title": "🎯 Compte & préférences",
-            "content": (
-                "`!linkanilist <pseudo>` – Lier Anilist\n"
-                "`!unlink` – Supprimer ton lien\n"
-                "`!reminder on/off` – Rappels DM on/off"
-            )
-        },
-        {
-            "title": "⚙️ Utilitaire",
-            "content": (
-                "`!uptime` – Temps d’activité du bot\n"
-                "`!setchannel` – Définir le salon des alertes (admin)"
-            )
+            "title": "🎨 Autres outils",
+            "fields": [
+                ("📅 Planning visuel", "`!planningvisuel`"),
+                ("⚙️ Utilitaires", "`!uptime`, `!help`")
+            ]
         }
     ]
 
-    for i, section in enumerate(help_sections):
+    def make_embed(index):
+        page = pages[index]
         embed = discord.Embed(
-            title="📖 Commandes disponibles",
-            description="AnimeBot – Ton assistant AniList personnalisé",
+            title=page["title"],
             color=discord.Color.purple()
         )
-        embed.add_field(name=section["title"], value=section["content"], inline=False)
-        embed.set_footer(text=f"Page {i+1}/{len(help_sections)} • Utilise ⬅️ ➡️ pour naviguer • ❌ pour fermer")
-        pages.append(embed)
+        for name, value in page["fields"]:
+            embed.add_field(name=name, value=value, inline=False)
+        embed.set_footer(text=f"Page {index+1}/{len(pages)} – AnimeBot")
+        return embed
 
-    class HelpPaginator(discord.ui.View):
-        def __init__(self): super().__init__(timeout=120); self.index = 0
+    current = 0
+    message = await ctx.send(embed=make_embed(current))
 
-        @discord.ui.button(label="⬅️", style=discord.ButtonStyle.secondary)
-        async def prev(self, interaction, button):
-            self.index = max(0, self.index - 1)
-            await interaction.response.edit_message(embed=pages[self.index], view=self)
+    await message.add_reaction("◀️")
+    await message.add_reaction("▶️")
 
-        @discord.ui.button(label="➡️", style=discord.ButtonStyle.secondary)
-        async def next(self, interaction, button):
-            self.index = min(len(pages) - 1, self.index + 1)
-            await interaction.response.edit_message(embed=pages[self.index], view=self)
+    def check(reaction, user):
+        return (
+            user == ctx.author and str(reaction.emoji) in ["◀️", "▶️"]
+            and reaction.message.id == message.id
+        )
 
-        @discord.ui.button(label="❌ Fermer", style=discord.ButtonStyle.danger)
-        async def close(self, interaction, button):
-            await interaction.message.delete()
+    while True:
+        try:
+            reaction, user = await bot.wait_for("reaction_add", timeout=60.0, check=check)
+            if str(reaction.emoji) == "▶️":
+                current = (current + 1) % len(pages)
+            elif str(reaction.emoji) == "◀️":
+                current = (current - 1) % len(pages)
+            await message.edit(embed=make_embed(current))
+            await message.remove_reaction(reaction, user)
+        except asyncio.TimeoutError:
+            break
 
-    await ctx.send(embed=pages[0], view=HelpPaginator())
     
 @bot.command(name="setalert")
 async def setalert(ctx, time_str: str):
@@ -1149,6 +1534,20 @@ async def check_new_episodes():
             await channel.send("🔔 Rappel d'épisode imminent :", embed=embed)
             notified.add(uid)
             save_json(NOTIFIED_FILE, list(notified))
+
+            # ✅ Envoi aux abonnés
+            tracker_data = load_tracker()
+            for uid, titles in tracker_data.items():
+                if ep["title"] in titles:
+                    try:
+                        user = await bot.fetch_user(int(uid))
+                        await user.send(
+                            f"🔔 Nouvel épisode dispo : **{ep['title']} – Épisode {ep['episode']}**",
+                            embed=embed
+                        )
+                    except:
+                        pass  # utilisateur bloqué, DM désactivés, etc.
+
             
 @bot.event
 async def on_ready():
