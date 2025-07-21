@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import unicodedata
+import matplotlib.pyplot as plt
 
 def normalize(text):
     if not text:
