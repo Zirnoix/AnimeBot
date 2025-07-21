@@ -285,7 +285,7 @@ async def linkanilist(ctx, pseudo: str):
     user_id = str(ctx.author.id)
     data[user_id] = pseudo
     save_links(data)
-    await ctx.send(f"✅ Ton compte Anilist **{pseudo}** a bien été lié à ton profil Discord.")
+    await ctx.send(f"✅ Ton compte AniList **{pseudo}** a été lié à ton profil Discord.")
 
 @bot.command(name="quiztop")
 async def quiztop(ctx):
@@ -626,9 +626,9 @@ async def unlink(ctx):
     if user_id in data:
         del data[user_id]
         save_links(data)
-        await ctx.send("🔗 Ton compte a bien été délié.")
+        await ctx.send("🔗 Ton lien AniList a bien été supprimé.")
     else:
-        await ctx.send("❌ Tu n’avais pas encore de compte lié.")
+        await ctx.send("❌ Aucun compte AniList n’était lié à ce profil.")
 
 
 @bot.command(name="mystats")
@@ -636,10 +636,12 @@ async def mystats(ctx):
     data = load_links()
     user_id = str(ctx.author.id)
     pseudo = data.get(user_id)
+
     if not pseudo:
-        await ctx.send("❌ Tu dois d'abord lier ton compte avec `!linkanilist <pseudo>`")
+        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList.\nUtilise `!linkanilist <pseudo>` pour le faire.")
         return
-    await stats(ctx, pseudo)  # Appelle la commande stats classique
+
+    await stats(ctx, pseudo)
 
 # Commande pour voir les stats
 @bot.command(name="stats")
@@ -666,15 +668,14 @@ async def stats(ctx, username: str):
       }
     }
     '''
-    variables = {"name": username}
     url = "https://graphql.anilist.co"
+    variables = {"name": username}
 
     try:
-        response = requests.post(url, json={"query": query, "variables": variables})
-        response.raise_for_status()
-        data = response.json()["data"]["User"]
+        res = requests.post(url, json={"query": query, "variables": variables})
+        data = res.json()["data"]["User"]
     except:
-        await ctx.send(f"❌ Impossible de récupérer les infos pour **{username}**.")
+        await ctx.send(f"❌ Impossible de récupérer le profil **{username}**.")
         return
 
     stats = data["statistics"]["anime"]
@@ -682,50 +683,51 @@ async def stats(ctx, username: str):
     fav_genre = sorted(genres, key=lambda g: g["count"], reverse=True)[0]["genre"] if genres else "N/A"
     days = round(stats["minutesWatched"] / 1440, 1)
 
-    # Images
     avatar = Image.open(BytesIO(requests.get(data["avatar"]["large"]).content)).resize((140, 140)).convert("RGBA")
     banner_url = data["bannerImage"] or "https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-oJxzcFvSTFZg.jpg"
     banner = Image.open(BytesIO(requests.get(banner_url).content)).resize((800, 300)).convert("RGBA")
 
-    # Flou de fond
+    # Effet flou + overlay
     blur = banner.filter(ImageFilter.GaussianBlur(3))
     overlay = Image.new("RGBA", blur.size, (0, 0, 0, 160))
     card = Image.alpha_composite(blur, overlay)
 
-    draw = ImageDraw.Draw(card)
-
-    # Polices
-    font_title = ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 26)
-    font_text = ImageFont.truetype("fonts/DejaVuSans.ttf", 20)
-
-    # Avatar arrondi avec contour
+    # Avatar rond avec bord
     mask = Image.new("L", (140, 140), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, 140, 140), fill=255)
     avatar = ImageOps.fit(avatar, (140, 140), centering=(0.5, 0.5))
     avatar.putalpha(mask)
-    circle = Image.new("RGBA", (146, 146), (255, 255, 255, 60))
-    circle.paste(avatar, (3, 3), avatar)
-    card.paste(circle, (40, 80), circle)
+    border = Image.new("RGBA", (146, 146), (255, 255, 255, 80))
+    border.paste(avatar, (3, 3), avatar)
+    card.paste(border, (40, 80), border)
+
+    # Polices
+    font1 = ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 26)
+    font2 = ImageFont.truetype("fonts/DejaVuSans.ttf", 20)
+    font_badge = ImageFont.truetype("fonts/DejaVuSans.ttf", 20)
 
     # Texte
-    draw.text((210, 30), f"{data['name']}", font=font_title, fill="white")
-    draw.text((210, 85), f"🎬 Animés vus : {stats['count']}", font=font_text, fill="white")
-    draw.text((210, 115), f"🕒 Temps total : {days} jours", font=font_text, fill="white")
-    draw.text((210, 145), f"⭐ Score moyen : {round(stats['meanScore'], 1)}", font=font_text, fill="white")
-    draw.text((210, 175), f"🎭 Genre préféré : {fav_genre}", font=font_text, fill="white")
-    draw.text((210, 210), f"🔗 {data['siteUrl']}", font=font_text, fill="white")
+    draw = ImageDraw.Draw(card)
+    x, y = 210, 30
+    draw.text((x, y), data["name"], font=font1, fill="white"); y += 50
+    draw.text((x, y), f"🎬 Animés vus : {stats['count']}", font=font2, fill="white"); y += 30
+    draw.text((x, y), f"🕒 Temps total : {days} jours", font=font2, fill="white"); y += 30
+    draw.text((x, y), f"⭐ Score moyen : {round(stats['meanScore'], 1)}", font=font2, fill="white"); y += 30
+    draw.text((x, y), f"🎭 Genre préféré : {fav_genre}", font=font2, fill="white"); y += 30
+    draw.text((x, y), f"🔗 {data['siteUrl']}", font=font2, fill="white"); y += 40
 
     # Badge bonus
     if stats["count"] >= 1000:
-        draw.text((210, 245), "🏅 Otaku confirmé", font=font_text, fill="#ffdd55")
+        draw.text((x, y), "🏅 Otaku confirmé", font=font_badge, fill="#ffdd55")
     elif stats["meanScore"] >= 85:
-        draw.text((210, 245), "🌟 Goût d'élite", font=font_text, fill="#55ddff")
+        draw.text((x, y), "🌟 Goût d'élite", font=font_badge, fill="#55ddff")
 
-    path = f"/tmp/{username}_profile.png"
-    card.save(path)
+    # Envoi
+    output_path = f"/tmp/{username}_styled.png"
+    card.save(output_path)
 
-    await ctx.send(file=discord.File(path))
-
+    with open(output_path, "rb") as f:
+        await ctx.send(file=discord.File(f, filename=f"{username}_stats.png"))
 
 # Commandes supplémentaires
 @bot.command(name="next")
