@@ -747,7 +747,7 @@ async def anime_quiz(ctx):
         title="🧠 Anime Quiz",
         description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
         color=discord.Color.orange()
-)
+    )
 
 
 
