@@ -447,11 +447,10 @@ async def planning(ctx):
 async def anime_quiz(ctx):
     await ctx.send("🎮 Devine l’anime à partir de sa description...")
 
-    # Appel à l’API AniList pour un anime aléatoire
     query = '''
     query {
       Page(perPage: 1, page: %d) {
-        media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+        media(type: ANIME, isAdult: false, sort: SCORE_DESC) {
           id
           title {
             romaji
@@ -461,8 +460,7 @@ async def anime_quiz(ctx):
           description(asHtml: false)
         }
       }
-    }
-    ''' % random.randint(1, 1000)
+    ''' % random.randint(1, 500)
 
     response = requests.post(
         "https://graphql.anilist.co",
@@ -476,14 +474,11 @@ async def anime_quiz(ctx):
 
     data = response.json()
     anime = data["data"]["Page"]["media"][0]
-    description = anime.get("description", "Pas de description.").split(".")[0] + "."
-
-    # Nettoyage
-    description = discord.utils.escape_markdown(description.replace("<br>", "\n"))
+    description = anime.get("description", "Pas de description disponible.").split(".")[0] + "."
 
     embed = discord.Embed(
         title="🧠 Anime Quiz",
-        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour répondre.*",
+        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
         color=discord.Color.orange()
     )
     await ctx.send(embed=embed)
@@ -508,14 +503,6 @@ async def anime_quiz(ctx):
 
     except asyncio.TimeoutError:
         await ctx.send(f"⏰ Temps écoulé ! La réponse était **{anime['title']['romaji']}**.")
-        
-@bot.command(name="quizscore")
-async def quiz_score(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    scores = load_scores()
-    uid = str(member.id)
-    score = scores.get(uid, 0)
-    await ctx.send(f"🏅 **{member.display_name}** a un score de **{score}** au quiz.")
 
 
 @bot.command(name="suggest")
