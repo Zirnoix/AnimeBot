@@ -794,9 +794,6 @@ def get_title(level):
     scores = load_scores()
     user_id = str(ctx.author.id)
 
-    if user_id not in scores:
-        await ctx.send("❌ Tu n'as pas encore de score enregistré. Joue au `!animequiz` pour commencer !")
-        return
 
     def get_title(score):
         if score >= 15:
