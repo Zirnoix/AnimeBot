@@ -445,7 +445,12 @@ async def planning(ctx):
 
 @bot.command(name="animequiz")
 async def anime_quiz(ctx):
-    await ctx.send("🎮 Devine l’anime à partir de sa description...")
+    embed = discord.Embed(
+        title="🧠 Anime Quiz",
+        description=f"🎮 *Devine l’anime à partir de sa description...*\n\n**Description :**\n{description}\n\n*Tu as 20 secondes pour répondre.*",
+        color=discord.Color.orange()
+    )
+
 
     query = '''
     query {
