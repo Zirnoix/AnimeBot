@@ -6,7 +6,7 @@ import json
 import asyncio
 import os
 import pytz
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 
