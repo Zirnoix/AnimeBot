@@ -431,7 +431,6 @@ async def monplanning(ctx):
 async def weekly(ctx, sub=None):
     user_id = str(ctx.author.id)
     data = load_weekly()
-
     if sub == "complete":
         last = data.get(user_id, {}).get("last_completed")
         if last:
@@ -442,6 +441,7 @@ async def weekly(ctx, sub=None):
                 wait_days = (next_time - datetime.now()).days + 1
                 await ctx.send(f"⏳ Tu as déjà validé ton défi cette semaine.\nTu pourras le refaire dans **{wait_days} jour(s)**.")
                 return
+
         if user_id not in data or not data[user_id].get("active"):
             await ctx.send("❌ Tu n’as pas de défi en cours.")
             return
@@ -451,14 +451,10 @@ async def weekly(ctx, sub=None):
         history.append({"description": challenge["description"], "completed": True})
         data[user_id]["history"] = history
         data[user_id]["active"] = None
+        data[user_id]["last_completed"] = datetime.now().isoformat()  # ✅ ligne à ajouter
         save_weekly(data)
         add_xp(ctx.author.id, amount=25)
         await ctx.send(f"✅ Défi terminé : **{challenge['description']}** ! Bien joué 🎉")
-        return
-
-    # Proposer un nouveau défi
-    if user_id in data and data[user_id].get("active"):
-        await ctx.send(f"📌 Tu as déjà un défi mensuel :\n**{data[user_id]['active']['description']}**\nTape `!weekly complete` quand tu l’as terminé.")
         return
 
     # Liste d’objectifs possibles
@@ -481,7 +477,7 @@ async def weekly(ctx, sub=None):
         "history": data.get(user_id, {}).get("history", [])
     }
     save_weekly(data)
-    await ctx.send(f"📅 Ton défi du mois :\n**{chosen}**\nQuand tu as terminé, tape `!weekly complete`.")
+    await ctx.send(f"📅 Ton défi de la semaine :\n**{chosen}**\nQuand tu as terminé, tape `!weekly complete`.")
 
 @bot.command(name="linkanilist")
 async def linkanilist(ctx, pseudo: str):
@@ -1240,6 +1236,83 @@ async def next_command(ctx):
 
     await ctx.send(embed=embed)
 
+@bot.command(name="monplanning")
+async def mon_planning(ctx):
+    username = get_user_anilist(ctx.author.id)
+    if not username:
+        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
+        return
+
+    episodes = get_upcoming_episodes(username)
+    if not episodes:
+        await ctx.send(f"📭 Aucun épisode à venir trouvé pour **{username}**.")
+        return
+
+    embed = discord.Embed(
+        title=f"📅 Planning personnel – {username}",
+        description="Voici les prochains épisodes à venir dans ta liste.",
+        color=discord.Color.teal()
+    )
+
+    for ep in sorted(episodes, key=lambda e: e["airingAt"])[:10]:
+        dt = datetime.fromtimestamp(ep["airingAt"], tz=TIMEZONE)
+        emoji = genre_emoji(ep["genres"])
+        embed.add_field(
+            name=f"{emoji} {ep['title']} – Épisode {ep['episode']}",
+            value=f"🕒 {dt.strftime('%A %d %B à %H:%M')}",
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
+@bot.command(name="monchart")
+async def mon_chart(ctx):
+    username = get_user_anilist(ctx.author.id)
+    if not username:
+        await ctx.send("❌ Tu dois lier ton compte avec `!linkanilist`.")
+        return
+
+    query = '''
+    query ($name: String) {
+      User(name: $name) {
+        statistics {
+          anime {
+            genres {
+              genre
+              count
+            }
+          }
+        }
+      }
+    }
+    '''
+    variables = {"name": username}
+    url = "https://graphql.anilist.co"
+
+    try:
+        res = requests.post(url, json={"query": query, "variables": variables})
+        data = res.json()
+        genres = data["data"]["User"]["statistics"]["anime"]["genres"]
+        genres = sorted(genres, key=lambda g: g["count"], reverse=True)[:8]
+
+        labels = [g["genre"] for g in genres]
+        sizes = [g["count"] for g in genres]
+
+        fig, ax = plt.subplots()
+        ax.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=140)
+        ax.axis("equal")
+        plt.title(f"Répartition des genres — {username}")
+
+        img_path = f"/tmp/{username}_chart.png"
+        plt.savefig(img_path)
+        plt.close()
+
+        with open(img_path, "rb") as f:
+            await ctx.send(file=discord.File(f, filename="chart.png"))
+
+    except Exception as e:
+        await ctx.send("❌ Erreur lors de la génération du graphique.")
+        print(f"[monchart] {e}")
 
 @bot.command(name="uptime")
 async def uptime(ctx):
