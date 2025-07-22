@@ -53,38 +53,90 @@ def normalize(text):
 def title_variants(title_data):
     titles = set()
 
-    for key in ['romaji', 'english', 'native']:
-        title = title_data.get(key)
-        if not title:
-            continue
-
-        base = normalize(title)
-        base = re.sub(r"(saison|season|s\d|2nd|second|3rd|third|final|part \d+)", "", base, flags=re.IGNORECASE).strip()
-        titles.add(base)
-
-        shortcuts = {
-            "shingeki no kyojin": {"snk", "attack on titan"},
-            "boku no hero academia": {"mha", "my hero academia"},
-            "sword art online": {"sao"},
-            "kimetsu no yaiba": {"demon slayer"},
-            "one punch man": {"opm"},
-            "jujutsu kaisen": {"jjk"},
-            "fullmetal alchemist": {"fma"},
-            "hunter x hunter": {"hxh"},
-            "kaguya-sama": {"kaguya"},
-        }
-
-        for original, variants in shortcuts.items():
-            if original in base:
-                titles.update(variants)
-
-    # Ajoute aussi les titres d’origine non modifiés
+    # 🔤 Nettoyage des titres initiaux
     for key in ['romaji', 'english', 'native']:
         t = title_data.get(key)
-        if t:
-            titles.add(normalize(t))
+        if not t:
+            continue
+        base = normalize(t)
+        clean = re.sub(r"(saison|season|s\d|2nd|second|3rd|third|final|part \d+|ver\d+|[^\w\s])", "", base, flags=re.IGNORECASE).strip()
+        titles.add(base)
+        titles.add(clean)
+        for word in clean.split():
+            if len(word) >= 4:
+                titles.add(word)
 
-    return titles
+    # 🔁 Synonymes connus
+    aliases = {
+        "attack on titan": {"snk", "aot", "shingeki no kyojin"},
+        "my hero academia": {"mha", "boku no hero academia", "hero academia"},
+        "sword art online": {"sao"},
+        "demon slayer": {"kimetsu no yaiba", "kny", "demon slayer kimetsu"},
+        "bleach": {"bleach", "bleach tybw"},
+        "one piece": {"onepiece"},
+        "naruto": {"naruto shippuden", "naruto"},
+        "jujutsu kaisen": {"jjk"},
+        "hunter x hunter": {"hxh"},
+        "tokyo ghoul": {"tokyo ghoul", "tg"},
+        "nier automata": {"nier"},
+        "death note": {"deathnote"},
+        "fullmetal alchemist": {"fma", "brotherhood", "full metal alchemist"},
+        "code geass": {"code geass", "cg"},
+        "erased": {"boku dake ga inai machi"},
+        "violet evergarden": {"violet"},
+        "black clover": {"blackclover"},
+        "mob psycho 100": {"mob", "mob psycho"},
+        "one punch man": {"opm"},
+        "kaguya sama": {"love is war", "kaguya"},
+        "re zero": {"rezero"},
+        "tokyo revengers": {"revengers"},
+        "chainsaw man": {"chainsawman"},
+        "fire force": {"fire force", "enkai no shouboutai"},
+        "fairy tail": {"fairytail"},
+        "blue lock": {"bluelock"},
+        "spy x family": {"spyxfamily", "spy family"},
+        "noragami": {"yato"},
+        "your lie in april": {"shigatsu wa kimi no uso"},
+        "clannad": {"clannad"},
+        "angel beats": {"angelbeats"},
+        "toradora": {"toradora"},
+        "your name": {"kimi no na wa"},
+        "a silent voice": {"koe no katachi"},
+        "made in abyss": {"mia"},
+        "the promised neverland": {"yakusoku no neverland", "tpn"},
+        "dr stone": {"dr. stone"},
+        "86": {"eighty six"},
+        "akame ga kill": {"akame"},
+        "charlotte": {"charlotte"},
+        "zom 100": {"zom100", "bucket list of the dead"},
+        "oshi no ko": {"oshinoko"},
+        "hell’s paradise": {"jigokuraku"},
+        "vinland saga": {"vinland"},
+        "bocchi the rock": {"bocchi"},
+        "solo leveling": {"sololeveling"},
+        "mashle": {"mashle"},
+        "frieren": {"sousou no frieren"},
+        "steins gate": {"steins;gate"},
+        "meitantei conan": {"detective conan"},
+        "no game no life": {"ngnl"},
+        "future diary": {"mirai nikki"},
+        "parasyte": {"kiseijuu"},
+        "the quintessential quintuplets": {"5toubun no hanayome"},
+        "jobless reincarnation": {"mushoku tensei"},
+        "rent a girlfriend": {"kanokari"},
+        "classroom of the elite": {"youkoso jitsuryoku"},
+        "reincarnated as a slime": {"tensura"},
+        "the rising of the shield hero": {"tate no yuusha"},
+    }
+
+    base_all = [normalize(title_data.get(k, "")) for k in ['romaji', 'english', 'native']]
+    for b in base_all:
+        for key, values in aliases.items():
+            if key in b:
+                titles.update(values)
+
+    return set(normalize(t) for t in titles if len(t) > 1)
+
 
 # 📁 Chargement des préférences utilisateur
 PREFERENCES_FILE = "/data/preferences.json"
@@ -1638,11 +1690,22 @@ async def anime_quiz(ctx):
     correct_titles = title_variants(anime["title"])
 
     def check(m):
-        return m.author == ctx.author and normalize(m.content) in correct_titles
+        content = normalize(m.content)
+    return m.author == ctx.author and (content in correct_titles or content == "jsp")
+
 
     try:
         msg = await bot.wait_for("message", timeout=20.0, check=check)
-        await ctx.send(f"✅ Bonne réponse, **{ctx.author.display_name}** !")
+
+        if normalize(msg.content) == "jsp":
+            await ctx.send(f"❌ Pass : **{anime['title']['romaji']}**.")
+        else:
+            await ctx.send(f"✅ Bonne réponse, **{ctx.author.display_name}** !")
+            scores = load_scores()
+            user_id = str(ctx.author.id)
+            scores[user_id] = scores.get(user_id, 0) + 1
+            save_scores(scores)
+
 
         # 🏆 Enregistrer le score
         scores = load_scores()
