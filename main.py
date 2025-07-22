@@ -929,43 +929,6 @@ async def todayinhistory(ctx):
 
 import matplotlib.pyplot as plt
 
-@bot.command(name="mychart")
-async def mychart(ctx, username: str):
-    query = '''
-    query ($name: String) {
-      User(name: $name) {
-        statistics {
-          anime {
-            genres {
-              genre
-              count
-            }
-          }
-        }
-      }
-    }
-    '''
-    data = query_anilist(query, {"name": username})
-    if not data:
-        await ctx.send("❌ Erreur lors de la récupération.")
-        return
-
-    genres = data["data"]["User"]["statistics"]["anime"]["genres"]
-    genres = sorted(genres, key=lambda g: g["count"], reverse=True)[:8]
-
-    labels = [g["genre"] for g in genres]
-    sizes = [g["count"] for g in genres]
-
-    plt.figure(figsize=(6, 6))
-    plt.pie(sizes, labels=labels, autopct='%1.1f%%')
-    plt.title(f"Genres préférés de {username}")
-
-    path = f"/tmp/{username}_chart.png"
-    plt.savefig(path)
-    plt.close()
-
-    await ctx.send(file=discord.File(path))
-
 @bot.command(name="topanime")
 async def topanime(ctx):
     now = datetime.now()
@@ -1179,32 +1142,54 @@ async def stats(ctx, username: str):
 
 # Commandes supplémentaires
 @bot.command(name="next")
-async def next_command(ctx):
+async def next_card(ctx):
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    import requests
+    from io import BytesIO
+
     episodes = get_upcoming_episodes(ANILIST_USERNAME)
 
     if not episodes:
         await ctx.send("📭 Aucun épisode à venir trouvé dans ta liste.")
         return
 
-    # 🔽 On trie par date la plus proche
     next_ep = min(episodes, key=lambda e: e["airingAt"])
 
+    # 🔽 Données
     dt = datetime.fromtimestamp(next_ep["airingAt"], tz=TIMEZONE)
+    date_text = dt.strftime("%A %d %B %Y à %H:%M")
     title = next_ep["title"]
     episode = next_ep["episode"]
-    emoji = genre_emoji(next_ep["genres"])
+    genres = ", ".join(next_ep["genres"])
+    image_url = next_ep["image"]
 
-    embed = discord.Embed(
-        title="🎬 Prochain épisode à sortir",
-        description=f"**{title}** — Épisode {episode}",
-        color=discord.Color.orange()
-    )
-    embed.add_field(name="🕒 Horaire", value=dt.strftime("%A %d %B à %H:%M"), inline=False)
-    embed.add_field(name="🎭 Genre", value=", ".join(next_ep["genres"]), inline=False)
-    embed.set_footer(text="AnimeBot – AniList Sync")
-    
-    embed.set_thumbnail(url=next_ep["image"])
-    await ctx.send(embed=embed)
+    try:
+        # 🖼️ Image de fond + flou
+        response = requests.get(image_url)
+        bg = Image.open(BytesIO(response.content)).resize((800, 300)).convert("RGBA")
+        blurred = bg.filter(ImageFilter.GaussianBlur(4))
+        overlay = Image.new("RGBA", blurred.size, (0, 0, 0, 180))
+        card = Image.alpha_composite(blurred, overlay)
+        draw = ImageDraw.Draw(card)
+
+        # ✍️ Textes
+        font_title = ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 32)
+        font_small = ImageFont.truetype("fonts/DejaVuSans.ttf", 20)
+
+        draw.text((30, 30), f"{title}", font=font_title, fill="white")
+        draw.text((30, 90), f"🎬 Épisode {episode}", font=font_small, fill="white")
+        draw.text((30, 130), f"📅 {date_text}", font=font_small, fill="white")
+        draw.text((30, 170), f"🎭 Genres : {genres}", font=font_small, fill="white")
+
+        path = f"/tmp/{ctx.author.id}_nextcard.png"
+        card.save(path)
+
+        with open(path, "rb") as f:
+            await ctx.send(file=discord.File(f, filename="nextcard.png"))
+
+    except Exception as e:
+        print(f"[Carte Next] Erreur : {e}")
+        await ctx.send("❌ Impossible de générer l’image du prochain épisode.")
 
 @bot.command(name="monnext")
 async def mon_next(ctx):
@@ -1621,7 +1606,7 @@ async def help_command(ctx):
             "title": "📈 Comparaison & Genres",
             "fields": [
                 ("`!duelstats @ami`", "Compare ton profil AniList avec un ami."),
-                ("`!mychart`", "Affiche un graphique des genres que tu regardes."),
+                ("`!monchart`", "Affiche un graphique des genres que tu regardes."),
                 ("`!classementgenre <genre>`", "Classement de ceux qui regardent le plus ce genre."),
             ]
         },
