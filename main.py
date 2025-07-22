@@ -1234,12 +1234,11 @@ async def stats(ctx, username: str):
 @bot.command(name="next")
 async def next_command(ctx):
     import requests
-    from PIL import Image, ImageDraw, ImageFont
-    from datetime import datetime
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
     from io import BytesIO
+    from datetime import datetime
 
     episodes = get_upcoming_episodes(ANILIST_USERNAME)
-
     if not episodes:
         await ctx.send("📭 Aucun épisode à venir trouvé dans ta liste.")
         return
@@ -1249,19 +1248,30 @@ async def next_command(ctx):
     title = next_ep["title"]
     episode = next_ep["episode"]
     genres = next_ep["genres"]
+    image_url = next_ep["image"]
 
-    # Création de l’image
-    card = Image.new("RGBA", (800, 300), (30, 30, 30, 255))
+    # 🎨 Création du fond avec blur
+    try:
+        bg_response = requests.get(image_url)
+        bg = Image.open(BytesIO(bg_response.content)).resize((800, 300)).convert("RGBA")
+    except:
+        bg = Image.new("RGBA", (800, 300), (30, 30, 30, 255))  # fallback
+    blur = bg.filter(ImageFilter.GaussianBlur(3))
+    overlay = Image.new("RGBA", blur.size, (0, 0, 0, 160))
+    card = Image.alpha_composite(blur, overlay)
     draw = ImageDraw.Draw(card)
+
+    # ✏️ Polices
     font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-    draw.text((40, 30), "🎬 Prochain épisode", font=font_title, fill="white")
+    # 📄 Texte
+    draw.text((40, 30), "🎬 Prochain épisode à venir", font=font_title, fill="white")
     draw.text((40, 90), f"{title} – Épisode {episode}", font=font_text, fill="white")
     draw.text((40, 130), f"🕒 {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
     draw.text((40, 170), f"🎭 Genre : {', '.join(genres)}", font=font_text, fill="white")
 
-    # 🧩 Emoji PNG par genre principal
+    # 🔥 Collage de l'emoji genre
     GENRE_EMOJI_FILES = {
         "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
         "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
@@ -1277,9 +1287,9 @@ async def next_command(ctx):
             emoji_img = Image.open(f"Emojis/{emoji_file}").resize((64, 64)).convert("RGBA")
             card.paste(emoji_img, (700, 30), emoji_img)
         except Exception as e:
-            print(f"[Erreur emoji] {e}")
+            print(f"[Erreur emoji image] {e}")
 
-    # Sauvegarde et envoi
+    # 💾 Envoi
     path = f"/tmp/{ctx.author.id}_next.png"
     card.save(path)
 
