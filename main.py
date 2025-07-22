@@ -1045,107 +1045,133 @@ async def unlink(ctx):
 @bot.command(name="mystats")
 async def mystats(ctx):
     import requests
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
     from io import BytesIO
+    import os
 
-    username = get_user_anilist(ctx.author.id)
+    def get_badge_file(count):
+        if count >= 2000:
+            return "badge_6.png"
+        elif count >= 1500:
+            return "badge_5.png"
+        elif count >= 1200:
+            return "badge_4.png"
+        elif count >= 900:
+            return "badge_3.png"
+        elif count >= 600:
+            return "badge_2.png"
+        elif count >= 300:
+            return "badge_1.png"
+        else:
+            return "badge_0.png"
+
+    def emoji_file(name):
+        path = f"Emojis/{name}"
+        return path if os.path.exists(path) else None
+
+    user_links = load_links()
+    user_id = str(ctx.author.id)
+    username = user_links.get(user_id)
     if not username:
-        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
+        await ctx.send("❌ Tu dois lier ton compte avec `!linkanilist <pseudo>` avant d’utiliser cette commande.")
         return
 
-    # 📡 Requête GraphQL
     query = '''
     query ($name: String) {
       User(name: $name) {
         name
         avatar { large }
         bannerImage
-        siteUrl
         statistics {
           anime {
             count
             minutesWatched
             meanScore
-            genres {
-              genre
-              count
-            }
+            genres { genre count }
           }
         }
+        siteUrl
       }
     }
     '''
-    variables = {"name": username}
+
     try:
-        res = requests.post("https://graphql.anilist.co", json={"query": query, "variables": variables})
-        res.raise_for_status()
-        user = res.json()["data"]["User"]
+        response = requests.post("https://graphql.anilist.co", json={"query": query, "variables": {"name": username}})
+        data = response.json()["data"]["User"]
     except:
-        await ctx.send("❌ Impossible de récupérer les données de ton profil.")
+        await ctx.send("🚫 Erreur en contactant AniList.")
         return
 
-    stats = user["statistics"]["anime"]
-    name = user["name"]
-    avatar_url = user["avatar"]["large"]
-    banner_url = user["bannerImage"] or "https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-oJxzcFvSTFZg.jpg"
-    favorite_genre = sorted(stats["genres"], key=lambda g: g["count"], reverse=True)[0]["genre"]
-    site = user["siteUrl"]
+    stats = data["statistics"]["anime"]
+    favorite_genre = max(stats["genres"], key=lambda g: g["count"])["genre"] if stats["genres"] else "N/A"
+    avatar_url = data["avatar"]["large"]
+    banner_url = data.get("bannerImage")
+    site_url = data["siteUrl"]
+    count = stats["count"]
     days = round(stats["minutesWatched"] / 1440, 1)
+    score = round(stats["meanScore"], 1)
 
-    # 🧩 Emojis PNG élargis
-    GENRE_EMOJI_FILES = {
-        "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
-        "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
-        "Sci-Fi": "1f680.png", "Slice of Life": "1f338.png", "Sports": "26bd.png",
-        "Music": "1f3b5.png", "Supernatural": "1f47e.png", "Mecha": "1f916.png",
-        "Psychological": "1f52e.png", "Adventure": "1f30d.png", "Thriller": "1f4a5.png",
-        "Ecchi": "1f633.png"
-    }
-    emoji_file = GENRE_EMOJI_FILES.get(favorite_genre)
+    # Création de l'image
+    width, height = 800, 300
+    card = Image.new("RGBA", (width, height), (0, 0, 0, 255))
 
-    # 🔄 Téléchargement des images
     try:
-        banner = Image.open(BytesIO(requests.get(banner_url).content)).resize((800, 300)).convert("RGBA")
-        avatar = Image.open(BytesIO(requests.get(avatar_url).content)).resize((128, 128)).convert("RGBA")
-        mask = Image.new("L", avatar.size, 0)
-        draw_mask = ImageDraw.Draw(mask)
-        draw_mask.ellipse((0, 0, 128, 128), fill=255)
-        avatar = ImageOps.fit(avatar, mask.size, centering=(0.5, 0.5))
-        avatar.putalpha(mask)
+        banner = Image.open(BytesIO(requests.get(banner_url).content)).resize((width, height)).convert("RGBA")
     except:
-        await ctx.send("❌ Impossible de charger les images de profil ou de fond.")
-        return
+        banner = Image.new("RGBA", (width, height), (40, 40, 40, 255))
 
-    # 🖌️ Composition de l’image
     blur = banner.filter(ImageFilter.GaussianBlur(3))
-    overlay = Image.new("RGBA", blur.size, (0, 0, 0, 170))
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 160))
     card = Image.alpha_composite(blur, overlay)
-    draw = ImageDraw.Draw(card)
 
-    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
+    draw = ImageDraw.Draw(card)
+    font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-    draw.text((180, 30), f"{name}", font=font_title, fill="white")
-    draw.text((180, 80), f"Animés vus : {stats['count']}", font=font_text, fill="white")
-    draw.text((180, 110), f"Temps total : {days} jours", font=font_text, fill="white")
-    draw.text((180, 140), f"Score moyen : {round(stats['meanScore'], 1)}", font=font_text, fill="white")
-    draw.text((180, 170), f"Genre préféré : {favorite_genre}", font=font_text, fill="white")
-    draw.text((180, 220), f"{site}", font=font_text, fill="white")
+    # Avatar
+    try:
+        avatar = Image.open(BytesIO(requests.get(avatar_url).content)).resize((110, 110)).convert("RGBA")
+        mask = Image.new("L", avatar.size, 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, 110, 110), fill=255)
+        card.paste(avatar, (40, 90), mask)
+    except:
+        pass
 
-    card.paste(avatar, (30, 86), avatar)
+    # Badge
+    badge_path = emoji_file(get_badge_file(count))
+    if badge_path:
+        badge = Image.open(badge_path).resize((48, 48)).convert("RGBA")
+        card.paste(badge, (700, 30), badge)
 
-    # 🎯 Ajouter emoji PNG du genre préféré
-    if emoji_file:
-        try:
-            emoji_img = Image.open(f"Emojis/{emoji_file}").resize((28, 28)).convert("RGBA")
-            card.paste(emoji_img, (180 + len(f"Genre préféré : {favorite_genre}") * 9, 170), emoji_img)
-        except Exception as e:
-            print(f"[Erreur emoji mystats] {e}")
+    # Infos
+    draw.text((180, 30), f"{data['name']}", font=font_bold, fill="white")
 
-    # 💾 Export
-    path = f"/tmp/{ctx.author.id}_mystats.png"
+    y = 80
+    infos = [
+        ("1f4fd.png", f"Animés vus : {count}"),
+        ("23f1.png", f"Temps total : {days} jours"),
+        ("2b50.png", f"Score moyen : {score}"),
+        ("1f3ad.png", f"Genre préféré : {favorite_genre}")
+    ]
+
+    for emoji, text in infos:
+        icon_path = emoji_file(emoji)
+        if icon_path:
+            try:
+                icon = Image.open(icon_path).resize((28, 28)).convert("RGBA")
+                card.paste(icon, (180, y), icon)
+            except:
+                pass
+        draw.text((220, y), text, font=font_text, fill="white")
+        y += 35
+
+    draw.text((180, 220), site_url, font=font_text, fill="white")
+
+    # Envoi
+    path = f"/tmp/{username}_mystats.png"
     card.save(path)
-    await ctx.send(file=discord.File(path, filename="mystats.png"))
+    with open(path, "rb") as f:
+        await ctx.send(file=discord.File(f, filename=f"{username}_mystats.png"))
 
 # Commande pour voir les stats
 @bot.command(name="stats")
