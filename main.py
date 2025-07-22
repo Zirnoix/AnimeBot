@@ -341,7 +341,7 @@ async def prochains(ctx, *args):
         else:
             filter_genre = arg.capitalize()
 
-    episodes = get_upcoming_episodes(ANILIST_USERNAME, status_filter=["CURRENT"])
+    episodes = get_upcoming_episodes(ANILIST_USERNAME)
     if not episodes:
         await ctx.send("Aucun épisode à venir.")
         return
@@ -537,7 +537,7 @@ async def anichallenge(ctx):
 
 @bot.command(name="debugnext")
 async def debug_next(ctx):
-    episodes = get_upcoming_episodes(ANILIST_USERNAME, status_filter=["CURRENT"])
+    episodes = get_upcoming_episodes(ANILIST_USERNAME)
 
     count = len(episodes)
     if count == 0:
@@ -1215,7 +1215,7 @@ async def stats(ctx, username: str):
 # Commandes supplémentaires
 @bot.command(name="next")
 async def next_episode(ctx):
-    episodes = get_upcoming_episodes(ANILIST_USERNAME, status_filter=["CURRENT"])
+    episodes = get_upcoming_episodes(ANILIST_USERNAME)
     if not episodes:
         await ctx.send("Aucun épisode à venir.")
         return
@@ -1256,7 +1256,7 @@ async def journalier(ctx, mode: str = ""):
 @bot.command(name="aujourdhui")
 async def aujourdhui(ctx):
     today = datetime.now(TIMEZONE).date()
-    episodes = get_upcoming_episodes(ANILIST_USERNAME, status_filter=["CURRENT"])
+    episodes = get_upcoming_episodes(ANILIST_USERNAME)
     found = [(ep, datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE))
              for ep in episodes if datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE).date() == today]
     if not found:
@@ -1270,7 +1270,7 @@ async def aujourdhui(ctx):
 
 @bot.command(name="planning")
 async def planning(ctx):
-    episodes = get_upcoming_episodes(ANILIST_USERNAME, status_filter=["CURRENT"])
+    episodes = get_upcoming_episodes(ANILIST_USERNAME)
     if not episodes:
         await ctx.send("Aucun planning disponible.")
         return
@@ -1430,7 +1430,7 @@ async def planningvisuel(ctx):
     import pytz
 
     # 📅 Récupération des épisodes à venir
-    episodes = get_upcoming_episodes(ANILIST_USERNAME, status_filter=["CURRENT"])
+    episodes = get_upcoming_episodes(ANILIST_USERNAME)
     TIMEZONE = pytz.timezone("Europe/Paris")
     jours = list(calendar.day_name)
     planning = {day: [] for day in jours}
@@ -1613,7 +1613,7 @@ async def send_daily_summaries():
         if current_time != alert_time:
             continue  # Ce n’est pas encore l’heure
 
-        episodes = get_upcoming_episodes(ANILIST_USERNAME, status_filter=["CURRENT"])
+        episodes = get_upcoming_episodes(ANILIST_USERNAME)
         episodes_today = [ep for ep in episodes if
                           datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE).strftime("%A") == current_day]
 
@@ -1651,7 +1651,7 @@ async def check_new_episodes():
     if not channel:
         return
 
-    episodes = get_upcoming_episodes(ANILIST_USERNAME, status_filter=["CURRENT"])
+    episodes = get_upcoming_episodes(ANILIST_USERNAME)
     now = int(datetime.now(tz=pytz.utc).timestamp())
 
     for ep in episodes:
