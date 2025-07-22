@@ -233,48 +233,56 @@ def build_embed(ep, dt):
     return embed
 
 def get_upcoming_episodes(username):
+    import requests
+    from datetime import datetime
+
     query = '''
     query ($name: String) {
-      MediaListCollection(userName: $name, type: ANIME) {
+      MediaListCollection(userName: $name, type: ANIME, status: CURRENT) {
         lists {
           entries {
             media {
               id
-              title { romaji }
-              coverImage { large }
-              genres
+              title {
+                romaji
+              }
+              episodes
               nextAiringEpisode {
                 airingAt
                 episode
               }
+              genres
             }
           }
         }
       }
     }
     '''
-    response = requests.post("https://graphql.anilist.co", json={'query': query, 'variables': {'name': username}})
+
+    variables = {"name": username}
+    url = "https://graphql.anilist.co"
+
     try:
+        response = requests.post(url, json={"query": query, "variables": variables})
         data = response.json()
-    except:
+        entries = []
+        for lst in data["data"]["MediaListCollection"]["lists"]:
+            for entry in lst["entries"]:
+                media = entry["media"]
+                next_ep = media.get("nextAiringEpisode")
+                if next_ep:
+                    entries.append({
+                        "id": media["id"],
+                        "title": media["title"]["romaji"],
+                        "episode": next_ep["episode"],
+                        "airingAt": next_ep["airingAt"],
+                        "genres": media["genres"]
+                    })
+        return entries
+    except Exception as e:
+        print(f"[Erreur AniList] {e}")
         return []
-    if not data.get("data") or not data["data"].get("MediaListCollection"):
-        return []
-    result = []
-    for group in data["data"]["MediaListCollection"]["lists"]:
-        for entry in group["entries"]:
-            media = entry["media"]
-            ep = media.get("nextAiringEpisode")
-            if ep:
-                result.append({
-                    "id": media["id"],
-                    "title": media["title"]["romaji"],
-                    "episode": ep["episode"],
-                    "airingAt": ep["airingAt"],
-                    "image": media["coverImage"]["large"],
-                    "genres": media["genres"]
-                })
-    return result
+
 
 # Commande !prochains en un seul embed
 @bot.command(name="prochains")
