@@ -310,7 +310,7 @@ def get_upcoming_episodes(username):
                     "title": media.get("title", {}).get("romaji", "Inconnu"),
                     "episode": next_ep["episode"],
                     "airingAt": next_ep["airingAt"],
-                    "genres": media.get("genres", [])
+                    "genres": media.get("genres", []),
                     "image": media.get("coverImage", {}).get("extraLarge") 
                 })
 
