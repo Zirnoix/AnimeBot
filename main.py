@@ -1045,21 +1045,15 @@ async def unlink(ctx):
 @bot.command(name="mystats")
 async def mystats(ctx):
     import requests
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
     from io import BytesIO
-
-    GENRE_EMOJIS = {
-        "Action": "🔥", "Adventure": "🧭", "Fantasy": "✨", "Romance": "💖",
-        "Comedy": "😂", "Drama": "🎭", "Slice of Life": "🌸", "Horror": "👻",
-        "Sci-Fi": "🚀", "Sports": "⚽", "Supernatural": "🔮", "Music": "🎵",
-        "Mecha": "🤖", "Mystery": "🕵️", "Ecchi": "😳", "Psychological": "🧠"
-    }
 
     username = get_user_anilist(ctx.author.id)
     if not username:
         await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
         return
 
+    # 🔎 Requête GraphQL
     query = '''
     query ($name: String) {
       User(name: $name) {
@@ -1082,67 +1076,74 @@ async def mystats(ctx):
     }
     '''
     variables = {"name": username}
-    url = "https://graphql.anilist.co"
-
     try:
-        res = requests.post(url, json={"query": query, "variables": variables})
+        res = requests.post("https://graphql.anilist.co", json={"query": query, "variables": variables})
         res.raise_for_status()
         user = res.json()["data"]["User"]
     except:
-        await ctx.send("❌ Impossible de récupérer les données AniList.")
+        await ctx.send("❌ Impossible de récupérer les données de ton profil.")
         return
 
-    # Infos utilisateur
+    stats = user["statistics"]["anime"]
     name = user["name"]
     avatar_url = user["avatar"]["large"]
     banner_url = user["bannerImage"] or "https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-oJxzcFvSTFZg.jpg"
-    stats = user["statistics"]["anime"]
+    favorite_genre = sorted(stats["genres"], key=lambda g: g["count"], reverse=True)[0]["genre"]
     site = user["siteUrl"]
+    days = round(stats["minutesWatched"] / 1440, 1)
 
-    genre_list = stats["genres"]
-    favorite_genre = sorted(genre_list, key=lambda g: g["count"], reverse=True)[0]["genre"] if genre_list else "Inconnu"
-    emoji = GENRE_EMOJIS.get(favorite_genre, "🎬")
+    # 🧩 Emoji genre préféré
+    GENRE_EMOJI_FILES = {
+        "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
+        "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
+        "Sci-Fi": "1f680.png", "Slice of Life": "1f338.png",
+        "Sports": "26bd.png", "Music": "1f3b5.png"
+    }
+    emoji_file = GENRE_EMOJI_FILES.get(favorite_genre)
 
-    # Génération de l’image
+    # 📸 Téléchargement des images
     try:
-        avatar = Image.open(BytesIO(requests.get(avatar_url).content)).resize((128, 128)).convert("RGBA")
         banner = Image.open(BytesIO(requests.get(banner_url).content)).resize((800, 300)).convert("RGBA")
+        avatar = Image.open(BytesIO(requests.get(avatar_url).content)).resize((128, 128)).convert("RGBA")
+        mask = Image.new("L", avatar.size, 0)
+        draw_mask = ImageDraw.Draw(mask)
+        draw_mask.ellipse((0, 0, 128, 128), fill=255)
+        avatar = ImageOps.fit(avatar, mask.size, centering=(0.5, 0.5))
+        avatar.putalpha(mask)
     except:
-        await ctx.send("❌ Impossible de charger les images de profil/banner.")
+        await ctx.send("❌ Impossible de charger les images de profil ou de fond.")
         return
 
+    # 🎨 Composition
     blur = banner.filter(ImageFilter.GaussianBlur(3))
-    overlay = Image.new("RGBA", blur.size, (0, 0, 0, 180))
+    overlay = Image.new("RGBA", blur.size, (0, 0, 0, 170))
     card = Image.alpha_composite(blur, overlay)
     draw = ImageDraw.Draw(card)
 
-    # Polices
-    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-    # Affichage du texte
     draw.text((180, 30), f"{name}", font=font_title, fill="white")
     draw.text((180, 80), f"🎬 Animés vus : {stats['count']}", font=font_text, fill="white")
-    draw.text((180, 110), f"🕒 Temps total : {round(stats['minutesWatched'] / 1440, 1)} jours", font=font_text, fill="white")
+    draw.text((180, 110), f"🕒 Temps total : {days} jours", font=font_text, fill="white")
     draw.text((180, 140), f"⭐ Score moyen : {round(stats['meanScore'], 1)}", font=font_text, fill="white")
-    draw.text((180, 170), f"{emoji} Genre préféré : {favorite_genre}", font=font_text, fill="white")
+    draw.text((180, 170), f"🎭 Genre préféré : {favorite_genre}", font=font_text, fill="white")
     draw.text((180, 220), f"🔗 {site}", font=font_text, fill="white")
 
     card.paste(avatar, (30, 86), avatar)
 
-    # Sauvegarde
+    # 🧩 Coller emoji PNG
+    if emoji_file:
+        try:
+            emoji_img = Image.open(f"Emojis/{emoji_file}").resize((64, 64)).convert("RGBA")
+            card.paste(emoji_img, (700, 30), emoji_img)
+        except Exception as e:
+            print(f"[Erreur emoji mystats] {e}")
+
+    # 💾 Envoi
     path = f"/tmp/{ctx.author.id}_mystats.png"
     card.save(path)
-
-    # Envoi
-    await ctx.send(
-        content=(
-            f"📊 **Statistiques AniList de {name}**\n"
-            f"{emoji} Genre favori : **{favorite_genre}**\n"
-            f"🔗 {site}"
-        ),
-        file=discord.File(path, filename="mystats.png")
-    )
+    await ctx.send(file=discord.File(path, filename="mystats.png"))
 
 # Commande pour voir les stats
 @bot.command(name="stats")
@@ -1250,50 +1251,57 @@ async def next_command(ctx):
     genres = next_ep["genres"]
     image_url = next_ep["image"]
 
-    # 🎨 Création du fond avec blur
+    # 🎨 Création du fond flouté
     try:
         bg_response = requests.get(image_url)
         bg = Image.open(BytesIO(bg_response.content)).resize((800, 300)).convert("RGBA")
     except:
-        bg = Image.new("RGBA", (800, 300), (30, 30, 30, 255))  # fallback
+        bg = Image.new("RGBA", (800, 300), (30, 30, 30, 255))  # fond neutre
     blur = bg.filter(ImageFilter.GaussianBlur(3))
     overlay = Image.new("RGBA", blur.size, (0, 0, 0, 160))
     card = Image.alpha_composite(blur, overlay)
     draw = ImageDraw.Draw(card)
 
-    # ✏️ Polices
+    # ✍️ Polices
     font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-    # 📄 Texte
-    draw.text((40, 30), "🎬 Prochain épisode à venir", font=font_title, fill="white")
+    # 📝 Texte sans emojis Unicode (PIL ne les supporte pas)
+    draw.text((40, 30), "Prochain épisode à venir", font=font_title, fill="white")
     draw.text((40, 90), f"{title} – Épisode {episode}", font=font_text, fill="white")
-    draw.text((40, 130), f"🕒 {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
-    draw.text((40, 170), f"🎭 Genre : {', '.join(genres)}", font=font_text, fill="white")
+    draw.text((40, 130), f"Heure : {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
+    draw.text((40, 170), f"Genre : {', '.join(genres)}", font=font_text, fill="white")
 
-    # 🔥 Collage de l'emoji genre
+    # 🧩 Emojis PNG par genre
     GENRE_EMOJI_FILES = {
         "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
         "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
         "Sci-Fi": "1f680.png", "Slice of Life": "1f338.png",
-        "Sports": "26bd.png", "Music": "1f3b5.png"
+        "Sports": "26bd.png", "Music": "1f3b5.png","Supernatural": "1f47e.png",
+        "Mecha": "1f916.png", "Psychological": "1f52e.png", "Adventure": "1f30d.png",
+        "Thriller": "1f4a5.png", "Ecchi": "1f633.png"
+
     }
 
-    main_genre = genres[0] if genres else "Action"
-    emoji_file = GENRE_EMOJI_FILES.get(main_genre)
+    x_start = 180  # position initiale après le texte "Genre :"
+    y_pos = 170
 
-    if emoji_file:
-        try:
-            emoji_img = Image.open(f"Emojis/{emoji_file}").resize((64, 64)).convert("RGBA")
-            card.paste(emoji_img, (700, 30), emoji_img)
-        except Exception as e:
-            print(f"[Erreur emoji image] {e}")
+    for genre in genres[:3]:  # max 3 genres
+        emoji_file = GENRE_EMOJI_FILES.get(genre)
+        if emoji_file:
+            try:
+                emoji_img = Image.open(f"Emojis/{emoji_file}").resize((28, 28)).convert("RGBA")
+                card.paste(emoji_img, (x_start, y_pos), emoji_img)
+                x_start += 34
+            except Exception as e:
+                print(f"[Emoji {genre}] {e}")
 
-    # 💾 Envoi
+    # 💾 Sauvegarde et envoi
     path = f"/tmp/{ctx.author.id}_next.png"
     card.save(path)
 
     await ctx.send(file=discord.File(path, filename="next.png"))
+
     
 @bot.command(name="monnext")
 async def monnext_card(ctx):
