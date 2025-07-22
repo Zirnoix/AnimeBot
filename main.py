@@ -13,6 +13,26 @@ from io import BytesIO
 import unicodedata
 import matplotlib.pyplot as plt
 
+PREFERENCES_FILE = "/data/preferences.json"
+QUIZ_SCORES_FILE = "/data/quiz_scores.json"
+LINKED_FILE = "/data/linked_users.json"
+LEVELS_FILE = "/data/quiz_levels.json"
+TRACKER_FILE = "/data/anitracker.json"
+CHALLENGES_FILE = "/data/challenges.json"
+WEEKLY_FILE = "/data/weekly.json"
+USER_SETTINGS_FILE = "/data/user_settings.json"
+NOTIFIED_FILE = "/data/notified.json"
+LINKS_FILE = "/data/user_links.json"
+
+for path in [
+    PREFERENCES_FILE, QUIZ_SCORES_FILE, TRACKER_FILE, WEEKLY_FILE,
+    LINKED_FILE, LEVELS_FILE, CHALLENGES_FILE,
+    USER_SETTINGS_FILE, NOTIFIED_FILE, LINKS_FILE
+]:
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump({}, f)
+
 for path in [
     PREFERENCES_FILE, QUIZ_SCORES_FILE, "/data/anitracker.json", "/data/weekly.json",
     "/data/linked_users.json", "/data/quiz_levels.json", "/data/challenges.json",
