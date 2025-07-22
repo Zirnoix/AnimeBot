@@ -1358,38 +1358,37 @@ async def next_command(ctx):
     genres = next_ep["genres"]
     image_url = next_ep["image"]
 
-    # 🖼️ Image de fond 800x240 avec redimensionnement centré
+    # 🖼️ Image centrée floue
     try:
-        bg_response = requests.get(image_url)
-        cover = Image.open(BytesIO(bg_response.content)).convert("RGBA")
+        response = requests.get(image_url)
+        img = Image.open(BytesIO(response.content)).convert("RGBA")
 
-        aspect = cover.width / cover.height
-        new_height = 240
-        new_width = int(aspect * new_height)
-        resized = cover.resize((new_width, new_height))
+        aspect = img.width / img.height
+        target_h = 300
+        target_w = 800
+        resized_w = int(aspect * target_h)
+        img = img.resize((resized_w, target_h))
 
-        # crop centré si trop large
-        if new_width > 800:
-            left = (new_width - 800) // 2
-            resized = resized.crop((left, 0, left + 800, 240))
+        if resized_w > target_w:
+            left = (resized_w - target_w) // 2
+            img = img.crop((left, 0, left + target_w, target_h))
 
-        blur = resized.filter(ImageFilter.GaussianBlur(3))
-        overlay = Image.new("RGBA", (800, 240), (0, 0, 0, 160))
-        card = Image.alpha_composite(blur, overlay)
+        blurred = img.filter(ImageFilter.GaussianBlur(4))
+        overlay = Image.new("RGBA", blurred.size, (0, 0, 0, 160))
+        card = Image.alpha_composite(blurred, overlay)
     except:
-        card = Image.new("RGBA", (800, 240), (30, 30, 30, 255))
+        card = Image.new("RGBA", (800, 300), (30, 30, 30, 255))
 
     draw = ImageDraw.Draw(card)
-    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
+    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-    # 🖋️ Texte
-    draw.text((40, 20), "Prochain épisode à venir", font=font_title, fill="white")
-    draw.text((40, 70), f"{title} – Épisode {episode}", font=font_text, fill="white")
-    draw.text((40, 105), f"Heure : {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
-    draw.text((40, 140), "Genres :", font=font_text, fill="white")
+    draw.text((40, 25), "🎬 Prochain épisode à venir", font=font_title, fill="white")
+    draw.text((40, 75), f"{title} – Épisode {episode}", font=font_text, fill="white")
+    draw.text((40, 110), f"Heure : {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
+    draw.text((40, 150), "Genres :", font=font_text, fill="white")
 
-    # 🎯 Emojis PNG par genre
+    # 🎯 Émojis visuels
     GENRE_EMOJI_FILES = {
         "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
         "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
@@ -1399,20 +1398,20 @@ async def next_command(ctx):
         "Ecchi": "1f633.png"
     }
 
-    x_start = 140
-    y_emoji = 140
+    x_start = 130
+    y_emoji = 150
 
-    for genre in genres[:4]:  # max 4 genres
+    for genre in genres[:4]:
         emoji_file = GENRE_EMOJI_FILES.get(genre)
         text_width = draw.textlength(genre, font=font_text)
 
         if emoji_file:
             try:
                 emoji_img = Image.open(f"Emojis/{emoji_file}").resize((22, 22)).convert("RGBA")
-                card.paste(emoji_img, (x_start, y_emoji), emoji_img)
+                card.paste(emoji_img, (x_start, y_emoji - 2), emoji_img)
                 x_start += 26
-            except Exception as e:
-                print(f"[Emoji {genre}] {e}")
+            except:
+                pass
 
         draw.text((x_start, y_emoji), genre, font=font_text, fill="white")
         x_start += int(text_width) + 24
