@@ -264,29 +264,30 @@ def build_embed(ep, dt):
     embed.set_thumbnail(url=ep["image"])
     return embed
 
-def get_upcoming_episodes(username, status_filter=["CURRENT"]):
+def get_upcoming_episodes(username):
     import requests
+    import json
 
-    status_filter_str = ", ".join(f'"{s}"' for s in status_filter)
-
-    query = f'''
-    query ($name: String) {{
-      MediaListCollection(userName: $name, type: ANIME, status_in: [{status_filter_str}]) {{
-        lists {{
-          entries {{
-            media {{
+    query = '''
+    query ($name: String) {
+      MediaListCollection(userName: $name, type: ANIME) {
+        lists {
+          entries {
+            media {
               id
-              title {{ romaji }}
-              nextAiringEpisode {{
+              title {
+                romaji
+              }
+              nextAiringEpisode {
                 airingAt
                 episode
-              }}
+              }
               genres
-            }}
-          }}
-        }}
-      }}
-    }}
+            }
+          }
+        }
+      }
+    }
     '''
 
     variables = {"name": username}
@@ -316,13 +317,11 @@ def get_upcoming_episodes(username, status_filter=["CURRENT"]):
                     "genres": media.get("genres", [])
                 })
 
-        # 🖨️ Ici ton print de test :
         print(f"🎯 {len(entries)} épisodes trouvés pour {username}", flush=True)
-
         return entries
 
     except Exception as e:
-        print(f"[Erreur AniList] {e}")
+        print(f"[Erreur AniList] {e}", flush=True)
         return []
 
 
