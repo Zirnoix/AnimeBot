@@ -317,7 +317,7 @@ def get_upcoming_episodes(username, status_filter=["CURRENT"]):
                 })
 
         # 🖨️ Ici ton print de test :
-        print(f"🎯 {len(entries)} épisodes trouvés pour {username}")
+        print(f"🎯 {len(entries)} épisodes trouvés pour {username}", flush=True)
 
         return entries
 
