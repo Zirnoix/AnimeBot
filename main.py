@@ -1411,26 +1411,14 @@ async def mon_planning(ctx):
     await ctx.send(embed=embed)
 
 @bot.command(name="monchart")
-async def monchart(ctx):
-    import requests
-    import matplotlib.pyplot as plt
-    from io import BytesIO
-    import os
-
-    # 📌 Emoji par genre
-    GENRE_EMOJIS = {
-        "Action": "🔥", "Adventure": "🧭", "Fantasy": "✨", "Romance": "💖",
-        "Comedy": "😂", "Drama": "🎭", "Slice of Life": "🌸", "Horror": "👻",
-        "Sci-Fi": "🚀", "Sports": "⚽", "Supernatural": "🔮", "Music": "🎵",
-        "Mecha": "🤖", "Mystery": "🕵️", "Ecchi": "😳", "Psychological": "🧠"
-    }
-
-    username = get_user_anilist(ctx.author.id)
+async def monchart(ctx, username: str = None):
+    links = load_links()
     if not username:
-        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
-        return
+        username = links.get(str(ctx.author.id))
+        if not username:
+            await ctx.send("❌ Tu dois lier ton compte AniList avec `!linkanilist <pseudo>`.")
+            return
 
-    # 🔍 Récupération des genres
     query = '''
     query ($name: String) {
       User(name: $name) {
@@ -1445,57 +1433,35 @@ async def monchart(ctx):
       }
     }
     '''
-    variables = {"name": username}
-    url = "https://graphql.anilist.co"
-
-    try:
-        res = requests.post(url, json={"query": query, "variables": variables})
-        res.raise_for_status()
-        data = res.json()["data"]["User"]["statistics"]["anime"]["genres"]
-    except:
+    data = query_anilist(query, {"name": username})
+    if not data:
         await ctx.send("❌ Impossible de récupérer les données AniList.")
         return
 
-    # 📊 Traitement des genres
-    genres = {entry["genre"]: entry["count"] for entry in data}
-    sorted_items = sorted(genres.items(), key=lambda x: x[1], reverse=True)
-    main = sorted_items[:6]
-    other_sum = sum(v for k, v in sorted_items[6:])
-    if other_sum > 0:
-        main.append(("Autres", other_sum))
+    genre_stats = data["data"]["User"]["statistics"]["anime"]["genres"]
+    top_genres = sorted(genre_stats, key=lambda g: g["count"], reverse=True)[:6]
+    total = sum(g["count"] for g in top_genres)
 
-    labels = [k for k, v in main]
-    sizes = [v for k, v in main]
+    def emoji_genre(name):
+        emojis = {
+            "Action": "⚔️", "Fantasy": "🧙", "Romance": "💖", "Comedy": "😂",
+            "Drama": "🎭", "Horror": "👻", "Sci-Fi": "🚀", "Music": "🎵",
+            "Sports": "⚽", "Slice of Life": "🍃", "Psychological": "🧠",
+            "Adventure": "🌍", "Mecha": "🤖", "Supernatural": "🔮",
+            "Ecchi": "😳", "Mystery": "🕵️"
+        }
+        return emojis.get(name, "📺")
 
-    # 🎨 Camembert stylisé
-    colors = plt.cm.viridis(range(0, 256, int(256 / len(sizes))))
-    fig, ax = plt.subplots(figsize=(7, 7), dpi=100)
-    wedges, texts, autotexts = ax.pie(
-        sizes, labels=labels, autopct='%1.1f%%',
-        startangle=140, colors=colors, textprops=dict(color="white")
-    )
-    plt.setp(autotexts, size=12, weight="bold")
-    plt.setp(texts, size=11)
-    ax.set_title(f"Genres préférés de {username}", fontsize=16, fontweight='bold')
+    def bar(p):
+        filled = int(p / 10)
+        return "▰" * filled + "▱" * (10 - filled)
 
-    # 💾 Sauvegarde
-    path = f"/tmp/{ctx.author.id}_mychart.png"
-    plt.savefig(path, transparent=True)
-    plt.close()
+    lines = [f"📊 Genres les plus regardés de **{username}** :\n"]
+    for g in top_genres:
+        percent = int((g["count"] / total) * 100)
+        lines.append(f"{emoji_genre(g['genre'])} {g['genre']:<13} {bar(percent)}  {percent}%")
 
-    # 🎯 Emoji line
-    top_emojis = [GENRE_EMOJIS.get(k, "🎬") for k, _ in sorted_items[:6]]
-    emoji_line = "".join(top_emojis)
-
-    # 📨 Envoi
-    await ctx.send(
-        content=(
-            f"📊 **Genres préférés de {username}**\n"
-            f"{emoji_line}\n"
-            f"Voici ton graphique personnalisé !"
-        ),
-        file=discord.File(path, filename="mychart.png")
-    )
+    await ctx.send("\n".join(lines))
 
 @bot.command(name="uptime")
 async def uptime(ctx):
