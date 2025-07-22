@@ -1044,15 +1044,105 @@ async def unlink(ctx):
 
 @bot.command(name="mystats")
 async def mystats(ctx):
-    data = load_links()
-    user_id = str(ctx.author.id)
-    pseudo = data.get(user_id)
+    import requests
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    from io import BytesIO
 
-    if not pseudo:
-        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList.\nUtilise `!linkanilist <pseudo>` pour le faire.")
+    GENRE_EMOJIS = {
+        "Action": "🔥", "Adventure": "🧭", "Fantasy": "✨", "Romance": "💖",
+        "Comedy": "😂", "Drama": "🎭", "Slice of Life": "🌸", "Horror": "👻",
+        "Sci-Fi": "🚀", "Sports": "⚽", "Supernatural": "🔮", "Music": "🎵",
+        "Mecha": "🤖", "Mystery": "🕵️", "Ecchi": "😳", "Psychological": "🧠"
+    }
+
+    username = get_user_anilist(ctx.author.id)
+    if not username:
+        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
         return
 
-    await stats(ctx, pseudo)
+    query = '''
+    query ($name: String) {
+      User(name: $name) {
+        name
+        avatar { large }
+        bannerImage
+        siteUrl
+        statistics {
+          anime {
+            count
+            minutesWatched
+            meanScore
+            genres {
+              genre
+              count
+            }
+          }
+        }
+      }
+    }
+    '''
+    variables = {"name": username}
+    url = "https://graphql.anilist.co"
+
+    try:
+        res = requests.post(url, json={"query": query, "variables": variables})
+        res.raise_for_status()
+        user = res.json()["data"]["User"]
+    except:
+        await ctx.send("❌ Impossible de récupérer les données AniList.")
+        return
+
+    # Infos utilisateur
+    name = user["name"]
+    avatar_url = user["avatar"]["large"]
+    banner_url = user["bannerImage"] or "https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-oJxzcFvSTFZg.jpg"
+    stats = user["statistics"]["anime"]
+    site = user["siteUrl"]
+
+    genre_list = stats["genres"]
+    favorite_genre = sorted(genre_list, key=lambda g: g["count"], reverse=True)[0]["genre"] if genre_list else "Inconnu"
+    emoji = GENRE_EMOJIS.get(favorite_genre, "🎬")
+
+    # Génération de l’image
+    try:
+        avatar = Image.open(BytesIO(requests.get(avatar_url).content)).resize((128, 128)).convert("RGBA")
+        banner = Image.open(BytesIO(requests.get(banner_url).content)).resize((800, 300)).convert("RGBA")
+    except:
+        await ctx.send("❌ Impossible de charger les images de profil/banner.")
+        return
+
+    blur = banner.filter(ImageFilter.GaussianBlur(3))
+    overlay = Image.new("RGBA", blur.size, (0, 0, 0, 180))
+    card = Image.alpha_composite(blur, overlay)
+    draw = ImageDraw.Draw(card)
+
+    # Polices
+    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+    font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+
+    # Affichage du texte
+    draw.text((180, 30), f"{name}", font=font_title, fill="white")
+    draw.text((180, 80), f"🎬 Animés vus : {stats['count']}", font=font_text, fill="white")
+    draw.text((180, 110), f"🕒 Temps total : {round(stats['minutesWatched'] / 1440, 1)} jours", font=font_text, fill="white")
+    draw.text((180, 140), f"⭐ Score moyen : {round(stats['meanScore'], 1)}", font=font_text, fill="white")
+    draw.text((180, 170), f"{emoji} Genre préféré : {favorite_genre}", font=font_text, fill="white")
+    draw.text((180, 220), f"🔗 {site}", font=font_text, fill="white")
+
+    card.paste(avatar, (30, 86), avatar)
+
+    # Sauvegarde
+    path = f"/tmp/{ctx.author.id}_mystats.png"
+    card.save(path)
+
+    # Envoi
+    await ctx.send(
+        content=(
+            f"📊 **Statistiques AniList de {name}**\n"
+            f"{emoji} Genre favori : **{favorite_genre}**\n"
+            f"🔗 {site}"
+        ),
+        file=discord.File(path, filename="mystats.png")
+    )
 
 # Commande pour voir les stats
 @bot.command(name="stats")
@@ -1155,7 +1245,6 @@ async def next_card(ctx):
 
     next_ep = min(episodes, key=lambda e: e["airingAt"])
 
-    # 🔽 Données
     dt = datetime.fromtimestamp(next_ep["airingAt"], tz=TIMEZONE)
     date_text = dt.strftime("%A %d %B %Y à %H:%M")
     title = next_ep["title"]
@@ -1164,7 +1253,7 @@ async def next_card(ctx):
     image_url = next_ep["image"]
 
     try:
-        # 🖼️ Image de fond + flou
+        # 🖼️ Création de la carte
         response = requests.get(image_url)
         bg = Image.open(BytesIO(response.content)).resize((800, 300)).convert("RGBA")
         blurred = bg.filter(ImageFilter.GaussianBlur(4))
@@ -1172,27 +1261,39 @@ async def next_card(ctx):
         card = Image.alpha_composite(blurred, overlay)
         draw = ImageDraw.Draw(card)
 
-        # ✍️ Textes
-        font_title = ImageFont.truetype("fonts/DejaVuSans-Bold.ttf", 32)
-        font_small = ImageFont.truetype("fonts/DejaVuSans.ttf", 20)
+        # 📚 Polices
+        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
+        # 📝 Texte sans emoji dans l’image
         draw.text((30, 30), f"{title}", font=font_title, fill="white")
-        draw.text((30, 90), f"🎬 Épisode {episode}", font=font_small, fill="white")
-        draw.text((30, 130), f"📅 {date_text}", font=font_small, fill="white")
-        draw.text((30, 170), f"🎭 Genres : {genres}", font=font_small, fill="white")
+        draw.text((30, 90), f"Épisode {episode}", font=font_small, fill="white")
+        draw.text((30, 130), f"Sortie : {date_text}", font=font_small, fill="white")
+        draw.text((30, 170), f"Genres : {genres}", font=font_small, fill="white")
 
+        # 💾 Sauvegarde et envoi
         path = f"/tmp/{ctx.author.id}_nextcard.png"
         card.save(path)
 
-        with open(path, "rb") as f:
-            await ctx.send(file=discord.File(f, filename="nextcard.png"))
+        await ctx.send(
+            content=(
+                f"🎬 **{title}** – Épisode {episode}\n"
+                f"📅 Sortie prévue : **{date_text}**\n"
+                f"🎭 Genres : _{genres}_"
+            ),
+            file=discord.File(path, filename="nextcard.png")
+        )
 
     except Exception as e:
         print(f"[Carte Next] Erreur : {e}")
         await ctx.send("❌ Impossible de générer l’image du prochain épisode.")
 
 @bot.command(name="monnext")
-async def mon_next(ctx):
+async def monnext_card(ctx):
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    import requests
+    from io import BytesIO
+
     username = get_user_anilist(ctx.author.id)
     if not username:
         await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
@@ -1205,19 +1306,48 @@ async def mon_next(ctx):
 
     next_ep = min(episodes, key=lambda e: e["airingAt"])
     dt = datetime.fromtimestamp(next_ep["airingAt"], tz=TIMEZONE)
-    emoji = genre_emoji(next_ep["genres"])
+    date_text = dt.strftime("%A %d %B %Y à %H:%M")
 
-    embed = discord.Embed(
-        title=f"🎬 Prochain épisode pour {username}",
-        description=f"**{next_ep['title']}** — Épisode {next_ep['episode']}",
-        color=discord.Color.blue()
-    )
-    embed.add_field(name="🕒 Horaire", value=dt.strftime("%A %d %B à %H:%M"), inline=False)
-    embed.add_field(name="🎭 Genre", value=", ".join(next_ep["genres"]), inline=False)
-    embed.set_thumbnail(url=next_ep["image"])
-    embed.set_footer(text="AnimeBot – AniList perso ❤️")
+    title = next_ep["title"]
+    episode = next_ep["episode"]
+    genres = ", ".join(next_ep["genres"])
+    image_url = next_ep["image"]
 
-    await ctx.send(embed=embed)
+    try:
+        # 🖼️ Création de la carte
+        response = requests.get(image_url)
+        bg = Image.open(BytesIO(response.content)).resize((800, 300)).convert("RGBA")
+        blurred = bg.filter(ImageFilter.GaussianBlur(4))
+        overlay = Image.new("RGBA", blurred.size, (0, 0, 0, 180))
+        card = Image.alpha_composite(blurred, overlay)
+        draw = ImageDraw.Draw(card)
+
+        # ✍️ Polices
+        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+
+        draw.text((30, 30), f"{title}", font=font_title, fill="white")
+        draw.text((30, 90), f"Épisode {episode}", font=font_small, fill="white")
+        draw.text((30, 130), f"Sortie : {date_text}", font=font_small, fill="white")
+        draw.text((30, 170), f"Genres : {genres}", font=font_small, fill="white")
+
+        # 💾 Sauvegarde et envoi
+        path = f"/tmp/{ctx.author.id}_monnextcard.png"
+        card.save(path)
+
+        await ctx.send(
+            content=(
+                f"🎬 **{title}** – Épisode {episode}\n"
+                f"📅 Sortie prévue : **{date_text}**\n"
+                f"🎭 Genres : _{genres}_\n"
+                f"👤 Liste de **{username}**"
+            ),
+            file=discord.File(path, filename="monnextcard.png")
+        )
+
+    except Exception as e:
+        print(f"[Carte MonNext] Erreur : {e}")
+        await ctx.send("❌ Impossible de générer la carte personnalisée.")
 
 @bot.command(name="monplanning")
 async def mon_planning(ctx):
@@ -1261,12 +1391,26 @@ async def mon_planning(ctx):
     await ctx.send(embed=embed)
 
 @bot.command(name="monchart")
-async def mon_chart(ctx):
+async def monchart(ctx):
+    import requests
+    import matplotlib.pyplot as plt
+    from io import BytesIO
+    import os
+
+    # 📌 Emoji par genre
+    GENRE_EMOJIS = {
+        "Action": "🔥", "Adventure": "🧭", "Fantasy": "✨", "Romance": "💖",
+        "Comedy": "😂", "Drama": "🎭", "Slice of Life": "🌸", "Horror": "👻",
+        "Sci-Fi": "🚀", "Sports": "⚽", "Supernatural": "🔮", "Music": "🎵",
+        "Mecha": "🤖", "Mystery": "🕵️", "Ecchi": "😳", "Psychological": "🧠"
+    }
+
     username = get_user_anilist(ctx.author.id)
     if not username:
-        await ctx.send("❌ Tu dois lier ton compte avec `!linkanilist`.")
+        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
         return
 
+    # 🔍 Récupération des genres
     query = '''
     query ($name: String) {
       User(name: $name) {
@@ -1286,28 +1430,52 @@ async def mon_chart(ctx):
 
     try:
         res = requests.post(url, json={"query": query, "variables": variables})
-        data = res.json()
-        genres = data["data"]["User"]["statistics"]["anime"]["genres"]
-        genres = sorted(genres, key=lambda g: g["count"], reverse=True)[:8]
+        res.raise_for_status()
+        data = res.json()["data"]["User"]["statistics"]["anime"]["genres"]
+    except:
+        await ctx.send("❌ Impossible de récupérer les données AniList.")
+        return
 
-        labels = [g["genre"] for g in genres]
-        sizes = [g["count"] for g in genres]
+    # 📊 Traitement des genres
+    genres = {entry["genre"]: entry["count"] for entry in data}
+    sorted_items = sorted(genres.items(), key=lambda x: x[1], reverse=True)
+    main = sorted_items[:6]
+    other_sum = sum(v for k, v in sorted_items[6:])
+    if other_sum > 0:
+        main.append(("Autres", other_sum))
 
-        fig, ax = plt.subplots()
-        ax.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=140)
-        ax.axis("equal")
-        plt.title(f"Répartition des genres — {username}")
+    labels = [k for k, v in main]
+    sizes = [v for k, v in main]
 
-        img_path = f"/tmp/{username}_chart.png"
-        plt.savefig(img_path)
-        plt.close()
+    # 🎨 Camembert stylisé
+    colors = plt.cm.viridis(range(0, 256, int(256 / len(sizes))))
+    fig, ax = plt.subplots(figsize=(7, 7), dpi=100)
+    wedges, texts, autotexts = ax.pie(
+        sizes, labels=labels, autopct='%1.1f%%',
+        startangle=140, colors=colors, textprops=dict(color="white")
+    )
+    plt.setp(autotexts, size=12, weight="bold")
+    plt.setp(texts, size=11)
+    ax.set_title(f"Genres préférés de {username}", fontsize=16, fontweight='bold')
 
-        with open(img_path, "rb") as f:
-            await ctx.send(file=discord.File(f, filename="chart.png"))
+    # 💾 Sauvegarde
+    path = f"/tmp/{ctx.author.id}_mychart.png"
+    plt.savefig(path, transparent=True)
+    plt.close()
 
-    except Exception as e:
-        await ctx.send("❌ Erreur lors de la génération du graphique.")
-        print(f"[monchart] {e}")
+    # 🎯 Emoji line
+    top_emojis = [GENRE_EMOJIS.get(k, "🎬") for k, _ in sorted_items[:6]]
+    emoji_line = "".join(top_emojis)
+
+    # 📨 Envoi
+    await ctx.send(
+        content=(
+            f"📊 **Genres préférés de {username}**\n"
+            f"{emoji_line}\n"
+            f"Voici ton graphique personnalisé !"
+        ),
+        file=discord.File(path, filename="mychart.png")
+    )
 
 @bot.command(name="uptime")
 async def uptime(ctx):
@@ -1567,65 +1735,52 @@ async def help_command(ctx):
 
     pages = [
         {
-            "title": "📅 Épisodes & Planning",
+            "title": "📅 Épisodes & Planning + 🔔 Notifications",
             "fields": [
-                ("`!next`", "Affiche le prochain épisode à sortir dans ta liste."),
-                ("`!planning` / `!monplanning`", "Liste tous les épisodes à venir cette semaine."),
-                ("`!prochains <genre>`", "Filtre les épisodes à venir selon un genre."),
-                ("`!planningvisuel`", "Affiche un planning visuel de la semaine."),
-            ]
-        },
-        {
-            "title": "🎮 Quiz & Niveaux",
-            "fields": [
-                ("`!animequiz`", "Réponds à une question pour deviner l’anime."),
-                ("`!animebattle @ami`", "Affronte un ami sur 3 questions anime."),
-                ("`!quiztop`", "Classement des meilleurs joueurs au quiz."),
-                ("`!myrank`", "Affiche ton niveau et XP obtenus."),
-            ]
-        },
-        {
-            "title": "🏆 Défis & Challenges",
-            "fields": [
-                ("`!anichallenge`", "Propose un anime à regarder et noter."),
-                ("`!challenge complete <note>`", "Indique que tu as fini ton défi personnel."),
-                ("`!weekly`", "Reçoit un défi hebdomadaire original."),
-                ("`!weekly complete`", "Indique que tu as terminé ton défi de la semaine."),
-            ]
-        },
-        {
-            "title": "📊 Stats & Profils",
-            "fields": [
-                ("`!linkanilist <pseudo>`", "Lie ton compte AniList au bot."),
-                ("`!unlink`", "Dissocie ton compte AniList."),
-                ("`!mystats`", "Affiche ton profil AniList de façon stylisée."),
-                ("`!stats <pseudo>`", "Affiche les stats d’un autre utilisateur."),
-            ]
-        },
-        {
-            "title": "📈 Comparaison & Genres",
-            "fields": [
-                ("`!duelstats @ami`", "Compare ton profil AniList avec un ami."),
-                ("`!monchart`", "Affiche un graphique des genres que tu regardes."),
-                ("`!classementgenre <genre>`", "Classement de ceux qui regardent le plus ce genre."),
-            ]
-        },
-        {
-            "title": "🔔 Notifications & Rappels",
-            "fields": [
+                ("`!next` / `!monnext`", "Prochain épisode dans ta liste ou celle d'un membre."),
+                ("`!planning` / `!monplanning`", "Planning complet de la semaine."),
+                ("`!prochains <genre>`", "Épisodes à venir filtrés par genre."),
+                ("`!planningvisuel`", "Affiche une version visuelle du planning."),
                 ("`!reminder`", "Active ou désactive les rappels quotidiens."),
-                ("`!setalert HH:MM`", "Choisis l’heure de ton rappel."),
-                ("`!anitracker <titre>`", "Suis un anime pour recevoir les DM quand un épisode sort."),
-                ("`!anitracker list` / `remove <titre>`", "Liste ou retire un anime suivi."),
+                ("`!setalert HH:MM`", "Définit l’heure de ton résumé automatique."),
+                ("`!anitracker <titre>`", "Suis un anime et reçois une alerte DM."),
+                ("`!anitracker list` / `remove <titre>`", "Voir ou retirer tes suivis.")
             ]
         },
         {
-            "title": "🛠️ Outils & Utilitaires",
+            "title": "🎮 Quiz & Niveaux + 🏆 Challenges",
             "fields": [
-                ("`!uptime`", "Affiche depuis combien de temps le bot est actif."),
-                ("`!setchannel`", "Définit ce salon comme canal de notifications (admin uniquement)."),
-                ("`!topanime` / `!seasonal`", "Affiche les meilleurs animes de la saison."),
-                ("`!search <titre>`", "Recherche un anime sur AniList."),
+                ("`!animequiz`", "Devine l’anime à partir d’une description."),
+                ("`!animebattle @ami`", "Affronte un ami en duel de culture anime."),
+                ("`!quiztop`", "Classement des meilleurs au quiz."),
+                ("`!myrank`", "Affiche ton niveau, XP et ton titre."),
+                ("`!anichallenge`", "Reçois un anime à regarder et note-le."),
+                ("`!challenge complete <note>`", "Indique que tu as terminé ton défi."),
+                ("`!weekly`", "Un nouveau défi chaque semaine."),
+                ("`!weekly complete`", "Valide ton défi hebdomadaire.")
+            ]
+        },
+        {
+            "title": "📊 Stats & Profils + 🎯 Comparaison",
+            "fields": [
+                ("`!linkanilist <pseudo>`", "Lier ton compte AniList au bot."),
+                ("`!unlink`", "Supprimer le lien avec ton compte AniList."),
+                ("`!mystats`", "Carte de profil stylisée avec tes stats."),
+                ("`!stats <pseudo>`", "Voir les stats d’un autre utilisateur."),
+                ("`!monchart`", "Graphique des genres que tu regardes."),
+                ("`!duelstats @ami`", "Compare ton profil AniList à un ami."),
+                ("`!classementgenre <genre>`", "Classement des passionnés par genre.")
+            ]
+        },
+        {
+            "title": "🛠️ Utilitaires & Recherche",
+            "fields": [
+                ("`!uptime`", "Depuis combien de temps le bot est actif."),
+                ("`!setchannel`", "Définit ce salon comme canal des notifications."),
+                ("`!topanime`", "Top des animés les mieux notés."),
+                ("`!seasonal`", "Top des animés en cours cette saison."),
+                ("`!search <titre>`", "Recherche un anime via AniList."),
+                ("`!help`", "Affiche cette aide interactive.")
             ]
         }
     ]
