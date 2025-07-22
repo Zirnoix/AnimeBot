@@ -264,31 +264,32 @@ def build_embed(ep, dt):
     embed.set_thumbnail(url=ep["image"])
     return embed
 
-def get_upcoming_episodes(username):
+def get_upcoming_episodes(username, status_filter=["CURRENT"]):
     import requests
-    from datetime import datetime
 
-    query = '''
-    query ($name: String) {
-      MediaListCollection(userName: $name, type: ANIME, status: CURRENT) {
-        lists {
-          entries {
-            media {
+    status_filter_str = ", ".join(f'"{s}"' for s in status_filter)
+
+    query = f'''
+    query ($name: String) {{
+      MediaListCollection(userName: $name, type: ANIME, status_in: [{status_filter_str}]) {{
+        lists {{
+          entries {{
+            media {{
               id
-              title {
+              title {{
                 romaji
-              }
+              }}
               episodes
-              nextAiringEpisode {
+              nextAiringEpisode {{
                 airingAt
                 episode
-              }
+              }}
               genres
-            }
-          }
-        }
-      }
-    }
+            }}
+          }}
+        }}
+      }}
+    }}
     '''
 
     variables = {"name": username}
