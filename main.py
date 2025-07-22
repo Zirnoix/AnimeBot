@@ -1274,7 +1274,7 @@ async def next_command(ctx):
 
     if emoji_file:
         try:
-            emoji_img = Image.open(f"emojis/{emoji_file}").resize((64, 64)).convert("RGBA")
+            emoji_img = Image.open(f"Emojis/{emoji_file}").resize((64, 64)).convert("RGBA")
             card.paste(emoji_img, (700, 30), emoji_img)
         except Exception as e:
             print(f"[Erreur emoji] {e}")
