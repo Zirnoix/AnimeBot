@@ -1339,16 +1339,21 @@ async def stats(ctx, username: str):
         await ctx.send(file=discord.File(f, filename=f"{username}_stats.png"))
 
 # Commandes supplémentaires
-@bot.command(name="next")
-async def next_command(ctx):
+@bot.command(name="monnext")
+async def monnext(ctx):
     import requests
     from PIL import Image, ImageDraw, ImageFont, ImageFilter
     from io import BytesIO
     from datetime import datetime
 
-    episodes = get_upcoming_episodes(ANILIST_USERNAME)
+    username = get_user_anilist(ctx.author.id)
+    if not username:
+        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
+        return
+
+    episodes = get_upcoming_episodes(username)
     if not episodes:
-        await ctx.send("📭 Aucun épisode à venir trouvé dans ta liste.")
+        await ctx.send("📭 Aucun épisode à venir dans ta liste.")
         return
 
     next_ep = min(episodes, key=lambda e: e["airingAt"])
@@ -1358,37 +1363,34 @@ async def next_command(ctx):
     genres = next_ep["genres"]
     image_url = next_ep["image"]
 
-    # 🖼️ Image centrée floue
+    # 🖼️ Chargement image et fallback
     try:
         response = requests.get(image_url)
-        img = Image.open(BytesIO(response.content)).convert("RGBA")
+        base_img = Image.open(BytesIO(response.content)).convert("RGBA")
 
-        aspect = img.width / img.height
-        target_h = 300
-        target_w = 800
-        resized_w = int(aspect * target_h)
-        img = img.resize((resized_w, target_h))
+        # Resize proportionnel en gardant le ratio
+        base_img.thumbnail((1000, 300), Image.Resampling.LANCZOS)
+        bg = Image.new("RGBA", (800, 300), (0, 0, 0, 255))
+        x = (800 - base_img.width) // 2
+        y = (300 - base_img.height) // 2
+        bg.paste(base_img, (x, y))
 
-        if resized_w > target_w:
-            left = (resized_w - target_w) // 2
-            img = img.crop((left, 0, left + target_w, target_h))
-
-        blurred = img.filter(ImageFilter.GaussianBlur(4))
-        overlay = Image.new("RGBA", blurred.size, (0, 0, 0, 160))
+        blurred = bg.filter(ImageFilter.GaussianBlur(3))
+        overlay = Image.new("RGBA", (800, 300), (0, 0, 0, 160))
         card = Image.alpha_composite(blurred, overlay)
     except:
-        card = Image.new("RGBA", (800, 300), (30, 30, 30, 255))
+        card = Image.new("RGBA", (800, 300), (20, 20, 20, 255))
 
     draw = ImageDraw.Draw(card)
     font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-    draw.text((40, 25), "🎬 Prochain épisode à venir", font=font_title, fill="white")
+    draw.text((40, 25), "🎬 Ton prochain épisode à venir", font=font_title, fill="white")
     draw.text((40, 75), f"{title} – Épisode {episode}", font=font_text, fill="white")
     draw.text((40, 110), f"Heure : {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
     draw.text((40, 150), "Genres :", font=font_text, fill="white")
 
-    # 🎯 Émojis visuels
+    # 🎯 Émojis de genres
     GENRE_EMOJI_FILES = {
         "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
         "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
@@ -1416,16 +1418,17 @@ async def next_command(ctx):
         draw.text((x_start, y_emoji), genre, font=font_text, fill="white")
         x_start += int(text_width) + 24
 
-    path = f"/tmp/{ctx.author.id}_next.png"
+    path = f"/tmp/{ctx.author.id}_monnext.png"
     card.save(path)
-    await ctx.send(file=discord.File(path, filename="next.png"))
+    await ctx.send(file=discord.File(path, filename="monnext.png"))
 
     
 @bot.command(name="monnext")
-async def monnext_card(ctx):
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+async def monnext(ctx):
     import requests
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
     from io import BytesIO
+    from datetime import datetime
 
     username = get_user_anilist(ctx.author.id)
     if not username:
@@ -1434,53 +1437,74 @@ async def monnext_card(ctx):
 
     episodes = get_upcoming_episodes(username)
     if not episodes:
-        await ctx.send(f"📭 Aucun épisode à venir trouvé pour **{username}**.")
+        await ctx.send("📭 Aucun épisode à venir dans ta liste.")
         return
 
     next_ep = min(episodes, key=lambda e: e["airingAt"])
     dt = datetime.fromtimestamp(next_ep["airingAt"], tz=TIMEZONE)
-    date_text = dt.strftime("%A %d %B %Y à %H:%M")
-
     title = next_ep["title"]
     episode = next_ep["episode"]
-    genres = ", ".join(next_ep["genres"])
+    genres = next_ep["genres"]
     image_url = next_ep["image"]
 
+    # 🖼️ Chargement image et fallback
     try:
-        # 🖼️ Création de la carte
         response = requests.get(image_url)
-        bg = Image.open(BytesIO(response.content)).resize((800, 300)).convert("RGBA")
-        blurred = bg.filter(ImageFilter.GaussianBlur(4))
-        overlay = Image.new("RGBA", blurred.size, (0, 0, 0, 180))
+        base_img = Image.open(BytesIO(response.content)).convert("RGBA")
+
+        # Resize proportionnel en gardant le ratio
+        base_img.thumbnail((1000, 300), Image.Resampling.LANCZOS)
+        bg = Image.new("RGBA", (800, 300), (0, 0, 0, 255))
+        x = (800 - base_img.width) // 2
+        y = (300 - base_img.height) // 2
+        bg.paste(base_img, (x, y))
+
+        blurred = bg.filter(ImageFilter.GaussianBlur(3))
+        overlay = Image.new("RGBA", (800, 300), (0, 0, 0, 160))
         card = Image.alpha_composite(blurred, overlay)
-        draw = ImageDraw.Draw(card)
+    except:
+        card = Image.new("RGBA", (800, 300), (20, 20, 20, 255))
 
-        # ✍️ Polices
-        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+    draw = ImageDraw.Draw(card)
+    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+    font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-        draw.text((30, 30), f"{title}", font=font_title, fill="white")
-        draw.text((30, 90), f"Épisode {episode}", font=font_small, fill="white")
-        draw.text((30, 130), f"Sortie : {date_text}", font=font_small, fill="white")
-        draw.text((30, 170), f"Genres : {genres}", font=font_small, fill="white")
+    draw.text((40, 25), "🎬 Ton prochain épisode à venir", font=font_title, fill="white")
+    draw.text((40, 75), f"{title} – Épisode {episode}", font=font_text, fill="white")
+    draw.text((40, 110), f"Heure : {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
+    draw.text((40, 150), "Genres :", font=font_text, fill="white")
 
-        # 💾 Sauvegarde et envoi
-        path = f"/tmp/{ctx.author.id}_monnextcard.png"
-        card.save(path)
+    # 🎯 Émojis de genres
+    GENRE_EMOJI_FILES = {
+        "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
+        "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
+        "Sci-Fi": "1f680.png", "Slice of Life": "1f338.png", "Sports": "26bd.png",
+        "Music": "1f3b5.png", "Supernatural": "1f47e.png", "Mecha": "1f916.png",
+        "Psychological": "1f52e.png", "Adventure": "1f30d.png", "Thriller": "1f4a5.png",
+        "Ecchi": "1f633.png"
+    }
 
-        await ctx.send(
-            content=(
-                f"🎬 **{title}** – Épisode {episode}\n"
-                f"📅 Sortie prévue : **{date_text}**\n"
-                f"🎭 Genres : _{genres}_\n"
-                f"👤 Liste de **{username}**"
-            ),
-            file=discord.File(path, filename="monnextcard.png")
-        )
+    x_start = 130
+    y_emoji = 150
 
-    except Exception as e:
-        print(f"[Carte MonNext] Erreur : {e}")
-        await ctx.send("❌ Impossible de générer la carte personnalisée.")
+    for genre in genres[:4]:
+        emoji_file = GENRE_EMOJI_FILES.get(genre)
+        text_width = draw.textlength(genre, font=font_text)
+
+        if emoji_file:
+            try:
+                emoji_img = Image.open(f"Emojis/{emoji_file}").resize((22, 22)).convert("RGBA")
+                card.paste(emoji_img, (x_start, y_emoji - 2), emoji_img)
+                x_start += 26
+            except:
+                pass
+
+        draw.text((x_start, y_emoji), genre, font=font_text, fill="white")
+        x_start += int(text_width) + 24
+
+    path = f"/tmp/{ctx.author.id}_monnext.png"
+    card.save(path)
+    await ctx.send(file=discord.File(path, filename="monnext.png"))
 
 @bot.command(name="monplanning")
 async def mon_planning(ctx):
