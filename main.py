@@ -399,34 +399,6 @@ async def prochains(ctx, *args):
         pages[0].title = f"📅 Prochains épisodes — Page 1/{len(pages)}"
         await ctx.send(embed=pages[0], view=Paginator())
 
-@bot.command(name="monplanning")
-async def monplanning(ctx):
-    username = get_user_anilist(ctx.author.id)
-    if not username:
-        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
-        return
-
-    episodes = get_upcoming_episodes(username)
-    if not episodes:
-        await ctx.send("📭 Aucun épisode prévu cette semaine pour ta liste AniList.")
-        return
-
-    embed = discord.Embed(
-        title=f"📅 Planning perso – {username}",
-        description="Voici les épisodes à venir dans ta watchlist AniList",
-        color=discord.Color.blue()
-    )
-
-    for ep in sorted(episodes, key=lambda e: e['airingAt']):
-        date = datetime.fromtimestamp(ep["airingAt"], tz=TIMEZONE).strftime("%A %d %B — %H:%M")
-        embed.add_field(
-            name=f"{ep['title']} – Épisode {ep['episode']}",
-            value=f"🕒 {date}",
-            inline=False
-        )
-
-    await ctx.send(embed=embed)
-
 @bot.command(name="weekly")
 async def weekly(ctx, sub=None):
     user_id = str(ctx.author.id)
