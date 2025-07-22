@@ -276,10 +276,7 @@ def get_upcoming_episodes(username, status_filter=["CURRENT"]):
           entries {{
             media {{
               id
-              title {{
-                romaji
-              }}
-              episodes
+              title {{ romaji }}
               nextAiringEpisode {{
                 airingAt
                 episode
@@ -297,24 +294,37 @@ def get_upcoming_episodes(username, status_filter=["CURRENT"]):
 
     try:
         response = requests.post(url, json={"query": query, "variables": variables})
+        response.raise_for_status()
         data = response.json()
+
         entries = []
         for lst in data["data"]["MediaListCollection"]["lists"]:
             for entry in lst["entries"]:
-                media = entry["media"]
+                media = entry.get("media")
+                if not media:
+                    continue
+
                 next_ep = media.get("nextAiringEpisode")
-                if next_ep:
-                    entries.append({
-                        "id": media["id"],
-                        "title": media["title"]["romaji"],
-                        "episode": next_ep["episode"],
-                        "airingAt": next_ep["airingAt"],
-                        "genres": media["genres"]
-                    })
+                if not next_ep or not next_ep.get("airingAt") or not next_ep.get("episode"):
+                    continue
+
+                entries.append({
+                    "id": media.get("id"),
+                    "title": media.get("title", {}).get("romaji", "Inconnu"),
+                    "episode": next_ep["episode"],
+                    "airingAt": next_ep["airingAt"],
+                    "genres": media.get("genres", [])
+                })
+
+        # 🖨️ Ici ton print de test :
+        print(f"🎯 {len(entries)} épisodes trouvés pour {username}")
+
         return entries
+
     except Exception as e:
         print(f"[Erreur AniList] {e}")
         return []
+
 
 
 # Commande !prochains en un seul embed
