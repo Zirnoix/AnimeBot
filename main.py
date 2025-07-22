@@ -1232,9 +1232,10 @@ async def stats(ctx, username: str):
 
 # Commandes supplémentaires
 @bot.command(name="next")
-async def next_card(ctx):
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+async def next_command(ctx):
     import requests
+    from PIL import Image, ImageDraw, ImageFont
+    from datetime import datetime
     from io import BytesIO
 
     episodes = get_upcoming_episodes(ANILIST_USERNAME)
@@ -1244,50 +1245,46 @@ async def next_card(ctx):
         return
 
     next_ep = min(episodes, key=lambda e: e["airingAt"])
-
     dt = datetime.fromtimestamp(next_ep["airingAt"], tz=TIMEZONE)
-    date_text = dt.strftime("%A %d %B %Y à %H:%M")
     title = next_ep["title"]
     episode = next_ep["episode"]
-    genres = ", ".join(next_ep["genres"])
-    image_url = next_ep["image"]
+    genres = next_ep["genres"]
 
-    try:
-        # 🖼️ Création de la carte
-        response = requests.get(image_url)
-        bg = Image.open(BytesIO(response.content)).resize((800, 300)).convert("RGBA")
-        blurred = bg.filter(ImageFilter.GaussianBlur(4))
-        overlay = Image.new("RGBA", blurred.size, (0, 0, 0, 180))
-        card = Image.alpha_composite(blurred, overlay)
-        draw = ImageDraw.Draw(card)
+    # Création de l’image
+    card = Image.new("RGBA", (800, 300), (30, 30, 30, 255))
+    draw = ImageDraw.Draw(card)
+    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+    font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-        # 📚 Polices
-        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+    draw.text((40, 30), "🎬 Prochain épisode", font=font_title, fill="white")
+    draw.text((40, 90), f"{title} – Épisode {episode}", font=font_text, fill="white")
+    draw.text((40, 130), f"🕒 {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
+    draw.text((40, 170), f"🎭 Genre : {', '.join(genres)}", font=font_text, fill="white")
 
-        # 📝 Texte sans emoji dans l’image
-        draw.text((30, 30), f"{title}", font=font_title, fill="white")
-        draw.text((30, 90), f"Épisode {episode}", font=font_small, fill="white")
-        draw.text((30, 130), f"Sortie : {date_text}", font=font_small, fill="white")
-        draw.text((30, 170), f"Genres : {genres}", font=font_small, fill="white")
+    # 🧩 Emoji PNG par genre principal
+    GENRE_EMOJI_FILES = {
+        "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
+        "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
+        "Sci-Fi": "1f680.png", "Slice of Life": "1f338.png",
+        "Sports": "26bd.png", "Music": "1f3b5.png"
+    }
 
-        # 💾 Sauvegarde et envoi
-        path = f"/tmp/{ctx.author.id}_nextcard.png"
-        card.save(path)
+    main_genre = genres[0] if genres else "Action"
+    emoji_file = GENRE_EMOJI_FILES.get(main_genre)
 
-        await ctx.send(
-            content=(
-                f"🎬 **{title}** – Épisode {episode}\n"
-                f"📅 Sortie prévue : **{date_text}**\n"
-                f"🎭 Genres : _{genres}_"
-            ),
-            file=discord.File(path, filename="nextcard.png")
-        )
+    if emoji_file:
+        try:
+            emoji_img = Image.open(f"emojis/{emoji_file}").resize((64, 64)).convert("RGBA")
+            card.paste(emoji_img, (700, 30), emoji_img)
+        except Exception as e:
+            print(f"[Erreur emoji] {e}")
 
-    except Exception as e:
-        print(f"[Carte Next] Erreur : {e}")
-        await ctx.send("❌ Impossible de générer l’image du prochain épisode.")
+    # Sauvegarde et envoi
+    path = f"/tmp/{ctx.author.id}_next.png"
+    card.save(path)
 
+    await ctx.send(file=discord.File(path, filename="next.png"))
+    
 @bot.command(name="monnext")
 async def monnext_card(ctx):
     from PIL import Image, ImageDraw, ImageFont, ImageFilter
