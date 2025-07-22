@@ -536,6 +536,22 @@ async def anichallenge(ctx):
 
     await ctx.send("❌ Impossible de récupérer un anime pour le challenge.")
 
+@bot.command(name="debugnext")
+async def debug_next(ctx):
+    episodes = get_upcoming_episodes(ANILIST_USERNAME, status_filter=["CURRENT"])
+
+    count = len(episodes)
+    if count == 0:
+        await ctx.send("❌ Aucun épisode détecté.")
+    else:
+        await ctx.send(f"🎯 {count} épisodes trouvés pour **{ANILIST_USERNAME}**.")
+
+    for ep in episodes[:5]:  # Limite à 5 pour éviter le spam
+        titre = ep["title"]
+        num = ep["episode"]
+        date = datetime.fromtimestamp(ep["airingAt"], tz=TIMEZONE).strftime("%A %d %B à %H:%M")
+        await ctx.send(f"📺 {titre} — Épisode {num} \n🕒 Sortie : {date}")
+
 @bot.command(name="anitracker")
 async def anitracker(ctx, sub=None, *, title=None):
     user_id = str(ctx.author.id)
