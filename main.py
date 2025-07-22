@@ -1666,8 +1666,15 @@ async def planning(ctx):
             await ctx.send(embed=embed)
 
 @bot.command(name="animequiz")
-async def anime_quiz(ctx):
+async def anime_quiz(ctx, difficulty: str = "normal"):
     await ctx.send("🎮 Préparation du quiz...")
+
+    difficulty = difficulty.lower()
+    sort_option = "SCORE_DESC"
+    if difficulty == "easy":
+        sort_option = "POPULARITY_DESC"
+    elif difficulty == "hard":
+        sort_option = "TRENDING_DESC"
 
     anime = None
     for _ in range(10):
@@ -1675,7 +1682,7 @@ async def anime_quiz(ctx):
         query = f'''
         query {{
           Page(perPage: 1, page: {page}) {{
-            media(type: ANIME, isAdult: false, sort: SCORE_DESC) {{
+            media(type: ANIME, isAdult: false, sort: {sort_option}) {{
               id
               title {{ romaji english native }}
               coverImage {{ large }}
@@ -1694,47 +1701,232 @@ async def anime_quiz(ctx):
         await ctx.send("❌ Aucun anime trouvé.")
         return
 
-    # 🖼️ Embed
-    embed = discord.Embed(
-        title="🧠 Anime Quiz",
-        description="*Tu as 20 secondes pour deviner l'anime.*",
-        color=discord.Color.orange()
-    )
-    cover = anime.get("coverImage", {}).get("large")
-    if cover:
-        embed.set_image(url=cover)
-
-    await ctx.send(embed=embed)
-
     correct_titles = title_variants(anime["title"])
 
-    def check(m):
-        content = normalize(m.content)
-    return m.author == ctx.author and (content in correct_titles or content == "jsp")
+    # 🎴 Embed visuel
+    embed = discord.Embed(
+        title="❓ Quel est cet anime ?",
+        description="Tu as **20 secondes** pour deviner. Tape `jsp` si tu veux passer.",
+        color=discord.Color.orange()
+    )
+    embed.set_image(url=anime["coverImage"]["large"])
+    await ctx.send(embed=embed)
 
+    def check(m):
+        return (
+            m.author == ctx.author and
+            m.channel == ctx.channel
+        )
 
     try:
         msg = await bot.wait_for("message", timeout=20.0, check=check)
+        user_input = normalize(msg.content)
 
-        if normalize(msg.content) == "jsp":
-            await ctx.send(f"❌ Pass : **{anime['title']['romaji']}**.")
-        else:
+        if user_input == "jsp":
+            await ctx.send(f"⏭️ Question passée. La bonne réponse était **{anime['title']['romaji']}**.")
+            return
+
+        if user_input in correct_titles:
             await ctx.send(f"✅ Bonne réponse, **{ctx.author.display_name}** !")
+
+            # 🎯 Score + XP
             scores = load_scores()
-            user_id = str(ctx.author.id)
-            scores[user_id] = scores.get(user_id, 0) + 1
+            uid = str(ctx.author.id)
+            scores[uid] = scores.get(uid, 0) + 1
             save_scores(scores)
 
+            xp_amount = 10
+            if difficulty == "easy":
+                xp_amount = 5
+            elif difficulty == "hard":
+                xp_amount = 15
+            add_xp(ctx.author.id, amount=xp_amount)
 
-        # 🏆 Enregistrer le score
-        scores = load_scores()
-        user_id = str(ctx.author.id)
-        scores[user_id] = scores.get(user_id, 0) + 1
-        save_scores(scores)
+        else:
+            await ctx.send(f"❌ Mauvaise réponse. C’était **{anime['title']['romaji']}**.")
 
     except asyncio.TimeoutError:
-        await ctx.send(f"⏰ Temps écoulé ! C’était **{anime['title']['romaji']}**.")
+        await ctx.send(f"⏰ Temps écoulé ! La bonne réponse était **{anime['title']['romaji']}**.")
 
+@bot.command(name="animequizmulti")
+async def anime_quiz_multi(ctx, nb_questions: int = 5):
+    if nb_questions < 1 or nb_questions > 20:
+        await ctx.send("❌ Tu dois choisir un nombre entre 1 et 20.")
+        return
+
+    await ctx.send(f"🎮 Lancement de **{nb_questions} questions** pour **{ctx.author.display_name}**...")
+
+    difficulties = ["easy", "normal", "hard"]
+    score = 0
+    total_xp = 0
+
+    for i in range(nb_questions):
+        difficulty = random.choice(difficulties)
+        sort_option = {
+            "easy": "POPULARITY_DESC",
+            "normal": "SCORE_DESC",
+            "hard": "TRENDING_DESC"
+        }.get(difficulty, "SCORE_DESC")
+
+        anime = None
+        for _ in range(10):
+            page = random.randint(1, 500)
+            query = f'''
+            query {{
+              Page(perPage: 1, page: {page}) {{
+                media(type: ANIME, isAdult: false, sort: {sort_option}) {{
+                  id
+                  title {{ romaji english native }}
+                  coverImage {{ large }}
+                }}
+              }}
+            }}
+            '''
+            data = query_anilist(query)
+            try:
+                anime = data["data"]["Page"]["media"][0]
+                break
+            except:
+                continue
+
+        if not anime:
+            await ctx.send("❌ Impossible de récupérer un anime.")
+            continue
+
+        correct_titles = title_variants(anime["title"])
+        image = anime["coverImage"]["large"]
+
+        embed = discord.Embed(
+            title=f"❓ Question {i+1}/{nb_questions} — difficulté `{difficulty}`",
+            description="Tu as **20 secondes** pour deviner. Tape `jsp` pour passer.",
+            color=discord.Color.orange()
+        )
+        embed.set_image(url=image)
+        await ctx.send(embed=embed)
+
+        def check(m):
+            return m.author == ctx.author and m.channel == ctx.channel
+
+        try:
+            msg = await bot.wait_for("message", timeout=20.0, check=check)
+            guess = normalize(msg.content)
+
+            if guess == "jsp":
+                await ctx.send(f"⏭️ Passé. C’était **{anime['title']['romaji']}**.")
+                continue
+
+            if guess in correct_titles:
+                await ctx.send(f"✅ Bonne réponse !")
+                score += 1
+                xp_gain = 5 if difficulty == "easy" else 10 if difficulty == "normal" else 15
+                total_xp += xp_gain
+            else:
+                await ctx.send(f"❌ Faux ! C’était **{anime['title']['romaji']}**.")
+
+        except asyncio.TimeoutError:
+            await ctx.send(f"⏰ Temps écoulé ! C’était **{anime['title']['romaji']}**.")
+
+        await asyncio.sleep(1.5)
+
+    add_xp(ctx.author.id, amount=total_xp)
+    await ctx.send(f"🏁 Fin du quiz ! Score final : **{score}/{nb_questions}** – 🎖️ XP gagné : **{total_xp}**")
+
+@bot.command(name="duel")
+async def duel(ctx, opponent: discord.Member):
+    if opponent.bot:
+        await ctx.send("🤖 Tu ne peux pas défier un bot.")
+        return
+    if opponent == ctx.author:
+        await ctx.send("🙃 Tu ne peux pas te défier toi-même.")
+        return
+
+    await ctx.send(f"⚔️ Duel entre **{ctx.author.display_name}** et **{opponent.display_name}** lancé !")
+
+    players = [ctx.author, opponent]
+    scores = {ctx.author.id: 0, opponent.id: 0}
+    difficulties = ["easy", "normal", "hard"]
+
+    for i in range(1, 4):
+        await ctx.send(f"❓ Question {i}/3...")
+
+        # 🎯 Tirage aléatoire d’un anime
+        difficulty = random.choice(difficulties)
+        sort_option = {
+            "easy": "POPULARITY_DESC",
+            "normal": "SCORE_DESC",
+            "hard": "TRENDING_DESC"
+        }[difficulty]
+
+        anime = None
+        for _ in range(10):
+            page = random.randint(1, 500)
+            query = f'''
+            query {{
+              Page(perPage: 1, page: {page}) {{
+                media(type: ANIME, isAdult: false, sort: {sort_option}) {{
+                  id
+                  title {{ romaji english native }}
+                  coverImage {{ large }}
+                }}
+              }}
+            }}
+            '''
+            data = query_anilist(query)
+            try:
+                anime = data["data"]["Page"]["media"][0]
+                break
+            except:
+                continue
+
+        if not anime:
+            await ctx.send("❌ Impossible de récupérer un anime.")
+            continue
+
+        correct_titles = title_variants(anime["title"])
+        embed = discord.Embed(
+            title=f"🎮 Duel – Question {i}/3",
+            description="**Tu as 15 secondes** pour deviner l’anime. Tape `jsp` pour passer.",
+            color=discord.Color.red()
+        )
+        embed.set_image(url=anime["coverImage"]["large"])
+        await ctx.send(embed=embed)
+
+        def check(m):
+            return (
+                m.channel == ctx.channel and
+                m.author in players
+            )
+
+        try:
+            msg = await bot.wait_for("message", timeout=15.0, check=check)
+            content = normalize(msg.content)
+
+            if content == "jsp":
+                await ctx.send(f"⏭️ Question passée. C’était **{anime['title']['romaji']}**.")
+                continue
+
+            if content in correct_titles:
+                scores[msg.author.id] += 1
+                await ctx.send(f"✅ Bonne réponse de **{msg.author.display_name}** !")
+            else:
+                await ctx.send(f"❌ Mauvaise réponse. C’était **{anime['title']['romaji']}**.")
+        except asyncio.TimeoutError:
+            await ctx.send(f"⏰ Temps écoulé ! C’était **{anime['title']['romaji']}**.")
+
+        await asyncio.sleep(1)
+
+    # 🧾 Résultat final
+    s1 = scores[ctx.author.id]
+    s2 = scores[opponent.id]
+    if s1 == s2:
+        result = f"🤝 Égalité parfaite : {s1} - {s2}"
+    else:
+        winner = ctx.author if s1 > s2 else opponent
+        loser = opponent if winner == ctx.author else ctx.author
+        result = f"🏆 Victoire de **{winner.display_name}** ({s1} - {s2})"
+        add_xp(winner.id, amount=20)
+
+    await ctx.send(result)
 
 @bot.command(name="suggest")
 async def suggest(ctx, genre: str = None):
@@ -1872,8 +2064,10 @@ async def help_command(ctx):
         {
             "title": "🎮 Quiz & Niveaux + 🏆 Challenges",
             "fields": [
-                ("`!animequiz`", "Devine l’anime à partir d’une description."),
-                ("`!animebattle @ami`", "Affronte un ami en duel de culture anime."),
+                ("`!animequiz`", "Devine un anime en solo."),
+                ("`!animequizmulti <N>`", "Enchaîne N questions à difficulté aléatoire."),
+                ("`!duel @ami`", "Affronte un ami en duel de 3 questions."),
+                ("`!animebattle`", "Petit mode quiz solo (aléatoire rapide)."),
                 ("`!quiztop`", "Classement des meilleurs au quiz."),
                 ("`!myrank`", "Affiche ton niveau, XP et ton titre."),
                 ("`!anichallenge`", "Reçois un anime à regarder et note-le."),
@@ -1887,9 +2081,8 @@ async def help_command(ctx):
             "fields": [
                 ("`!linkanilist <pseudo>`", "Lier ton compte AniList au bot."),
                 ("`!unlink`", "Supprimer le lien avec ton compte AniList."),
-                ("`!mystats`", "Carte de profil stylisée avec tes stats."),
-                ("`!stats <pseudo>`", "Voir les stats d’un autre utilisateur."),
-                ("`!monchart`", "Graphique des genres que tu regardes."),
+                ("`!mystats` / `!stats <pseudo>`", "Carte de profil stylisée (toi ou un autre)."),
+                ("`!mychart` / `!monchart`", "Répartition de tes genres préférés."),
                 ("`!duelstats @ami`", "Compare ton profil AniList à un ami."),
                 ("`!classementgenre <genre>`", "Classement des passionnés par genre.")
             ]
