@@ -13,6 +13,14 @@ from io import BytesIO
 import unicodedata
 import matplotlib.pyplot as plt
 
+for path in [
+    PREFERENCES_FILE, QUIZ_SCORES_FILE, "/data/anitracker.json", "/data/weekly.json",
+    "/data/linked_users.json", "/data/quiz_levels.json", "/data/challenges.json",
+    USER_SETTINGS_FILE, NOTIFIED_FILE, LINKS_FILE
+]:
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump({}, f)
 
 def normalize(text):
     if not text:
@@ -32,19 +40,19 @@ def title_variants(title_data):
     return titles
 
 # 📁 Chargement des préférences utilisateur
-PREFERENCES_FILE = "preferences.json"
+PREFERENCES_FILE = "/data/preferences.json"
 
-QUIZ_SCORES_FILE = "quiz_scores.json"
+QUIZ_SCORES_FILE = "/data/quiz_scores.json"
 
 def load_tracker():
     try:
-        with open("anitracker.json", "r") as f:
+        with open("/data/anitracker.json", "r") as f:
             return json.load(f)
     except:
         return {}
 
 def save_tracker(data):
-    with open("anitracker.json", "w") as f:
+    with open("/data/anitracker.json", "w") as f:
         json.dump(data, f, indent=2)
 
 def get_xp_bar(xp, total, length=10):
@@ -54,13 +62,13 @@ def get_xp_bar(xp, total, length=10):
 
 def load_weekly():
     try:
-        with open("weekly.json", "r") as f:
+        with open("/data/weekly.json", "r") as f:
             return json.load(f)
     except:
         return {}
 
 def save_weekly(data):
-    with open("weekly.json", "w") as f:
+    with open("/data/weekly.json", "w") as f:
         json.dump(data, f, indent=2)
 
 def load_scores():
@@ -75,13 +83,13 @@ def save_scores(scores):
 
 def load_links():
     try:
-        with open("linked_users.json", "r") as f:
+        with open("/data/linked_users.json", "r") as f:
             return json.load(f)
     except:
         return {}
 
 def save_links(data):
-    with open("linked_users.json", "w") as f:
+    with open("/data/linked_users.json", "w") as f:
         json.dump(data, f, indent=2)
 
 def query_anilist(query: str, variables: dict = None):
@@ -98,13 +106,13 @@ def query_anilist(query: str, variables: dict = None):
 
 def load_levels():
     try:
-        with open("quiz_levels.json", "r") as f:
+        with open("/data/quiz_levels.json", "r") as f:
             return json.load(f)
     except:
         return {}
 
 def save_levels(data):
-    with open("quiz_levels.json", "w") as f:
+    with open("/data/quiz_levels.json", "w") as f:
         json.dump(data, f, indent=2)
 
 def add_xp(user_id, amount=10):
@@ -129,13 +137,13 @@ def add_xp(user_id, amount=10):
 
 def load_challenges():
     try:
-        with open("challenges.json", "r") as f:
+        with open("/data/challenges.json", "r") as f:
             return json.load(f)
     except:
         return {}
 
 def save_challenges(data):
-    with open("challenges.json", "w") as f:
+    with open("/data/challenges.json", "w") as f:
         json.dump(data, f, indent=2)
 
 def load_json(filename):
@@ -169,10 +177,10 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # Fichiers JSON
 CONFIG_FILE = "config.json"
-USER_SETTINGS_FILE = "user_settings.json"
-NOTIFIED_FILE = "notified.json"
+USER_SETTINGS_FILE = "/data/user_settings.json"
+NOTIFIED_FILE = "/data/notified.json"
 
-LINKS_FILE = "user_links.json"
+LINKS_FILE = "/data/user_links.json"
 
 # Charger les liens existants
 if os.path.exists(LINKS_FILE):
