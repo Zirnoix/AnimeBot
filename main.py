@@ -275,13 +275,9 @@ def get_upcoming_episodes(username):
           entries {
             media {
               id
-              title {
-                romaji
-              }
-              nextAiringEpisode {
-                airingAt
-                episode
-              }
+              title { romaji }
+              coverImage { extraLarge } 
+              nextAiringEpisode { airingAt episode }
               genres
             }
           }
@@ -315,6 +311,7 @@ def get_upcoming_episodes(username):
                     "episode": next_ep["episode"],
                     "airingAt": next_ep["airingAt"],
                     "genres": media.get("genres", [])
+                    "image": media.get("coverImage", {}).get("extraLarge") 
                 })
 
         print(f"🎯 {len(entries)} épisodes trouvés pour {username}", flush=True)
@@ -1205,6 +1202,35 @@ async def next_command(ctx):
     embed.add_field(name="🕒 Horaire", value=dt.strftime("%A %d %B à %H:%M"), inline=False)
     embed.add_field(name="🎭 Genre", value=", ".join(next_ep["genres"]), inline=False)
     embed.set_footer(text="AnimeBot – AniList Sync")
+    
+    embed.set_thumbnail(url=next_ep["image"])
+    await ctx.send(embed=embed)
+
+@bot.command(name="monnext")
+async def mon_next(ctx):
+    username = get_user_anilist(ctx.author.id)
+    if not username:
+        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
+        return
+
+    episodes = get_upcoming_episodes(username)
+    if not episodes:
+        await ctx.send(f"📭 Aucun épisode à venir trouvé pour **{username}**.")
+        return
+
+    next_ep = min(episodes, key=lambda e: e["airingAt"])
+    dt = datetime.fromtimestamp(next_ep["airingAt"], tz=TIMEZONE)
+    emoji = genre_emoji(next_ep["genres"])
+
+    embed = discord.Embed(
+        title=f"🎬 Prochain épisode pour {username}",
+        description=f"**{next_ep['title']}** — Épisode {next_ep['episode']}",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="🕒 Horaire", value=dt.strftime("%A %d %B à %H:%M"), inline=False)
+    embed.add_field(name="🎭 Genre", value=", ".join(next_ep["genres"]), inline=False)
+    embed.set_thumbnail(url=next_ep["image"])
+    embed.set_footer(text="AnimeBot – AniList perso ❤️")
 
     await ctx.send(embed=embed)
 
@@ -1225,7 +1251,7 @@ async def mon_planning(ctx):
         description="Voici les prochains épisodes à venir dans ta liste.",
         color=discord.Color.teal()
     )
-
+    
     for ep in sorted(episodes, key=lambda e: e["airingAt"])[:10]:
         dt = datetime.fromtimestamp(ep["airingAt"], tz=TIMEZONE)
         emoji = genre_emoji(ep["genres"])
@@ -1234,6 +1260,18 @@ async def mon_planning(ctx):
             value=f"🕒 {dt.strftime('%A %d %B à %H:%M')}",
             inline=False
         )
+        
+    for i, ep in enumerate(sorted(episodes, key=lambda e: e["airingAt"])[:10]):
+        dt = datetime.fromtimestamp(ep["airingAt"], tz=TIMEZONE)
+        emoji = genre_emoji(ep["genres"])
+        embed.add_field(
+            name=f"{emoji} {ep['title']} – Épisode {ep['episode']}",
+            value=f"🕒 {dt.strftime('%A %d %B à %H:%M')}",
+            inline=False
+        )
+
+        if i == 0:
+            embed.set_thumbnail(url=ep["image"])  # ✅ Ajoute l'image du 1er
 
     await ctx.send(embed=embed)
 
@@ -1544,38 +1582,65 @@ async def help_command(ctx):
 
     pages = [
         {
-            "title": "📖 Commandes disponibles",
+            "title": "📅 Épisodes & Planning",
             "fields": [
-                ("🗓️ Prochains épisodes", "`!prochains`, `!planning`, `!journalier`, `!next`"),
-                ("🎯 Personnalisation", "`!reminder`, `!setalert`, `!anitracker`, `!anitracker list`")
+                ("`!next`", "Affiche le prochain épisode à sortir dans ta liste."),
+                ("`!planning` / `!monplanning`", "Liste tous les épisodes à venir cette semaine."),
+                ("`!prochains <genre>`", "Filtre les épisodes à venir selon un genre."),
+                ("`!planningvisuel`", "Affiche un planning visuel de la semaine."),
             ]
         },
         {
-            "title": "🎮 Jeux & Quiz",
+            "title": "🎮 Quiz & Niveaux",
             "fields": [
-                ("🧠 Quiz & Duels", "`!animequiz`, `!animebattle`, `!quiztop`, `!duelstats`"),
-                ("🏆 Niveaux & Classements", "`!myrank`, `!stats`")
+                ("`!animequiz`", "Réponds à une question pour deviner l’anime."),
+                ("`!animebattle @ami`", "Affronte un ami sur 3 questions anime."),
+                ("`!quiztop`", "Classement des meilleurs joueurs au quiz."),
+                ("`!myrank`", "Affiche ton niveau et XP obtenus."),
             ]
         },
         {
-            "title": "🎯 Défis & Challenges",
+            "title": "🏆 Défis & Challenges",
             "fields": [
-                ("🎯 Défis Anime", "`!anichallenge`, `!challenge complete`"),
-                ("📅 Challenge mensuel", "`!weekly`, `!weekly complete`")
+                ("`!anichallenge`", "Propose un anime à regarder et noter."),
+                ("`!challenge complete <note>`", "Indique que tu as fini ton défi personnel."),
+                ("`!weekly`", "Reçoit un défi hebdomadaire original."),
+                ("`!weekly complete`", "Indique que tu as terminé ton défi de la semaine."),
             ]
         },
         {
             "title": "📊 Stats & Profils",
             "fields": [
-                ("🧬 Profils AniList", "`!linkanilist`, `!unlink`, `!mystats`, `!stats <pseudo>`"),
-                ("📈 Comparaisons", "`!duelstats @ami`, `!classementgenre <genre>`")
+                ("`!linkanilist <pseudo>`", "Lie ton compte AniList au bot."),
+                ("`!unlink`", "Dissocie ton compte AniList."),
+                ("`!mystats`", "Affiche ton profil AniList de façon stylisée."),
+                ("`!stats <pseudo>`", "Affiche les stats d’un autre utilisateur."),
             ]
         },
         {
-            "title": "🎨 Autres outils",
+            "title": "📈 Comparaison & Genres",
             "fields": [
-                ("📅 Planning visuel", "`!planningvisuel`"),
-                ("⚙️ Utilitaires", "`!uptime`, `!help`")
+                ("`!duelstats @ami`", "Compare ton profil AniList avec un ami."),
+                ("`!mychart`", "Affiche un graphique des genres que tu regardes."),
+                ("`!classementgenre <genre>`", "Classement de ceux qui regardent le plus ce genre."),
+            ]
+        },
+        {
+            "title": "🔔 Notifications & Rappels",
+            "fields": [
+                ("`!reminder`", "Active ou désactive les rappels quotidiens."),
+                ("`!setalert HH:MM`", "Choisis l’heure de ton rappel."),
+                ("`!anitracker <titre>`", "Suis un anime pour recevoir les DM quand un épisode sort."),
+                ("`!anitracker list` / `remove <titre>`", "Liste ou retire un anime suivi."),
+            ]
+        },
+        {
+            "title": "🛠️ Outils & Utilitaires",
+            "fields": [
+                ("`!uptime`", "Affiche depuis combien de temps le bot est actif."),
+                ("`!setchannel`", "Définit ce salon comme canal de notifications (admin uniquement)."),
+                ("`!topanime` / `!seasonal`", "Affiche les meilleurs animes de la saison."),
+                ("`!search <titre>`", "Recherche un anime sur AniList."),
             ]
         }
     ]
@@ -1586,14 +1651,13 @@ async def help_command(ctx):
             title=page["title"],
             color=discord.Color.purple()
         )
-        for name, value in page["fields"]:
-            embed.add_field(name=name, value=value, inline=False)
-        embed.set_footer(text=f"Page {index+1}/{len(pages)} – AnimeBot")
+        for name, desc in page["fields"]:
+            embed.add_field(name=name, value=desc, inline=False)
+        embed.set_footer(text=f"Page {index+1}/{len(pages)} — AnimeBot")
         return embed
 
     current = 0
     message = await ctx.send(embed=make_embed(current))
-
     await message.add_reaction("◀️")
     await message.add_reaction("▶️")
 
@@ -1605,7 +1669,7 @@ async def help_command(ctx):
 
     while True:
         try:
-            reaction, user = await bot.wait_for("reaction_add", timeout=60.0, check=check)
+            reaction, user = await bot.wait_for("reaction_add", timeout=120.0, check=check)
             if str(reaction.emoji) == "▶️":
                 current = (current + 1) % len(pages)
             elif str(reaction.emoji) == "◀️":
@@ -1614,7 +1678,6 @@ async def help_command(ctx):
             await message.remove_reaction(reaction, user)
         except asyncio.TimeoutError:
             break
-
     
 @bot.command(name="setalert")
 async def setalert(ctx, time_str: str):
