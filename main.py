@@ -1339,21 +1339,16 @@ async def stats(ctx, username: str):
         await ctx.send(file=discord.File(f, filename=f"{username}_stats.png"))
 
 # Commandes supplémentaires
-@bot.command(name="monnext")
-async def monnext(ctx):
+@bot.command(name="next")
+async def next_command(ctx):
     import requests
     from PIL import Image, ImageDraw, ImageFont, ImageFilter
     from io import BytesIO
     from datetime import datetime
 
-    username = get_user_anilist(ctx.author.id)
-    if not username:
-        await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
-        return
-
-    episodes = get_upcoming_episodes(username)
+    episodes = get_upcoming_episodes(ANILIST_USERNAME)
     if not episodes:
-        await ctx.send("📭 Aucun épisode à venir dans ta liste.")
+        await ctx.send("📭 Aucun épisode à venir trouvé dans ta liste.")
         return
 
     next_ep = min(episodes, key=lambda e: e["airingAt"])
@@ -1363,12 +1358,12 @@ async def monnext(ctx):
     genres = next_ep["genres"]
     image_url = next_ep["image"]
 
-    # 🖼️ Chargement image et fallback
+    # 🖼️ Chargement image centrée floue
     try:
         response = requests.get(image_url)
         base_img = Image.open(BytesIO(response.content)).convert("RGBA")
 
-        # Resize proportionnel en gardant le ratio
+        # Resize proportionnel pour garder le ratio
         base_img.thumbnail((1000, 300), Image.Resampling.LANCZOS)
         bg = Image.new("RGBA", (800, 300), (0, 0, 0, 255))
         x = (800 - base_img.width) // 2
@@ -1385,12 +1380,12 @@ async def monnext(ctx):
     font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-    draw.text((40, 25), "🎬 Ton prochain épisode à venir", font=font_title, fill="white")
+    draw.text((40, 25), "🎬 Prochain épisode à venir", font=font_title, fill="white")
     draw.text((40, 75), f"{title} – Épisode {episode}", font=font_text, fill="white")
     draw.text((40, 110), f"Heure : {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
     draw.text((40, 150), "Genres :", font=font_text, fill="white")
 
-    # 🎯 Émojis de genres
+    # 🎯 Émojis PNG par genre
     GENRE_EMOJI_FILES = {
         "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
         "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
@@ -1418,9 +1413,10 @@ async def monnext(ctx):
         draw.text((x_start, y_emoji), genre, font=font_text, fill="white")
         x_start += int(text_width) + 24
 
-    path = f"/tmp/{ctx.author.id}_monnext.png"
+    path = f"/tmp/{ctx.author.id}_next.png"
     card.save(path)
-    await ctx.send(file=discord.File(path, filename="monnext.png"))
+    await ctx.send(file=discord.File(path, filename="next.png"))
+
 
     
 @bot.command(name="monnext")
