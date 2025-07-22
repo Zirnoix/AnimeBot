@@ -1214,14 +1214,32 @@ async def stats(ctx, username: str):
 
 # Commandes supplémentaires
 @bot.command(name="next")
-async def next_episode(ctx):
+async def next_command(ctx):
     episodes = get_upcoming_episodes(ANILIST_USERNAME)
+
     if not episodes:
-        await ctx.send("Aucun épisode à venir.")
+        await ctx.send("📭 Aucun épisode à venir trouvé dans ta liste.")
         return
-    ep = min(episodes, key=lambda e: e["airingAt"])
-    dt = datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE)
-    await ctx.send(embed=build_embed(ep, dt))
+
+    # 🔽 On trie par date la plus proche
+    next_ep = min(episodes, key=lambda e: e["airingAt"])
+
+    dt = datetime.fromtimestamp(next_ep["airingAt"], tz=TIMEZONE)
+    title = next_ep["title"]
+    episode = next_ep["episode"]
+    emoji = genre_emoji(next_ep["genres"])
+
+    embed = discord.Embed(
+        title="🎬 Prochain épisode à sortir",
+        description=f"**{title}** — Épisode {episode}",
+        color=discord.Color.orange()
+    )
+    embed.add_field(name="🕒 Horaire", value=dt.strftime("%A %d %B à %H:%M"), inline=False)
+    embed.add_field(name="🎭 Genre", value=", ".join(next_ep["genres"]), inline=False)
+    embed.set_footer(text="AnimeBot – AniList Sync")
+
+    await ctx.send(embed=embed)
+
 
 @bot.command(name="uptime")
 async def uptime(ctx):
