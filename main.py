@@ -7,6 +7,7 @@ import random
 import asyncio
 import os
 import pytz
+import re
 from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
@@ -51,12 +52,38 @@ def normalize(text):
 
 def title_variants(title_data):
     titles = set()
+
+    for key in ['romaji', 'english', 'native']:
+        title = title_data.get(key)
+        if not title:
+            continue
+
+        base = normalize(title)
+        base = re.sub(r"(saison|season|s\d|2nd|second|3rd|third|final|part \d+)", "", base, flags=re.IGNORECASE).strip()
+        titles.add(base)
+
+        shortcuts = {
+            "shingeki no kyojin": {"snk", "attack on titan"},
+            "boku no hero academia": {"mha", "my hero academia"},
+            "sword art online": {"sao"},
+            "kimetsu no yaiba": {"demon slayer"},
+            "one punch man": {"opm"},
+            "jujutsu kaisen": {"jjk"},
+            "fullmetal alchemist": {"fma"},
+            "hunter x hunter": {"hxh"},
+            "kaguya-sama": {"kaguya"},
+        }
+
+        for original, variants in shortcuts.items():
+            if original in base:
+                titles.update(variants)
+
+    # Ajoute aussi les titres d’origine non modifiés
     for key in ['romaji', 'english', 'native']:
         t = title_data.get(key)
         if t:
             titles.add(normalize(t))
-            short = t.split(":")[0].split("-")[0].strip()
-            titles.add(normalize(short))
+
     return titles
 
 # 📁 Chargement des préférences utilisateur
@@ -1051,19 +1078,19 @@ async def mystats(ctx):
 
     def get_badge_file(count):
         if count >= 2000:
-            return "badge_6.png"
-        elif count >= 1500:
-            return "badge_5.png"
-        elif count >= 1200:
-            return "badge_4.png"
-        elif count >= 900:
-            return "badge_3.png"
-        elif count >= 600:
-            return "badge_2.png"
-        elif count >= 300:
-            return "badge_1.png"
+            return "1f451.png"
+        elif count >= 1600:
+            return "1f453.png"
+        elif count >= 1300:
+            return "1f9e0.png"
+        elif count >= 850:
+            return "1f525.png"
+        elif count >= 400:
+            return "1f4fd.png"
+        elif count >= 150:
+            return "1f4d5.png"
         else:
-            return "badge_0.png"
+            return "1f95a.png"
 
     def emoji_file(name):
         path = f"Emojis/{name}"
@@ -1279,18 +1306,28 @@ async def next_command(ctx):
     genres = next_ep["genres"]
     image_url = next_ep["image"]
 
-    # 🖼️ Image de fond (800x240)
+    # 🖼️ Image de fond 800x240 avec redimensionnement centré
     try:
         bg_response = requests.get(image_url)
-        bg = Image.open(BytesIO(bg_response.content)).resize((800, 240)).convert("RGBA")
-    except:
-        bg = Image.new("RGBA", (800, 240), (30, 30, 30, 255))
-    blur = bg.filter(ImageFilter.GaussianBlur(3))
-    overlay = Image.new("RGBA", blur.size, (0, 0, 0, 160))
-    card = Image.alpha_composite(blur, overlay)
-    draw = ImageDraw.Draw(card)
+        cover = Image.open(BytesIO(bg_response.content)).convert("RGBA")
 
-    # 📝 Polices
+        aspect = cover.width / cover.height
+        new_height = 240
+        new_width = int(aspect * new_height)
+        resized = cover.resize((new_width, new_height))
+
+        # crop centré si trop large
+        if new_width > 800:
+            left = (new_width - 800) // 2
+            resized = resized.crop((left, 0, left + 800, 240))
+
+        blur = resized.filter(ImageFilter.GaussianBlur(3))
+        overlay = Image.new("RGBA", (800, 240), (0, 0, 0, 160))
+        card = Image.alpha_composite(blur, overlay)
+    except:
+        card = Image.new("RGBA", (800, 240), (30, 30, 30, 255))
+
+    draw = ImageDraw.Draw(card)
     font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
@@ -1313,7 +1350,7 @@ async def next_command(ctx):
     x_start = 140
     y_emoji = 140
 
-    for genre in genres[:4]:  # max 4 genres pour éviter débordement
+    for genre in genres[:4]:  # max 4 genres
         emoji_file = GENRE_EMOJI_FILES.get(genre)
         text_width = draw.textlength(genre, font=font_text)
 
@@ -1321,14 +1358,13 @@ async def next_command(ctx):
             try:
                 emoji_img = Image.open(f"Emojis/{emoji_file}").resize((22, 22)).convert("RGBA")
                 card.paste(emoji_img, (x_start, y_emoji), emoji_img)
-                x_start += 26  # espace après l'emoji
+                x_start += 26
             except Exception as e:
                 print(f"[Emoji {genre}] {e}")
 
         draw.text((x_start, y_emoji), genre, font=font_text, fill="white")
-        x_start += int(text_width) + 24  # espace après le texte
+        x_start += int(text_width) + 24
 
-    # 💾 Envoi
     path = f"/tmp/{ctx.author.id}_next.png"
     card.save(path)
     await ctx.send(file=discord.File(path, filename="next.png"))
@@ -1587,18 +1623,10 @@ async def anime_quiz(ctx):
         await ctx.send("❌ Aucun anime trouvé.")
         return
 
-    # 📖 Description & traduction
-    raw_description = anime.get("description", "Pas de description.").split(".")[0] + "."
-    try:
-        from deep_translator import GoogleTranslator
-        description = GoogleTranslator(source='auto', target='fr').translate(raw_description)
-    except:
-        description = raw_description  # fallback
-
     # 🖼️ Embed
     embed = discord.Embed(
         title="🧠 Anime Quiz",
-        description=f"**Description :**\n{description}\n\n*Tu as 20 secondes pour deviner l'anime.*",
+        description="*Tu as 20 secondes pour deviner l'anime.*",
         color=discord.Color.orange()
     )
     cover = anime.get("coverImage", {}).get("large")
