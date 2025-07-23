@@ -35,7 +35,7 @@ for path in [
             json.dump({}, f)
 
 for path in [
-    PREFERENCES_FILE, QUIZ_SCORES_FILE, "/data/anitracker.json", "/data/weekly.json",
+    PREFERENCES_FILE, QUIZ_SCORES_FILE, "/data/.json", "/data/weekly.json",
     "/data/linked_users.json", "/data/quiz_levels.json", "/data/challenges.json",
     USER_SETTINGS_FILE, NOTIFIED_FILE, LINKS_FILE
 ]:
@@ -44,11 +44,12 @@ for path in [
             json.dump({}, f)
 
 def normalize(text):
+    import unicodedata
     if not text:
         return ""
     text = ''.join(c for c in unicodedata.normalize('NFD', text)
-                   if unicodedata.category(c) != 'Mn')  # Enlève les accents
-    return ''.join(e for e in text.lower() if e.isalnum() or e.isspace())
+                   if unicodedata.category(c) != 'Mn')  # supprime les accents
+    return ''.join(e for e in text.lower() if e.isalnum() or e.isspace()).strip()
 
 def title_variants(title_data):
     titles = set()
@@ -163,13 +164,13 @@ def get_user_anilist(user_id):
 
 def load_tracker():
     try:
-        with open("/data/anitracker.json", "r") as f:
+        with open("/data/.json", "r") as f:
             return json.load(f)
     except:
         return {}
 
 def save_tracker(data):
-    with open("/data/anitracker.json", "w") as f:
+    with open("/data/.json", "w") as f:
         json.dump(data, f, indent=2)
 
 def get_xp_bar(xp, total, length=10):
@@ -2263,7 +2264,7 @@ async def check_new_episodes():
             # ✅ Envoi aux abonnés
             tracker_data = load_tracker()
             for uid, titles in tracker_data.items():
-                if ep["title"] in titles:
+                if normalize(ep["title"]) in [normalize(t) for t in titles]:
                     try:
                         user = await bot.fetch_user(int(uid))
                         await user.send(
