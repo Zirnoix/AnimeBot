@@ -13,6 +13,8 @@ from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import unicodedata
 import matplotlib.pyplot as plt
+from modules.title_cache import load_title_cache, normalize
+from title_cache import update_title_cache, load_title_cache
 
 PREFERENCES_FILE = "/data/preferences.json"
 QUIZ_SCORES_FILE = "/data/quiz_scores.json"
@@ -24,6 +26,16 @@ WEEKLY_FILE = "/data/weekly.json"
 USER_SETTINGS_FILE = "/data/user_settings.json"
 NOTIFIED_FILE = "/data/notified.json"
 LINKS_FILE = "/data/user_links.json"
+
+TITLE_CACHE_FILE = "/data/title_cache.json"
+
+def load_title_cache():
+    if os.path.exists(TITLE_CACHE_FILE):
+        with open(TITLE_CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+title_cache = load_title_cache()
 
 for path in [
     PREFERENCES_FILE, QUIZ_SCORES_FILE, TRACKER_FILE, WEEKLY_FILE,
@@ -43,6 +55,28 @@ for path in [
         with open(path, "w") as f:
             json.dump({}, f)
 
+def title_variants(title_data):
+    titles = set()
+
+    for key in ['romaji', 'english', 'native']:
+        t = title_data.get(key)
+        if not t:
+            continue
+        base = normalize(t)
+        titles.add(base)
+        titles.add(re.sub(r"(s\d|season|part|final|ver\d+|[^a-zA-Z\s])", "", base))
+        for word in base.split():
+            if len(word) >= 4:
+                titles.add(word)
+
+    # Ajout depuis le cache
+    cache = load_title_cache()
+    for entry in cache.values():
+        for t in entry["titles"]:
+            titles.add(t)
+
+    return set(titles)
+    
 def normalize(text):
     import unicodedata
     if not text:
@@ -51,10 +85,57 @@ def normalize(text):
                    if unicodedata.category(c) != 'Mn')  # supprime les accents
     return ''.join(e for e in text.lower() if e.isalnum() or e.isspace()).strip()
 
+def update_title_cache():
+    import requests
+
+    print("[CACHE] Mise à jour des titres AniList...")
+    cache = {}
+
+    username = ANILIST_USERNAME
+    query = '''
+    query ($name: String, $page: Int) {
+      MediaListCollection(userName: $name, type: ANIME) {
+        lists {
+          entries {
+            media {
+              id
+              title { romaji english native }
+            }
+          }
+        }
+      }
+    }
+    '''
+
+    variables = {"name": username, "page": 1}
+    try:
+        response = requests.post("https://graphql.anilist.co", json={"query": query, "variables": variables})
+        data = response.json()
+
+        all_entries = []
+        for lst in data["data"]["MediaListCollection"]["lists"]:
+            for entry in lst["entries"]:
+                media = entry.get("media")
+                if media:
+                    all_entries.append(media)
+
+        print(f"[CACHE] {len(all_entries)} titres récupérés pour {username}")
+
+        for media in all_entries:
+            cache[str(media["id"])] = title_variants(media)
+
+        # 🔐 Sauvegarde locale
+        with open("/data/title_cache.json", "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+
+        print("[CACHE] Cache des titres sauvegardé.")
+    except Exception as e:
+        print(f"[CACHE ❌] Erreur lors de la mise à jour : {e}")
+        
 def title_variants(title_data):
     titles = set()
 
-    # 🔤 Nettoyage initial
+    # 1. Titres de base (romaji, english, native)
     for key in ['romaji', 'english', 'native']:
         t = title_data.get(key)
         if not t:
@@ -64,10 +145,16 @@ def title_variants(title_data):
         titles.add(base)
         titles.add(clean)
         for word in clean.split():
-            if len(word) >= 3:
+            if len(word) >= 4:
                 titles.add(word)
 
-    # 🔁 Synonymes connus & abréviations
+    # 2. Titres issus du cache (automatique)
+    cache = load_title_cache()
+    for entry in cache.values():
+        variants = entry["titles"]
+        titles.update(variants)
+
+    # 3. Synonymes manuels (ceux que tu as déjà ajoutés à la main)
     aliases = {
         "one piece": {"op", "onepiece", "op film", "one piece stampede", "stampede"},
         "hajime no ippo": {"ippo", "hni", "champion road", "hajime"},
@@ -854,7 +941,14 @@ async def anime_battle(ctx, adversaire: discord.Member = None):
         )
         await ctx.send(embed=embed)
 
-        bonnes_reponses = title_variants(anime["title"])
+        correct_titles = set()
+
+        anime_id = str(anime.get("id"))
+        if anime_id in title_cache:
+            correct_titles = set(title_cache[anime_id])
+        else:
+        correct_titles = title_variants(anime["title"])  # fallback au cas où
+
 
         def check(m):
             return m.author in joueurs and normalize(m.content) in bonnes_reponses
@@ -1373,34 +1467,46 @@ async def next_command(ctx):
     genres = next_ep["genres"]
     image_url = next_ep["image"]
 
-    # 🖼️ Chargement image centrée floue
+    # 🖼️ Image de fond redimensionnée façon "cover"
     try:
-        response = requests.get(image_url)
-        base_img = Image.open(BytesIO(response.content)).convert("RGBA")
+        bg_response = requests.get(image_url)
+        img = Image.open(BytesIO(bg_response.content)).convert("RGBA")
+        aspect = img.width / img.height
+        target_width, target_height = 800, 300
 
-        # Resize proportionnel pour garder le ratio
-        base_img.thumbnail((1000, 300), Image.Resampling.LANCZOS)
-        bg = Image.new("RGBA", (800, 300), (0, 0, 0, 255))
-        x = (800 - base_img.width) // 2
-        y = (300 - base_img.height) // 2
-        bg.paste(base_img, (x, y))
+        # Crop pour remplir comme "background-size: cover"
+        if aspect > (target_width / target_height):
+            # Image plus large → crop horizontal
+            new_width = int(img.height * (target_width / target_height))
+            left = (img.width - new_width) // 2
+            img = img.crop((left, 0, left + new_width, img.height))
+        else:
+            # Image plus haute → crop vertical
+            new_height = int(img.width * (target_height / target_width))
+            top = (img.height - new_height) // 2
+            img = img.crop((0, top, img.width, top + new_height))
 
-        blurred = bg.filter(ImageFilter.GaussianBlur(3))
-        overlay = Image.new("RGBA", (800, 300), (0, 0, 0, 160))
-        card = Image.alpha_composite(blurred, overlay)
+        img = img.resize((target_width, target_height))
     except:
-        card = Image.new("RGBA", (800, 300), (20, 20, 20, 255))
+        img = Image.new("RGBA", (800, 300), (30, 30, 30, 255))
 
+    # 🌫️ Flou et overlay sombre
+    blur = img.filter(ImageFilter.GaussianBlur(3))
+    overlay = Image.new("RGBA", blur.size, (0, 0, 0, 160))
+    card = Image.alpha_composite(blur, overlay)
     draw = ImageDraw.Draw(card)
-    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+
+    # 📕 Polices
+    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
 
-    draw.text((40, 25), "🎬 Prochain épisode à venir", font=font_title, fill="white")
-    draw.text((40, 75), f"{title} – Épisode {episode}", font=font_text, fill="white")
+    # 🖋️ Textes
+    draw.text((40, 20), "📺 Prochain épisode à venir", font=font_title, fill="white")
+    draw.text((40, 70), f"{title} – Épisode {episode}", font=font_text, fill="white")
     draw.text((40, 110), f"Heure : {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
     draw.text((40, 150), "Genres :", font=font_text, fill="white")
 
-    # 🎯 Émojis PNG par genre
+    # 🎯 Emojis PNG par genre
     GENRE_EMOJI_FILES = {
         "Action": "1f525.png", "Fantasy": "2728.png", "Romance": "1f496.png",
         "Drama": "1f3ad.png", "Comedy": "1f602.png", "Horror": "1f47b.png",
@@ -1411,7 +1517,7 @@ async def next_command(ctx):
     }
 
     x_start = 130
-    y_emoji = 150
+    y_genre = 150
 
     for genre in genres[:4]:
         emoji_file = GENRE_EMOJI_FILES.get(genre)
@@ -1420,17 +1526,19 @@ async def next_command(ctx):
         if emoji_file:
             try:
                 emoji_img = Image.open(f"Emojis/{emoji_file}").resize((22, 22)).convert("RGBA")
-                card.paste(emoji_img, (x_start, y_emoji - 2), emoji_img)
-                x_start += 26
+                card.paste(emoji_img, (x_start, y_genre), emoji_img)
+                x_start += 28
             except:
                 pass
 
-        draw.text((x_start, y_emoji), genre, font=font_text, fill="white")
+        draw.text((x_start, y_genre), genre, font=font_text, fill="white")
         x_start += int(text_width) + 24
 
+    # 💾 Sauvegarde et envoi
     path = f"/tmp/{ctx.author.id}_next.png"
     card.save(path)
     await ctx.send(file=discord.File(path, filename="next.png"))
+
 
 
     
@@ -1716,7 +1824,15 @@ async def anime_quiz(ctx, difficulty: str = "normal"):
         await ctx.send("❌ Aucun anime trouvé.")
         return
 
-    correct_titles = title_variants(anime["title"])
+    correct_titles = set()
+
+    anime_id = str(anime.get("id"))
+    if anime_id in title_cache:
+        correct_titles = set(title_cache[anime_id])
+    else:
+        correct_titles = title_variants(anime["title"])  # fallback au cas où
+
+
 
     # 🎴 Embed visuel
     embed = discord.Embed(
@@ -2279,7 +2395,7 @@ async def check_new_episodes():
 async def on_ready():
     now = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
     print(f"[BOOT 🟢] {bot.user.name} prêt — ID: {bot.user.id} à {now}")
-
+    update_title_cache()
     
     # Récupération du bon channel depuis la config
     config = get_config()
