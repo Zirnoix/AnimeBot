@@ -1,8 +1,17 @@
 import json
 import os
 import pytz
+import discord
 
 TIMEZONE = pytz.timezone("Europe/Paris")
+
+import discord
+
+def generate_stats_embed(username, stats):
+    embed = discord.Embed(title=f"📊 Stats pour {username}", color=discord.Color.blue())
+    for k, v in stats.items():
+        embed.add_field(name=k.replace('_', ' ').title(), value=str(v), inline=True)
+    return embed
 
 def load_json(filename, default):
     if not os.path.exists(filename):
