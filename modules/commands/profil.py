@@ -25,7 +25,7 @@ async def unlink_anilist(ctx):
     else:
         await ctx.send("Tu n'avais pas encore lié de compte.")
 
-@commands.command(name="stats")
+@commands.command(name="statsother")
 async def stats_other(ctx, pseudo: str = None):
     if not pseudo:
         await ctx.send("❌ Donne un pseudo AniList.")
