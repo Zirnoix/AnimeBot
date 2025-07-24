@@ -65,7 +65,7 @@ async def mychart(ctx):
     else:
         await ctx.send("⚠️ Impossible de générer le graphique.")
 
-def setup(bot):
+async def setup(bot):
     bot.add_command(link_anilist)
     bot.add_command(unlink_anilist)
     bot.add_command(mystats)
