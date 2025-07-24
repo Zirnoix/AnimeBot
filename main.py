@@ -1,4 +1,7 @@
 import discord
+
+print("🚀 Le fichier main.py est bien lancé")
+
 from discord.ext import commands
 import os
 import asyncio
@@ -28,6 +31,7 @@ async def on_ready():
     print(f"✅ Connecté en tant que {bot.user} (ID: {bot.user.id})")
 
 async def main():
+    print("🔧 Fonction main() démarrée")
     for ext in extensions:
         try:
             await bot.load_extension(ext)
@@ -43,4 +47,5 @@ async def main():
     else:
         print("❌ Le token Discord n’est pas défini (clé DISCORD_TOKEN)")
 
+print("🌀 Appel de la fonction main()")
 asyncio.run(main())
