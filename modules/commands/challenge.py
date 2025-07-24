@@ -27,8 +27,10 @@ async def anichallenge(ctx):
 
     embed = discord.Embed(
         title="🎯 Ton défi anime",
-        description=f"Regarde : **{challenge}**"
-Quand tu as fini, tape `!challenge complete <note>` pour le valider.",
+        description=(
+            f"Regarde : **{challenge}**\n"
+            "Quand tu as fini, tape `!challenge complete <note>` pour le valider."
+        )
         color=discord.Color.orange()
     )
     await ctx.send(embed=embed)
