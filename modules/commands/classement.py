@@ -30,5 +30,5 @@ async def classement_genre(ctx, *, genre: str):
     )
     await ctx.send(embed=embed)
 
-def setup(bot):
+async def setup(bot):
     bot.add_command(classement_genre)
