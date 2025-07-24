@@ -54,6 +54,6 @@ async def next_episode(ctx):
     msg = f"🎬 Prochain épisode : **{next_ep['title']}** – Épisode {next_ep['episode']}\n🕒 {date_fr} à {heure}"
     await ctx.send(msg)
 
-def setup(bot):
+async def setup(bot):
     bot.add_command(mon_planning)
     bot.add_command(next_episode)
