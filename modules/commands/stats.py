@@ -3,18 +3,6 @@ import discord
 from modules.utils import get_user_anilist, generate_stats_embed, generate_genre_chart, get_user_genres
 import os
 
-@commands.command(name="linkanilist")
-async def link_anilist(ctx, pseudo: str = None):
-    if not pseudo:
-        await ctx.send("❓ Utilise : `!linkanilist <ton_pseudo_anilist>`")
-        return
-
-    data = get_user_anilist("all")
-    data[str(ctx.author.id)] = pseudo
-    get_user_anilist("save", data)
-
-    await ctx.send(f"🔗 Ton compte AniList **{pseudo}** est maintenant lié à ton profil Discord.")
-
 @commands.command(name="unlink")
 async def unlink_anilist(ctx):
     data = get_user_anilist("all")
@@ -90,7 +78,6 @@ async def genre_stats(ctx):
     os.remove(path)
 
 async def setup(bot):
-    bot.add_command(link_anilist)
     bot.add_command(unlink_anilist)
     bot.add_command(mystats)
     bot.add_command(stats)
