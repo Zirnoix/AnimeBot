@@ -2395,8 +2395,11 @@ async def check_new_episodes():
 async def on_ready():
     now = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
     print(f"[BOOT 🟢] {bot.user.name} prêt — ID: {bot.user.id} à {now}")
-    update_title_cache()
-    
+
+    # Mise à jour du cache de titres (dans un thread séparé si nécessaire)
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, update_title_cache)
+
     # Récupération du bon channel depuis la config
     config = get_config()
     channel_id = config.get("channel_id")
@@ -2404,7 +2407,7 @@ async def on_ready():
         channel = bot.get_channel(channel_id)
         if channel:
             try:
-                await channel.send(f"🤖 AnimeBot a démarré et est prêt à traquer les sorties !")
+                await channel.send("🤖 AnimeBot a démarré et est prêt à traquer les sorties !")
             except:
                 pass
 
