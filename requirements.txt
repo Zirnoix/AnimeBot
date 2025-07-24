@@ -4,3 +4,4 @@ pytz
 pillow
 matplotlib
 deep-translator
+babel
