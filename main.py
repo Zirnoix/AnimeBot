@@ -1,10 +1,6 @@
 import discord
 from discord.ext import commands
 import os
-from dotenv import load_dotenv
-
-# Charger les variables d'environnement si .env présent
-load_dotenv()
 
 # Intents recommandés pour bots avec interactions
 intents = discord.Intents.default()
