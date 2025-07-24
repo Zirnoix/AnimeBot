@@ -566,15 +566,21 @@ async def prochains(ctx, *args):
         for ep in group:
             dt = datetime.fromtimestamp(ep["airingAt"], tz=pytz.utc).astimezone(TIMEZONE)
             emoji = genre_emoji(ep["genres"])
+        
+        # ✅ Variables à calculer avant add_field
+            date_fr = format_datetime(dt, "d MMMM", locale='fr_FR')
+            jour = jours_fr[dt.strftime('%A')]
+            heure = dt.strftime('%H:%M')
+            value = f"🗓️ {jour} {date_fr} à {heure}"
+
             embed.add_field(
                 name=f"{emoji} {ep['title']} — Épisode {ep['episode']}",
-                date_fr = format_datetime(dt, "d MMMM", locale='fr_FR')
-                jour = jours_fr[dt.strftime('%A')]
-                heure = dt.strftime('%H:%M')
-                value = f"🗓️ {jour} {date_fr} à {heure}"
+                value=value,
                 inline=False
             )
+
         pages.append(embed)
+
 
     class Paginator(discord.ui.View):
         def __init__(self): super().__init__(timeout=120); self.index = 0
