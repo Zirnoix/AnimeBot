@@ -30,7 +30,7 @@ async def anichallenge(ctx):
         description=(
             f"Regarde : **{challenge}**\n"
             "Quand tu as fini, tape `!challenge complete <note>` pour le valider."
-        )
+        ),
         color=discord.Color.orange()
     )
     await ctx.send(embed=embed)
