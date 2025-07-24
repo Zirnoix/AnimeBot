@@ -3,16 +3,6 @@ import discord
 from modules.utils import get_user_anilist, generate_stats_embed, generate_genre_chart, get_user_genres
 import os
 
-@commands.command(name="unlink")
-async def unlink_anilist(ctx):
-    data = get_user_anilist("all")
-    if str(ctx.author.id) in data:
-        del data[str(ctx.author.id)]
-        get_user_anilist("save", data)
-        await ctx.send("❌ Ton compte AniList a été délié.")
-    else:
-        await ctx.send("🚫 Aucun compte lié trouvé.")
-
 @commands.command(name="mystats")
 async def mystats(ctx):
     username = get_user_anilist(ctx.author.id)
@@ -78,7 +68,6 @@ async def genre_stats(ctx):
     os.remove(path)
 
 async def setup(bot):
-    bot.add_command(unlink_anilist)
     bot.add_command(mystats)
     bot.add_command(stats)
     bot.add_command(genre_stats)
