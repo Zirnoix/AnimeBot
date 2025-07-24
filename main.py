@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands, tasks
 import requests
 import json
+import locale
 import random
 import asyncio
 import os
@@ -15,6 +16,7 @@ import unicodedata
 import matplotlib.pyplot as plt
 from modules.title_cache import load_title_cache, normalize
 from title_cache import update_title_cache, load_title_cache
+from calendar import monthrange
 
 PREFERENCES_FILE = "/data/preferences.json"
 QUIZ_SCORES_FILE = "/data/quiz_scores.json"
@@ -29,6 +31,18 @@ LINKS_FILE = "/data/user_links.json"
 
 TITLE_CACHE_FILE = "/data/title_cache.json"
 
+WINNER_FILE = "/data/quiz_winner.json"
+
+def load_quiz_winner():
+    if not os.path.exists(WINNER_FILE):
+        return {}
+    with open(WINNER_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_quiz_winner(data):
+    with open(WINNER_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
 def load_title_cache():
     if os.path.exists(TITLE_CACHE_FILE):
         with open(TITLE_CACHE_FILE, "r", encoding="utf-8") as f:
@@ -36,6 +50,8 @@ def load_title_cache():
     return {}
 
 title_cache = load_title_cache()
+
+locale.setlocale(locale.LC_TIME, "fr_FR.UTF-8")
 
 for path in [
     PREFERENCES_FILE, QUIZ_SCORES_FILE, TRACKER_FILE, WEEKLY_FILE,
@@ -86,19 +102,14 @@ def normalize(text):
     return ''.join(e for e in text.lower() if e.isalnum() or e.isspace()).strip()
 
 def update_title_cache():
-    import requests
-
     print("[CACHE] Mise à jour des titres AniList...")
-    cache = {}
 
-    username = ANILIST_USERNAME
     query = '''
-    query ($name: String, $page: Int) {
-      MediaListCollection(userName: $name, type: ANIME) {
+    query ($name: String) {
+      MediaListCollection(userName: $name, type: ANIME, status_in: [CURRENT, COMPLETED, PAUSED, DROPPED, PLANNING]) {
         lists {
           entries {
             media {
-              id
               title { romaji english native }
             }
           }
@@ -106,29 +117,30 @@ def update_title_cache():
       }
     }
     '''
+    variables = {"name": ANILIST_USERNAME}
 
-    variables = {"name": username, "page": 1}
     try:
-        response = requests.post("https://graphql.anilist.co", json={"query": query, "variables": variables})
-        data = response.json()
+        result = query_anilist(query, variables)
+        if not result or "data" not in result:
+            raise ValueError("Données manquantes ou incorrectes dans la réponse AniList.")
 
-        all_entries = []
-        for lst in data["data"]["MediaListCollection"]["lists"]:
+        entries = result["data"]["MediaListCollection"]["lists"]
+        all_titles = []
+
+        for lst in entries:
             for entry in lst["entries"]:
-                media = entry.get("media")
-                if media:
-                    all_entries.append(media)
+                titles = entry["media"]["title"]
+                all_titles.append(titles)
 
-        print(f"[CACHE] {len(all_entries)} titres récupérés pour {username}")
+        cache = {}
+        for t in all_titles:
+            variants = title_variants(t)
+            for v in variants:
+                cache[v] = t["romaji"]
 
-        for media in all_entries:
-            cache[str(media["id"])] = title_variants(media)
+        save_json("title_cache.json", cache)
+        print(f"[CACHE ✅] {len(cache)} titres ajoutés au cache.")
 
-        # 🔐 Sauvegarde locale
-        with open("/data/title_cache.json", "w", encoding="utf-8") as f:
-            json.dump(cache, f, ensure_ascii=False, indent=2)
-
-        print("[CACHE] Cache des titres sauvegardé.")
     except Exception as e:
         print(f"[CACHE ❌] Erreur lors de la mise à jour : {e}")
         
@@ -830,52 +842,80 @@ async def duelstats(ctx, opponent: discord.Member = None):
 
 @bot.command(name="quiztop")
 async def quiztop(ctx):
+    import calendar
+
     scores = load_scores()
     if not scores:
         await ctx.send("🏆 Aucun score enregistré pour l’instant.")
         return
 
-    # Titres évolutifs par score (tous les 5 points)
-    def get_title(score):
-        if score >= 50:
-            return "🧠 Grand Sage"
-        elif score >= 45:
-            return "👑 Champion du quiz"
-        elif score >= 40:
-            return "🌟 Stratège de l'anime"
-        elif score >= 35:
-            return "🎯 Expert en animation"
-        elif score >= 30:
-            return "🎬 Analyste Otaku"
-        elif score >= 25:
-            return "🔥 Fan Hardcore"
-        elif score >= 20:
-            return "📺 Binge-watcheur"
-        elif score >= 15:
-            return "💡 Connaisseur"
-        elif score >= 10:
-            return "📘 Passionné"
-        elif score >= 5:
-            return "🌱 Débutant prometteur"
-        else:
-            return "🔰 Nouveau joueur"
-
     leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
-    desc = ""
 
+    def get_title(score):
+        levels = [
+            (100, "👑 Dieu de l'Anime"),
+            (95, "💫 Génie légendaire"),
+            (90, "🔥 Maître incontesté"),
+            (85, "🌟 Pro absolu"),
+            (80, "🎯 Otaku ultime"),
+            (75, "🎬 Cinéphile expert"),
+            (70, "🧠 Stratège anime"),
+            (65, "⚡ Analyste senior"),
+            (60, "📺 Passionné confirmé"),
+            (55, "🎮 Joueur fidèle"),
+            (50, "📘 Fan régulier"),
+            (45, "💡 Connaisseur"),
+            (40, "📀 Binge-watcher"),
+            (35, "🎵 Amateur éclairé"),
+            (30, "🎙️ Apprenti curieux"),
+            (25, "📚 Étudiant otaku"),
+            (20, "📦 Débutant prometteur"),
+            (15, "🌱 Petit curieux"),
+            (10, "🍼 Nouveau joueur"),
+            (5,  "🔰 Padawan"),
+            (0,  "🐣 Nouvel arrivant")
+        ]
+        for threshold, title in levels:
+            if score >= threshold:
+                return title
+        return "❓ Inconnu"
+
+    desc = ""
     for i, (uid, score) in enumerate(leaderboard, 1):
         try:
             user = await bot.fetch_user(int(uid))
             title = get_title(score)
             desc += f"{i}. **{user.display_name}** — {score} pts {title}\n"
         except:
-            continue  # Si l'utilisateur n'existe plus
+            continue
 
     embed = discord.Embed(
         title="🏆 Classement Anime Quiz",
         description=desc,
         color=discord.Color.gold()
     )
+
+    # ⏳ Affiche le temps restant avant reset mensuel
+    now = datetime.now(tz=TIMEZONE)
+    _, last_day = calendar.monthrange(now.year, now.month)
+    reset_date = datetime(now.year, now.month, last_day, 23, 59, tzinfo=TIMEZONE)
+    remaining = reset_date - now
+    days_left = remaining.days + 1
+    embed.set_footer(text=f"⏳ Réinitialisation dans {days_left} jour(s)")
+
+    # 🥇 Vainqueur du mois précédent
+    winner_data = load_json("last_quiz_winner.json")
+    if winner_data and "uid" in winner_data:
+        try:
+            prev_user = await bot.fetch_user(int(winner_data["uid"]))
+            embed.add_field(
+                name="🥇 Vainqueur du mois dernier",
+                value=f"**{prev_user.display_name}**",
+                inline=False
+            )
+        except:
+            pass
+
     await ctx.send(embed=embed)
 
 
@@ -969,6 +1009,9 @@ async def anime_battle(ctx, adversaire: discord.Member = None):
         add_xp(gagnant.id, amount=20)
         resultat = f"🏆 Victoire de **{gagnant.display_name}** ! Score final : {s1} - {s2}"
 
+    now = datetime.now()
+    days_left = monthrange(now.year, now.month)[1] - now.day
+    embed.set_footer(text=f"🏁 Réinitialisation dans {days_left} jour(s) — AnimeBot")
 
     await ctx.send(resultat)
 
@@ -1503,7 +1546,7 @@ async def next_command(ctx):
     # 🖋️ Textes
     draw.text((40, 20), "📺 Prochain épisode à venir", font=font_title, fill="white")
     draw.text((40, 70), f"{title} – Épisode {episode}", font=font_text, fill="white")
-    draw.text((40, 110), f"Heure : {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
+    draw.text((40, 110), f"Heure : {dt.strftime('%A %d %B à %H:%M').capitalize()}", font=font_text, fill="white")
     draw.text((40, 150), "Genres :", font=font_text, fill="white")
 
     # 🎯 Emojis PNG par genre
@@ -1538,8 +1581,6 @@ async def next_command(ctx):
     path = f"/tmp/{ctx.author.id}_next.png"
     card.save(path)
     await ctx.send(file=discord.File(path, filename="next.png"))
-
-
 
     
 @bot.command(name="monnext")
@@ -1959,7 +2000,21 @@ async def anime_quiz_multi(ctx, nb_questions: int = 5):
 
         await asyncio.sleep(1.5)
 
+    # Enregistrement du score global
+    scores = load_scores()
+    uid = str(ctx.author.id)
+
+    # Pénalité si moins de 50% de bonnes réponses
+    if score < (nb_questions // 2):
+        penalty = 1
+        scores[uid] = max(0, scores.get(uid, 0) - penalty)
+        await ctx.send(f"⚠️ Tu as fait moins de 50% de bonnes réponses, -{penalty} point retiré.")
+    else:
+        scores[uid] = scores.get(uid, 0) + score
+
+    save_scores(scores)
     add_xp(ctx.author.id, amount=total_xp)
+
     await ctx.send(f"🏁 Fin du quiz ! Score final : **{score}/{nb_questions}** – 🎖️ XP gagné : **{total_xp}**")
 
 @bot.command(name="duel")
@@ -2264,7 +2319,21 @@ async def help_command(ctx):
             await message.remove_reaction(reaction, user)
         except asyncio.TimeoutError:
             break
-    
+
+@bot.command(name="resetquiz")
+@commands.is_owner()
+async def reset_quiz(ctx):
+    scores = load_scores()
+    if scores:
+        top_uid = max(scores.items(), key=lambda x: x[1])[0]
+        winner_data = {
+            "uid": top_uid,
+            "timestamp": datetime.now(tz=TIMEZONE).isoformat()
+        }
+        save_json("last_quiz_winner.json", winner_data)
+    save_scores({})
+    await ctx.send("✅ Classement `animequiz` réinitialisé.")
+
 @bot.command(name="setalert")
 async def setalert(ctx, time_str: str):
     try:
@@ -2352,6 +2421,35 @@ async def send_daily_summaries():
         except Exception as e:
             print(f"[Erreur DM résumé pour {user_id}] {e}")
 
+@tasks.loop(hours=24)
+async def monthly_reset():
+    now = datetime.now(tz=TIMEZONE)
+    if now.day == 1:
+        scores = load_scores()
+        if scores:
+            top_uid = max(scores.items(), key=lambda x: x[1])[0]
+            winner_data = {
+                "uid": top_uid,
+                "timestamp": now.isoformat()
+            }
+            save_json("last_quiz_winner.json", winner_data)
+            save_scores({})  # reset scores
+            print("🔁 Quiz mensuel réinitialisé.")
+
+            config = get_config()
+            cid = config.get("channel_id")
+            if cid:
+                channel = bot.get_channel(cid)
+                if channel:
+                    try:
+                        user = await bot.fetch_user(int(top_uid))
+                        await channel.send(
+                            f"🔁 **Début du mois !** Le classement `!quiztop` a été remis à zéro !\n"
+                            f"🏆 Bravo à **{user.display_name}** pour sa victoire le mois dernier ! Bonne chance à tous 🍀"
+                        )
+                    except:
+                        pass
+
 @tasks.loop(minutes=5)
 async def check_new_episodes():
     await bot.wait_until_ready()
@@ -2419,6 +2517,11 @@ async def on_ready():
     if not check_new_episodes.is_running():
         check_new_episodes.start()
 
+    if not reset_monthly_scores.is_running():
+    reset_monthly_scores.start()
+
+    if not monthly_reset.is_running():
+    monthly_reset.start()
 
 
 # Lancer le bot
