@@ -89,7 +89,7 @@ async def weekly_complete(ctx):
 
     await ctx.send("🎉 Bien joué ! Tu as terminé le défi hebdo !")
 
-def setup(bot):
+async def setup(bot):
     bot.add_command(anichallenge)
     bot.add_command(challenge_complete)
     bot.add_command(weekly)
