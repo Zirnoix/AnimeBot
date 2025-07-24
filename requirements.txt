@@ -1,0 +1,7 @@
+discord.py
+requests
+pytz
+pillow
+matplotlib
+deep-translator
+babel
