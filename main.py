@@ -17,6 +17,16 @@ import matplotlib.pyplot as plt
 from modules.title_cache import load_title_cache, normalize
 from modules.title_cache import update_title_cache, load_title_cache
 from calendar import monthrange
+from babel.dates import format_datetime
+
+# Date actuelle
+now = datetime.now()
+
+# Formatage en français
+formatted_date = format_datetime(now, "EEEE d MMMM y 'à' HH:mm", locale='fr_FR')
+
+print(formatted_date)
+
 
 PREFERENCES_FILE = "/data/preferences.json"
 QUIZ_SCORES_FILE = "/data/quiz_scores.json"
