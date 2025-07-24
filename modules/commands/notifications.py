@@ -69,7 +69,7 @@ async def check_anitrackers():
                 except:
                     pass
 
-def setup(bot):
+async def setup(bot):
     bot.add_command(set_alert)
     bot.add_command(toggle_reminder)
     bot.add_command(set_notification_channel)
