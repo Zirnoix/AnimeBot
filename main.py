@@ -372,7 +372,9 @@ def save_challenges(data):
     with open("/data/challenges.json", "w") as f:
         json.dump(data, f, indent=2)
 
-preferences = load_json(PREFERENCES_FILE)
+PREFERENCES_FILE = "data/preferences.json"
+preferences = load_json(PREFERENCES_FILE, {"users": {}})
+
 def save_preferences():
     save_json(PREFERENCES_FILE, preferences)
 
