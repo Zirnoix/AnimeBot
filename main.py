@@ -15,7 +15,7 @@ from io import BytesIO
 import unicodedata
 import matplotlib.pyplot as plt
 from modules.title_cache import load_title_cache, normalize
-from title_cache import update_title_cache, load_title_cache
+from modules.title_cache import update_title_cache, load_title_cache
 from calendar import monthrange
 
 PREFERENCES_FILE = "/data/preferences.json"
