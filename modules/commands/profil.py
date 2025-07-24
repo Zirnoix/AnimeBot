@@ -84,7 +84,7 @@ async def duelstats(ctx, member: discord.Member):
     embed.add_field(name=member.display_name, value=f"AniList: **{user2}**", inline=True)
     await ctx.send(embed=embed)
 
-def setup(bot):
+async def setup(bot):
     bot.add_command(link_anilist)
     bot.add_command(unlink_anilist)
     bot.add_command(mystats)
