@@ -1,13 +1,66 @@
 import json
 import os
+import pytz
+
+TIMEZONE = pytz.timezone("Europe/Paris")
 
 def load_json(filename, default):
-    if not os.path.isfile(filename):
+    if not os.path.exists(filename):
         return default
     with open(filename, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def save_json(filename, data):
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
+# Simule un stockage temporaire pour tests locaux
+LINKED_USERS_FILE = "linked_users.json"
+
+def get_user_anilist(user_id):
+    linked_users = load_json(LINKED_USERS_FILE, {})
+    return linked_users.get(str(user_id))
+
+def genre_emoji(genres):
+    emoji_map = {
+        "Action": "🔥", "Fantasy": "✨", "Romance": "💖",
+        "Drama": "🎭", "Comedy": "😂", "Horror": "👻",
+        "Sci-Fi": "🚀", "Slice of Life": "🌸", "Sports": "⚽",
+        "Music": "🎵", "Supernatural": "👽", "Mecha": "🤖",
+        "Psychological": "🔮", "Adventure": "🌍", "Thriller": "💥",
+        "Ecchi": "😳"
+    }
+    return " ".join(emoji_map.get(g, "📺") for g in genres[:3])
+
+# Stub à remplacer par appel AniList réel
+def get_upcoming_episodes(username):
+    return []  # Remplacer par la vraie récupération AniList
+
+def get_user_stats(username):
+    return {
+        "completed": 42,
+        "watching": 10,
+        "dropped": 2,
+        "plan_to_watch": 15
+    }
+
+def get_user_genre_chart(username):
+    return {
+        "Action": 10, "Comedy": 7, "Drama": 5
+    }
+
+def get_all_user_genres():
+    return [
+        "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Horror",
+        "Mecha", "Music", "Psychological", "Romance", "Sci-Fi", "Slice of Life",
+        "Sports", "Supernatural", "Thriller"
+    ]
+
+def search_anime(query):
+    return {"title": query.title(), "description": "Description factice."}
+
+def get_top_animes():
+    return ["Attack on Titan", "Fullmetal Alchemist", "Steins;Gate"]
+
+def get_seasonal_animes():
+    return ["My Hero Academia", "Jujutsu Kaisen", "Tokyo Revengers"]
