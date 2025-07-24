@@ -2518,10 +2518,10 @@ async def on_ready():
         check_new_episodes.start()
 
     if not reset_monthly_scores.is_running():
-    reset_monthly_scores.start()
+        reset_monthly_scores.start()
 
     if not monthly_reset.is_running():
-    monthly_reset.start()
+        monthly_reset.start()
 
 
 # Lancer le bot
