@@ -197,7 +197,7 @@ async def my_rank(ctx):
     )
     await ctx.send(embed=embed)
 
-def setup(bot):
+async def setup(bot):
     bot.add_command(anime_quiz)
     bot.add_command(anime_quiz_multi)
     bot.add_command(duel)
