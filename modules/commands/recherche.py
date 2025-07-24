@@ -32,7 +32,7 @@ async def seasonal(ctx):
     embed = discord.Embed(title="📅 Animés de la saison", description=description, color=discord.Color.blurple())
     await ctx.send(embed=embed)
 
-def setup(bot):
+async def setup(bot):
     bot.add_command(search)
     bot.add_command(top_anime)
     bot.add_command(seasonal)
