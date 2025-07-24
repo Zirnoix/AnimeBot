@@ -18,6 +18,7 @@ from modules.title_cache import load_title_cache, normalize
 from modules.title_cache import update_title_cache, load_title_cache
 from calendar import monthrange
 from babel.dates import format_datetime
+from modules.utils import load_json, save_json
 
 # Date actuelle
 now = datetime.now()
