@@ -371,16 +371,6 @@ def save_challenges(data):
     with open("/data/challenges.json", "w") as f:
         json.dump(data, f, indent=2)
 
-def load_json(filename):
-    if not os.path.exists(filename):
-        return {}
-    with open(filename, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_json(filename, data):
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
 preferences = load_json(PREFERENCES_FILE)
 def save_preferences():
     save_json(PREFERENCES_FILE, preferences)
@@ -421,6 +411,7 @@ def save_user_links():
         json.dump(user_links, f, ensure_ascii=False, indent=2)
 
 OWNER_ID = 180389173985804288
+
 def load_json(file, default):
     if not os.path.exists(file):
         return default
@@ -921,7 +912,7 @@ async def quiztop(ctx):
     embed.set_footer(text=f"⏳ Réinitialisation dans {days_left} jour(s)")
 
     # 🥇 Vainqueur du mois précédent
-    winner_data = load_json("last_quiz_winner.json")
+    winner_data = load_json("last_quiz_winner.json", {"username": "Inconnu", "score": 0})
     if winner_data and "uid" in winner_data:
         try:
             prev_user = await bot.fetch_user(int(winner_data["uid"]))
@@ -2443,6 +2434,11 @@ async def send_daily_summaries():
         except Exception as e:
             print(f"[Erreur DM résumé pour {user_id}] {e}")
 
+@tasks.loop(hours=1)
+async def reset_monthly_scores():
+    # Ton code de remise à zéro
+    print("🔁 Reset des scores mensuels exécuté")
+    
 @tasks.loop(hours=24)
 async def monthly_reset():
     now = datetime.now(tz=TIMEZONE)
