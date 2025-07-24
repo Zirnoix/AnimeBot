@@ -35,6 +35,8 @@ async def main():
         except Exception as e:
             print(f"❌ Erreur lors du chargement de {ext} : {e}")
 
+    print(f"🔎 Commandes chargées : {[cmd.name for cmd in bot.commands]}")  # <-- ajoute cette ligne
+
     token = os.getenv("DISCORD_TOKEN")
     if token:
         await bot.start(token)
