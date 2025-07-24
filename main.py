@@ -61,8 +61,6 @@ def load_title_cache():
 
 title_cache = load_title_cache()
 
-locale.setlocale(locale.LC_TIME, "fr_FR.UTF-8")
-
 for path in [
     PREFERENCES_FILE, QUIZ_SCORES_FILE, TRACKER_FILE, WEEKLY_FILE,
     LINKED_FILE, LEVELS_FILE, CHALLENGES_FILE,
@@ -570,7 +568,10 @@ async def prochains(ctx, *args):
             emoji = genre_emoji(ep["genres"])
             embed.add_field(
                 name=f"{emoji} {ep['title']} — Épisode {ep['episode']}",
-                value=f"🗓️ {jours_fr[dt.strftime('%A')]} {dt.strftime('%d/%m')} à {dt.strftime('%H:%M')}",
+                date_fr = format_datetime(dt, "d MMMM", locale='fr_FR')
+                jour = jours_fr[dt.strftime('%A')]
+                heure = dt.strftime('%H:%M')
+                value = f"🗓️ {jour} {date_fr} à {heure}"
                 inline=False
             )
         pages.append(embed)
@@ -1544,6 +1545,8 @@ async def next_command(ctx):
         img = Image.new("RGBA", (800, 300), (30, 30, 30, 255))
 
     # 🌫️ Flou et overlay sombre
+    date_fr = format_datetime(dt, "EEEE d MMMM", locale='fr_FR').capitalize()
+    heure = dt.strftime("%H:%M")
     blur = img.filter(ImageFilter.GaussianBlur(3))
     overlay = Image.new("RGBA", blur.size, (0, 0, 0, 160))
     card = Image.alpha_composite(blur, overlay)
@@ -1552,11 +1555,11 @@ async def next_command(ctx):
     # 📕 Polices
     font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 26)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
-
+    
     # 🖋️ Textes
     draw.text((40, 20), "📺 Prochain épisode à venir", font=font_title, fill="white")
     draw.text((40, 70), f"{title} – Épisode {episode}", font=font_text, fill="white")
-    draw.text((40, 110), f"Heure : {dt.strftime('%A %d %B à %H:%M').capitalize()}", font=font_text, fill="white")
+    draw.text((40, 110), f"Heure : {date_fr} à {heure}", font=font_text, fill="white")
     draw.text((40, 150), "Genres :", font=font_text, fill="white")
 
     # 🎯 Emojis PNG par genre
@@ -1638,10 +1641,12 @@ async def monnext(ctx):
     draw = ImageDraw.Draw(card)
     font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
     font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+    date_fr = format_datetime(dt, "EEEE d MMMM", locale='fr_FR').capitalize()
+    heure = dt.strftime('%H:%M')
 
     draw.text((40, 25), "🎬 Ton prochain épisode à venir", font=font_title, fill="white")
     draw.text((40, 75), f"{title} – Épisode {episode}", font=font_text, fill="white")
-    draw.text((40, 110), f"Heure : {dt.strftime('%A %d %B à %H:%M')}", font=font_text, fill="white")
+    draw.text((40, 110), f"Heure : {date_fr} à {heure}", font=font_text, fill="white")
     draw.text((40, 150), "Genres :", font=font_text, fill="white")
 
     # 🎯 Émojis de genres
@@ -1678,6 +1683,8 @@ async def monnext(ctx):
 
 @bot.command(name="monplanning")
 async def mon_planning(ctx):
+    from babel.dates import format_datetime
+
     username = get_user_anilist(ctx.author.id)
     if not username:
         await ctx.send("❌ Tu n’as pas encore lié ton compte AniList. Utilise `!linkanilist <pseudo>`.")
@@ -1694,26 +1701,25 @@ async def mon_planning(ctx):
         color=discord.Color.teal()
     )
     
+    # Première boucle : ajout des épisodes
     for ep in sorted(episodes, key=lambda e: e["airingAt"])[:10]:
         dt = datetime.fromtimestamp(ep["airingAt"], tz=TIMEZONE)
         emoji = genre_emoji(ep["genres"])
+        date_fr = format_datetime(dt, "EEEE d MMMM", locale='fr_FR').capitalize()
+        heure = dt.strftime('%H:%M')
+        value = f"🕒 {date_fr} à {heure}"
+
         embed.add_field(
             name=f"{emoji} {ep['title']} – Épisode {ep['episode']}",
-            value=f"🕒 {dt.strftime('%A %d %B à %H:%M')}",
-            inline=False
-        )
-        
-    for i, ep in enumerate(sorted(episodes, key=lambda e: e["airingAt"])[:10]):
-        dt = datetime.fromtimestamp(ep["airingAt"], tz=TIMEZONE)
-        emoji = genre_emoji(ep["genres"])
-        embed.add_field(
-            name=f"{emoji} {ep['title']} – Épisode {ep['episode']}",
-            value=f"🕒 {dt.strftime('%A %d %B à %H:%M')}",
+            value=value,
             inline=False
         )
 
+    # Deuxième boucle : miniature sur le premier
+    for i, ep in enumerate(sorted(episodes, key=lambda e: e["airingAt"])[:10]):
         if i == 0:
-            embed.set_thumbnail(url=ep["image"])  # ✅ Ajoute l'image du 1er
+            embed.set_thumbnail(url=ep["image"])
+            break  # plus besoin de continuer après le premier
 
     await ctx.send(embed=embed)
 
