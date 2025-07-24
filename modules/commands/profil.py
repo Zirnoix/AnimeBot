@@ -50,27 +50,6 @@ async def stats_other(ctx, pseudo: str = None):
         embed.add_field(name=key, value=value, inline=True)
     await ctx.send(embed=embed)
 
-@commands.command(name="mychart")
-async def mychart(ctx):
-    username = get_user_anilist(ctx.author.id)
-    if not username:
-        await ctx.send("❌ Aucun compte AniList lié.")
-        return
-
-    genres = get_user_genre_chart(username)
-    labels, sizes = zip(*genres.items())
-
-    fig, ax = plt.subplots()
-    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
-    ax.axis('equal')
-
-    buf = BytesIO()
-    plt.savefig(buf, format='png')
-    buf.seek(0)
-    file = discord.File(buf, filename="chart.png")
-
-    await ctx.send(file=file)
-
 @commands.command(name="duelstats")
 async def duelstats(ctx, member: discord.Member):
     user1 = get_user_anilist(ctx.author.id)
@@ -89,5 +68,4 @@ async def setup(bot):
     bot.add_command(unlink_anilist)
     bot.add_command(mystats)
     bot.add_command(stats_other)
-    bot.add_command(mychart)
     bot.add_command(duelstats)
