@@ -26,7 +26,7 @@ async def purge(ctx, nombre: int = 10):
     confirmation = await ctx.send(f"🧹 {nombre} messages supprimés.")
     await confirmation.delete(delay=5)
 
-def setup(bot):
+async def setup(bot):
     bot.add_command(uptime)
     bot.add_command(set_channel)
     bot.add_command(purge)
