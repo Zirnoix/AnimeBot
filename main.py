@@ -947,7 +947,7 @@ async def anime_battle(ctx, adversaire: discord.Member = None):
         if anime_id in title_cache:
             correct_titles = set(title_cache[anime_id])
         else:
-        correct_titles = title_variants(anime["title"])  # fallback au cas où
+            correct_titles = title_variants(anime["title"])  # fallback au cas où
 
 
         def check(m):
