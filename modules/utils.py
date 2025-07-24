@@ -2,11 +2,32 @@ import json
 import os
 import pytz
 import discord
+import matplotlib.pyplot as plt
 
 TIMEZONE = pytz.timezone("Europe/Paris")
 
 import discord
 
+def generate_genre_chart(genre_data: dict, filename: str = "genre_chart.png") -> str:
+    if not genre_data:
+        raise ValueError("Aucune donnée de genre fournie.")
+
+    labels = list(genre_data.keys())
+    sizes = list(genre_data.values())
+
+    plt.figure(figsize=(6, 6))
+    plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140)
+    plt.axis('equal')
+    plt.title("Répartition des genres")
+
+    # Dossier de sortie (sûr pour Render)
+    output_path = os.path.join("temp", filename)
+    os.makedirs("temp", exist_ok=True)
+    plt.savefig(output_path)
+    plt.close()
+
+    return output_path
+    
 def generate_stats_embed(username, stats):
     embed = discord.Embed(title=f"📊 Stats pour {username}", color=discord.Color.blue())
     for k, v in stats.items():
@@ -52,6 +73,10 @@ def get_user_stats(username):
         "dropped": 2,
         "plan_to_watch": 15
     }
+
+def get_user_genres(user_id):
+    data = load_json("user_genres.json", {})
+    return data.get(str(user_id), [])
 
 def get_user_genre_chart(username):
     return {
