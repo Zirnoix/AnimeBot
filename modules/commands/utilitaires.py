@@ -12,7 +12,7 @@ async def uptime(ctx):
     minutes, seconds = divmod(remainder, 60)
     await ctx.send(f"⏱️ Uptime : {hours}h {minutes}m {seconds}s")
 
-@commands.command(name="setchannel")
+@commands.command(name="setnotifchannel")
 async def set_channel(ctx):
     data = load_json("preferences.json", {})
     data["notification_channel"] = ctx.channel.id
