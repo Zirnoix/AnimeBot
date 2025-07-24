@@ -25,19 +25,6 @@ async def unlink_anilist(ctx):
     else:
         await ctx.send("Tu n'avais pas encore lié de compte.")
 
-@commands.command(name="mystats")
-async def mystats(ctx):
-    username = get_user_anilist(ctx.author.id)
-    if not username:
-        await ctx.send("❌ Aucun compte AniList lié.")
-        return
-
-    stats = get_user_stats(username)
-    embed = discord.Embed(title=f"📊 Statistiques – {username}", color=discord.Color.green())
-    for key, value in stats.items():
-        embed.add_field(name=key, value=value, inline=True)
-    await ctx.send(embed=embed)
-
 @commands.command(name="stats")
 async def stats_other(ctx, pseudo: str = None):
     if not pseudo:
@@ -66,6 +53,5 @@ async def duelstats(ctx, member: discord.Member):
 async def setup(bot):
     bot.add_command(link_anilist)
     bot.add_command(unlink_anilist)
-    bot.add_command(mystats)
     bot.add_command(stats_other)
     bot.add_command(duelstats)
