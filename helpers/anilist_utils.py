@@ -1,40 +1,21 @@
+# helpers/anilist_utils.py
 import os
 import requests
-import unicodedata
+import random
 import re
+from helpers.json_utils import load_json, save_json
 
-ANILIST_API = "https://graphql.anilist.co"
 OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
-ANILIST_USERNAME = os.getenv("ANILIST_USERNAME")
+QUIZ_FILE = "quiz_scores.json"
 
-def get_user_anilist(username: str = None):
-    if username is None:
-        username = ANILIST_USERNAME
 
-    query = """
-    query ($name: String) {
-        User(name: $name) {
-            id
-            name
-        }
-    }
-    """
-    variables = {"name": username}
-    response = requests.post("https://graphql.anilist.co", json={"query": query, "variables": variables})
+def get_user_anilist(user_id):
+    linked_users = load_json("linked_users.json", {})
+    return linked_users.get(str(user_id))
 
-    if response.status_code != 200:
-        raise Exception("Erreur lors de la récupération de l'utilisateur AniList")
-
-    return response.json()["data"]["User"]
-
-def normalize_title(title):
-    nfkd = unicodedata.normalize('NFKD', title)
-    cleaned = "".join(c for c in nfkd if not unicodedata.combining(c))
-    cleaned = re.sub(r"[^a-zA-Z0-9]", "", cleaned).lower()
-    return cleaned
 
 def get_anilist_user_animelist(username):
-    query = """
+    query = '''
     query ($username: String) {
       MediaListCollection(userName: $username, type: ANIME) {
         lists {
@@ -45,22 +26,57 @@ def get_anilist_user_animelist(username):
                 english
                 native
               }
-              id
-              status
             }
           }
         }
       }
     }
-    """
+    '''
     variables = {"username": username}
-    response = requests.post(ANILIST_API, json={"query": query, "variables": variables})
-    data = response.json()
-
-    entries = []
-    try:
-        for lst in data["data"]["MediaListCollection"]["lists"]:
-            entries.extend(lst["entries"])
-        return [entry["media"] for entry in entries]
-    except Exception:
+    response = requests.post(
+        'https://graphql.anilist.co',
+        json={'query': query, 'variables': variables},
+        headers={'Content-Type': 'application/json'}
+    )
+    if response.status_code != 200:
+        print("Erreur Anilist:", response.text)
         return []
+
+    data = response.json()
+    entries = data["data"]["MediaListCollection"]["lists"]
+    anime_titles = set()
+
+    for group in entries:
+        for entry in group["entries"]:
+            media = entry["media"]
+            titles = media["title"]
+            anime_titles.update([
+                titles.get("romaji", "").lower(),
+                titles.get("english", "").lower(),
+                titles.get("native", "").lower(),
+            ])
+
+    return list(filter(None, anime_titles))
+
+
+def get_anime_list():
+    return [anime.title() for anime in get_anilist_user_animelist(OWNER_USERNAME)]
+
+
+def normalize_title(title: str) -> str:
+    title = title.lower()
+    title = title.replace("’", "'")
+    title = re.sub(r"[^\w\s]", "", title)
+    return title.strip()
+
+
+def update_score(user_id, success):
+    scores = load_json(QUIZ_FILE, {})
+    if user_id not in scores:
+        scores[user_id] = {"points": 0, "games": 0}
+
+    scores[user_id]["games"] += 1
+    if success:
+        scores[user_id]["points"] += 1
+
+    save_json(QUIZ_FILE, scores)
