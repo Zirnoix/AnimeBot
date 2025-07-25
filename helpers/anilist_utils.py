@@ -72,7 +72,7 @@ def get_anilist_user_animelist(username):
             for key in ("romaji", "english", "native"):
                 if titles.get(key):
                     anime_titles.add(titles[key].lower())
-
+    print(f"DEBUG – Nombre d'animes récupérés pour {username} : {len(anime_titles)}")
     return list(anime_titles)
 
 
