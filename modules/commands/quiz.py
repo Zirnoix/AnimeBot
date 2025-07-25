@@ -6,14 +6,22 @@ import json
 import os
 from modules.utils import load_json, save_json, normalize_title, get_anilist_user_animelist, get_anime_list, update_score, normalize_title
 
+from discord.ext import commands
+
+class AnimeQuiz(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
     @commands.command(name="animequizmulti")
-    async def animequizmulti(self, ctx, count: int = 5):
+    async def animequizmulti(self, ctx, count: int = 10):
         if count < 5 or count > 20:
             return await ctx.send("❗ Choisis un nombre entre 5 et 20.")
 
+        anime_list = get_anime_list()
         score = 0
+
         for _ in range(count):
-            anime = random.choice(self.anime_list)
+            anime = random.choice(anime_list)
             await ctx.send(f"🎲 `{normalize_title(anime)}`")
 
             def check(m):
