@@ -41,11 +41,12 @@ async def mon_planning(ctx):
 
 
 @commands.command(name="next")
-async def next_episode(ctx):
-    episodes = get_upcoming_episodes("default_user")  # Peut être remplacé par un nom ou système
+async def next_episode(self, ctx):
+    username = get_user_anilist(ctx.author.id) or OWNER_USERNAME
+    episodes = get_upcoming_episodes(username)
     if not episodes:
-        await ctx.send("❌ Aucun épisode à venir trouvé.")
-        return
+        return await ctx.send("📭 Aucun épisode à venir trouvé.")
+
 
     next_ep = min(episodes, key=lambda e: e["airingAt"])
     dt = datetime.fromtimestamp(next_ep["airingAt"], tz=TIMEZONE)
