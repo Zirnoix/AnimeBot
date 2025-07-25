@@ -1,5 +1,12 @@
 # helpers/anilist_utils.py
 import os
+OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
+
+if not OWNER_USERNAME:
+    raise RuntimeError("❌ La variable d’environnement ANILIST_USERNAME est introuvable.")
+else:
+    print("✅ ANILIST_USERNAME =", OWNER_USERNAME)
+
 import requests
 import random
 import re
