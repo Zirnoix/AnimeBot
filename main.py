@@ -28,7 +28,8 @@ extensions = [
     "modules.commands.utilitaires",
     "modules.commands.notifications",
     "modules.commands.planning",
-    "modules.commands.profil"
+    "modules.commands.profil",
+    "modules.commands.help"
 ]
 
 @bot.event
