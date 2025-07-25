@@ -1,19 +1,22 @@
-# helpers/anilist_utils.py
 import os
 import requests
 import random
 import re
-from helpers.json_utils import load_json, save_json
 import logging
 
+from helpers.json_utils import load_json, save_json
+
+# Configuration du logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-logger.info("✅ anilist_utils.py a bien été importé")
+# Récupère le nom d'utilisateur Anilist
 OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
+QUIZ_FILE = "quiz_scores.json"
+
+logger.info("✅ anilist_utils.py a bien été importé")
 logger.info(f"✅ OWNER_USERNAME = {OWNER_USERNAME}")
 
-QUIZ_FILE = "quiz_scores.json"
 
 def get_user_anilist(user_id):
     linked_users = load_json("linked_users.json", {})
@@ -21,8 +24,6 @@ def get_user_anilist(user_id):
 
 
 def get_anilist_user_animelist(username):
-    print(f"🔍 Récupération de la liste d'animes pour: {username}")
-
     query = '''
     query ($username: String) {
       MediaListCollection(userName: $username, type: ANIME) {
@@ -45,7 +46,6 @@ def get_anilist_user_animelist(username):
     '''
 
     variables = {"username": username}
-
     response = requests.post(
         'https://graphql.anilist.co',
         json={'query': query, 'variables': variables},
@@ -53,45 +53,50 @@ def get_anilist_user_animelist(username):
     )
 
     if response.status_code != 200:
-        print(f"❌ Erreur lors de la requête Anilist ({response.status_code}): {response.text}")
+        logger.error(f"❌ Erreur Anilist : {response.text}")
         return []
 
     data = response.json()
-    print("📦 Réponse brute d'Anilist:", data)
-
-    entries = data.get("data", {}).get("MediaListCollection", {}).get("lists", [])
-    if not entries:
-        print(f"⚠️ Aucune entrée 'lists' pour l'utilisateur {username}.")
-        return []
+    entries = data["data"]["MediaListCollection"]["lists"]
 
     anime_titles = set()
 
     for group in entries:
-        for entry in group.get("entries", []):
+        for entry in group["entries"]:
             media = entry.get("media")
             if not media:
+                logger.warning(f"❌ Pas de media dans l'entrée : {entry}")
                 continue
 
             titles = media.get("title")
             if not titles:
+                logger.warning(f"❌ Pas de titre dans media : {media}")
                 continue
 
+            logger.info(f"✅ Titre détecté : {titles}")
+
             for key in ("romaji", "english", "native"):
-                title_value = titles.get(key)
-                if title_value:
-                    anime_titles.add(title_value.lower())
+                if titles.get(key):
+                    anime_titles.add(titles[key].lower())
 
-    result = list(anime_titles)
-    print(f"✅ {len(result)} anime(s) trouvés pour {username}")
-    return result
-
+    return list(anime_titles)
 
 
 def get_anime_list():
-    username = os.getenv("ANILIST_USERNAME")
-    if not username:
-        raise ValueError("ANILIST_USERNAME is not set in environment variables.")
-    return [anime.title() for anime in get_anilist_user_animelist(username)]
+    if not OWNER_USERNAME:
+        logger.error("❌ OWNER_USERNAME est vide ou non défini.")
+        return []
+
+    anime_titles = get_anilist_user_animelist(OWNER_USERNAME)
+
+    if not anime_titles:
+        logger.warning(f"⚠️ Aucun anime récupéré pour {OWNER_USERNAME}")
+        return []
+
+    formatted_titles = [anime.title() for anime in anime_titles if isinstance(anime, str)]
+
+    logger.info(f"🎉 {len(formatted_titles)} animés chargés pour {OWNER_USERNAME}")
+    return formatted_titles
 
 
 def normalize_title(title: str) -> str:
