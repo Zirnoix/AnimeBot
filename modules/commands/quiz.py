@@ -46,27 +46,36 @@ class AnimeQuiz(commands.Cog):
             for _ in range(count):
                 update_score(str(ctx.author.id), False)
 
-    @commands.command(name="animequiz")
-    async def animequiz(self, ctx):
-        anime = random.choice(get_anime_list())
-        await ctx.send(f"🎲 Quel est cet anime ? `{normalize_title(anime)}` (réponds dans les 15 secondes)")
+  @commands.command(name="animequiz")
+async def anime_quiz(ctx):
+    anime_list = get_anime_list()
+    anime = random.choice(anime_list)
 
-        def check(m):
-            return m.author == ctx.author and m.channel == ctx.channel
+    embed = discord.Embed(
+        title="🎲 Quiz Anime",
+        description=f"Quel est cet anime ?",
+        color=discord.Color.blurple()
+    )
+    embed.add_field(name="Indice", value=f"`{normalize_title(anime)}`", inline=False)
+    embed.set_footer(text="⏳ Tu as 15 secondes pour répondre !")
+    await ctx.send(embed=embed)
 
-        try:
-            msg = await self.bot.wait_for("message", timeout=15.0, check=check)
-        except asyncio.TimeoutError:
-            await ctx.send(f"⏱️ Temps écoulé ! C'était **{anime}**.")
-            update_score(str(ctx.author.id), False)
-            return
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel
 
-        if normalize_title(msg.content) == normalize_title(anime):
-            await ctx.send("✅ Bonne réponse ! +1 point")
-            update_score(str(ctx.author.id), True)
-        else:
-            await ctx.send(f"❌ Mauvaise réponse ! C'était **{anime}**.")
-            update_score(str(ctx.author.id), False)
+    try:
+        msg = await ctx.bot.wait_for("message", timeout=15.0, check=check)
+    except asyncio.TimeoutError:
+        await ctx.send(f"⏱️ Temps écoulé ! C'était **{anime}**.")
+        update_score(str(ctx.author.id), False)
+        return
+
+    if normalize_title(msg.content) == normalize_title(anime):
+        await ctx.send("✅ Bonne réponse ! +1 point")
+        update_score(str(ctx.author.id), True)
+    else:
+        await ctx.send(f"❌ Mauvaise réponse ! C'était **{anime}**.")
+        update_score(str(ctx.author.id), False)
 
     @commands.command(name="duel")
     async def duel(self, ctx, opponent: discord.Member):
