@@ -4,11 +4,9 @@ import random
 import asyncio
 import json
 import os
-from modules.utils import load_json, save_json, normalize_title, get_anilist_user_animelist
-from dotenv import load_dotenv
+from modules.utils import load_json, save_json, normalize_title, get_anilist_user_animelist, get_anime_list, update_score, normalize_title
 
 # ✅ !animequiz – Devine 1 anime
-load_dotenv()
 OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
 
 QUIZ_FILE = "quiz_scores.json"
