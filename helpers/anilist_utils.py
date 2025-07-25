@@ -21,6 +21,8 @@ def get_user_anilist(user_id):
 
 
 def get_anilist_user_animelist(username):
+    print(f"🔍 Récupération de la liste d'animes pour: {username}")
+
     query = '''
     query ($username: String) {
       MediaListCollection(userName: $username, type: ANIME) {
@@ -51,16 +53,21 @@ def get_anilist_user_animelist(username):
     )
 
     if response.status_code != 200:
-        print("Erreur Anilist:", response.text)
+        print(f"❌ Erreur lors de la requête Anilist ({response.status_code}): {response.text}")
         return []
 
     data = response.json()
-    entries = data["data"]["MediaListCollection"]["lists"]
+    print("📦 Réponse brute d'Anilist:", data)
+
+    entries = data.get("data", {}).get("MediaListCollection", {}).get("lists", [])
+    if not entries:
+        print(f"⚠️ Aucune entrée 'lists' pour l'utilisateur {username}.")
+        return []
 
     anime_titles = set()
 
     for group in entries:
-        for entry in group["entries"]:
+        for entry in group.get("entries", []):
             media = entry.get("media")
             if not media:
                 continue
@@ -70,10 +77,14 @@ def get_anilist_user_animelist(username):
                 continue
 
             for key in ("romaji", "english", "native"):
-                if titles.get(key):
-                    anime_titles.add(titles[key].lower())
-    print(f"DEBUG – Nombre d'animes récupérés pour {username} : {len(anime_titles)}")
-    return list(anime_titles)
+                title_value = titles.get(key)
+                if title_value:
+                    anime_titles.add(title_value.lower())
+
+    result = list(anime_titles)
+    print(f"✅ {len(result)} anime(s) trouvés pour {username}")
+    return result
+
 
 
 def get_anime_list():
