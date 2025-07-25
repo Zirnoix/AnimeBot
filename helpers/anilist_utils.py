@@ -5,6 +5,8 @@ import random
 import re
 from helpers.json_utils import load_json, save_json
 
+print("DEBUG – ANILIST_USERNAME =", os.getenv("ANILIST_USERNAME"))
+
 OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
 QUIZ_FILE = "quiz_scores.json"
 
