@@ -4,11 +4,14 @@ import requests
 import random
 import re
 from helpers.json_utils import load_json, save_json
+import logging
 
-print("✅ anilist_utils.py a bien été importé !")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+logger.info("✅ anilist_utils.py a bien été importé")
 OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
-print("✅ OWNER_USERNAME =", OWNER_USERNAME)
+logger.info(f"✅ OWNER_USERNAME = {OWNER_USERNAME}")
 
 QUIZ_FILE = "quiz_scores.json"
 
