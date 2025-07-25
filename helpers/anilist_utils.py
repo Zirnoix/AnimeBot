@@ -85,17 +85,27 @@ def get_anilist_user_animelist(username):
     return list(anime_titles)
 
 
-def get_anime_list():
-    """Récupère et formate la liste des animés vus par l’utilisateur propriétaire."""
-    anime_titles = get_anilist_user_animelist(OWNER_USERNAME)
+from helpers.title_matcher import normalize, generate_aliases
 
-    if not anime_titles:
-        logger.warning("⚠️ Aucun anime trouvé dans la liste de l'utilisateur.")
+def get_anime_list():
+    if not OWNER_USERNAME:
+        logger.error("❌ OWNER_USERNAME est vide.")
         return []
 
-    formatted_titles = [title.title() for title in anime_titles if isinstance(title, str)]
-    logger.info(f"📦 {len(formatted_titles)} animés formatés pour le quiz.")
-    return formatted_titles
+    raw_titles = get_anilist_user_animelist(OWNER_USERNAME)
+    all_titles = []
+
+    for t in raw_titles:
+        aliases = generate_aliases({
+            "romaji": t,
+            "english": t,
+            "native": t,
+        })
+        all_titles.extend(list(aliases))
+
+    unique_titles = list(set(all_titles))
+    logger.info(f"🎯 {len(unique_titles)} titres normalisés générés.")
+    return unique_titles
 
 
 def normalize_title(title: str) -> str:
