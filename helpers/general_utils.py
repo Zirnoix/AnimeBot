@@ -2,6 +2,8 @@
 import pytz
 import discord
 from helpers.json_utils import load_json
+import requests
+import datetime
 
 TIMEZONE = pytz.timezone("Europe/Paris")
 
@@ -41,7 +43,53 @@ def get_all_user_genres():
     ]
 
 def get_upcoming_episodes(username):
-    return []
+    query = '''
+    query ($username: String) {
+      MediaListCollection(userName: $username, type: ANIME, status_in: [CURRENT, PLANNING]) {
+        lists {
+          entries {
+            media {
+              title {
+                romaji
+              }
+              nextAiringEpisode {
+                airingAt
+                episode
+              }
+            }
+          }
+        }
+      }
+    }
+    '''
+    variables = {"username": username}
+
+    response = requests.post(
+        "https://graphql.anilist.co",
+        json={"query": query, "variables": variables},
+        headers={"Content-Type": "application/json"}
+    )
+
+    if response.status_code != 200:
+        return []
+
+    data = response.json()
+    episodes = []
+
+    for group in data["data"]["MediaListCollection"]["lists"]:
+        for entry in group["entries"]:
+            media = entry["media"]
+            airing = media.get("nextAiringEpisode")
+            if airing:
+                episodes.append({
+                    "title": media["title"]["romaji"],
+                    "airing_at": datetime.datetime.fromtimestamp(airing["airingAt"]),
+                    "episode": airing["episode"]
+                })
+
+    # Trier les épisodes les plus proches dans le futur
+    episodes.sort(key=lambda ep: ep["airing_at"])
+    return episodes
 
 def search_anime(query):
     return {"title": query.title(), "description": "Description factice."}
