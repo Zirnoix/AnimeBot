@@ -87,10 +87,12 @@ def get_anime_list():
         logger.error("❌ OWNER_USERNAME est vide ou non défini.")
         return get_anilist_user_animelist(OWNER_USERNAME)
 
+anime_list = get_anilist_user_animelist(OWNER_USERNAME)
 
-    if not anime_titles:
-        logger.warning(f"⚠️ Aucun anime récupéré pour {OWNER_USERNAME}")
-        return []
+    if not anime_list:
+        logging.warning("⚠️ Aucun anime trouvé dans la liste de l'utilisateur.")
+    
+    return anime_list
 
     formatted_titles = [anime.title() for anime in anime_titles if isinstance(anime, str)]
 
