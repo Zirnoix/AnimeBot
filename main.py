@@ -4,6 +4,9 @@ import os
 import asyncio
 import logging
 import traceback  # Pour afficher les erreurs en détail
+import helpers.anilist_utils  # Forcer l'import pour que le code dans le fichier s'exécute
+
+print("✅ TEST CONSOLE — Le script main.py démarre bien.")
 
 # Active les logs pour mieux diagnostiquer
 logging.basicConfig(level=logging.INFO)
