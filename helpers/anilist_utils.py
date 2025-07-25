@@ -1,18 +1,14 @@
 # helpers/anilist_utils.py
 import os
-OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
-
-if not OWNER_USERNAME:
-    raise RuntimeError("❌ La variable d’environnement ANILIST_USERNAME est introuvable.")
-else:
-    print("✅ ANILIST_USERNAME =", OWNER_USERNAME)
-
 import requests
 import random
 import re
 from helpers.json_utils import load_json, save_json
 
-print("DEBUG – ANILIST_USERNAME =", os.getenv("ANILIST_USERNAME") or "❌ Non défini")
+print("✅ anilist_utils.py a bien été importé !")
+
+OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
+print("✅ OWNER_USERNAME =", OWNER_USERNAME)
 
 QUIZ_FILE = "quiz_scores.json"
 
