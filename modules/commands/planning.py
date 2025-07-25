@@ -44,16 +44,22 @@ async def mon_planning(ctx):
 async def next_episode(self, ctx):
     username = get_user_anilist(ctx.author.id) or OWNER_USERNAME
     episodes = get_upcoming_episodes(username)
+
     if not episodes:
         return await ctx.send("📭 Aucun épisode à venir trouvé.")
 
+    next_ep = episodes[0]
+    time = next_ep["airing_at"].strftime("%A %d %B %Y à %Hh%M")
 
-    next_ep = min(episodes, key=lambda e: e["airingAt"])
-    dt = datetime.fromtimestamp(next_ep["airingAt"], tz=TIMEZONE)
-    date_fr = format_datetime(dt, "EEEE d MMMM", locale='fr_FR').capitalize()
-    heure = dt.strftime('%H:%M')
-    msg = f"🎬 Prochain épisode : **{next_ep['title']}** – Épisode {next_ep['episode']}\n🕒 {date_fr} à {heure}"
-    await ctx.send(msg)
+    embed = discord.Embed(
+        title="📺 Prochain épisode à venir",
+        description=f"**{next_ep['title']}** – Épisode {next_ep['episode']}",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="📅 Date de diffusion", value=time)
+    embed.set_footer(text=f"Demandé par {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
+
+    await ctx.send(embed=embed)
 
 async def setup(bot):
     bot.add_command(mon_planning)
