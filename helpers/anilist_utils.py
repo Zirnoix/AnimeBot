@@ -104,6 +104,57 @@ def normalize_title(title: str) -> str:
     title = re.sub(r"[^\w\s]", "", title)
     return title.strip()
 
+def get_upcoming_episodes(username):
+    query = '''
+    query ($username: String) {
+      MediaListCollection(userName: $username, type: ANIME) {
+        lists {
+          entries {
+            media {
+              title {
+                romaji
+              }
+              nextAiringEpisode {
+                airingAt
+                timeUntilAiring
+                episode
+              }
+            }
+          }
+        }
+      }
+    }
+    '''
+    variables = {"username": username}
+
+    response = requests.post(
+        "https://graphql.anilist.co",
+        json={"query": query, "variables": variables},
+        headers={"Content-Type": "application/json"}
+    )
+
+    if response.status_code != 200:
+        logging.error("Erreur AniList (next episodes): %s", response.text)
+        return []
+
+    data = response.json()
+    entries = data["data"]["MediaListCollection"]["lists"]
+
+    upcoming = []
+
+    for group in entries:
+        for entry in group["entries"]:
+            media = entry["media"]
+            airing = media.get("nextAiringEpisode")
+            if airing:
+                upcoming.append({
+                    "title": media["title"]["romaji"],
+                    "episode": airing["episode"],
+                    "timeUntilAiring": airing["timeUntilAiring"]
+                })
+
+    return sorted(upcoming, key=lambda x: x["timeUntilAiring"])
+
 
 def update_score(user_id, success):
     scores = load_json(QUIZ_FILE, {})
