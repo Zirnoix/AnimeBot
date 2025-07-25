@@ -17,4 +17,5 @@ def genre_emoji(genres):
         "Ecchi": "😳"
     }
     return " ".join(emoji_map.get(g, "📺") for g in genres[:3])
-
+    
+TIMEZONE = pytz.timezone("Europe/Paris")
