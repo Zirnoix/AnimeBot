@@ -46,6 +46,28 @@ class AnimeQuiz(commands.Cog):
             for _ in range(count):
                 update_score(str(ctx.author.id), False)
 
+    @commands.command(name="animequiz")
+    async def animequiz(self, ctx):
+        anime = random.choice(get_anime_list())
+        await ctx.send(f"🎲 Quel est cet anime ? `{normalize_title(anime)}` (réponds dans les 15 secondes)")
+
+        def check(m):
+            return m.author == ctx.author and m.channel == ctx.channel
+
+        try:
+            msg = await self.bot.wait_for("message", timeout=15.0, check=check)
+        except asyncio.TimeoutError:
+            await ctx.send(f"⏱️ Temps écoulé ! C'était **{anime}**.")
+            update_score(str(ctx.author.id), False)
+            return
+
+        if normalize_title(msg.content) == normalize_title(anime):
+            await ctx.send("✅ Bonne réponse ! +1 point")
+            update_score(str(ctx.author.id), True)
+        else:
+            await ctx.send(f"❌ Mauvaise réponse ! C'était **{anime}**.")
+            update_score(str(ctx.author.id), False)
+
     @commands.command(name="duel")
     async def duel(self, ctx, opponent: discord.Member):
         if opponent.bot:
