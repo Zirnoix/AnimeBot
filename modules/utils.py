@@ -28,6 +28,61 @@ def generate_genre_chart(genre_data: dict, filename: str = "genre_chart.png") ->
 
     return output_path
 
+import requests
+import os
+
+def get_anilist_user_animelist(username):
+    """Récupère la liste des animés vus d’un utilisateur Anilist (fini ou en cours)."""
+    query = '''
+    query ($username: String) {
+      MediaListCollection(userName: $username, type: ANIME) {
+        lists {
+          entries {
+            media {
+              title {
+                romaji
+                english
+                native
+              }
+              status
+              format
+            }
+            status
+          }
+        }
+      }
+    }
+    '''
+
+    variables = {"username": username}
+
+    response = requests.post(
+        'https://graphql.anilist.co',
+        json={'query': query, 'variables': variables},
+        headers={'Content-Type': 'application/json'}
+    )
+
+    if response.status_code != 200:
+        print("Erreur Anilist:", response.text)
+        return []
+
+    data = response.json()
+    entries = data["data"]["MediaListCollection"]["lists"]
+
+    anime_titles = set()
+
+    for group in entries:
+        for entry in group["entries"]:
+            media = entry["media"]
+            titles = media["title"]
+            anime_titles.update([
+                titles.get("romaji", "").lower(),
+                titles.get("english", "").lower(),
+                titles.get("native", "").lower()
+            ])
+
+    return list(filter(None, anime_titles))  # enlève les chaînes vides
+
 def normalize_title(title: str) -> str:
     # Exemple basique
     title = title.lower()
