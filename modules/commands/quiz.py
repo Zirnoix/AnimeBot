@@ -2,107 +2,95 @@ from discord.ext import commands
 import discord
 import random
 import asyncio
-from modules.utils import load_json, save_json
+import json
+import os
+from modules.utils import load_json, save_json, normalize_title, get_anilist_user_animelist
+from dotenv import load_dotenv
 
 # ✅ !animequiz – Devine 1 anime
-@commands.command(name="animequiz")
-async def anime_quiz(ctx):
-    data = load_json("quiz_data.json", [])
-    if not data:
-        await ctx.send("❌ Aucune question disponible.")
-        return
+load_dotenv()
+OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
 
-    question = random.choice(data)
-    anime = question["anime"]
-    options = question["options"]
-    correct = question["answer"]
+QUIZ_FILE = "quiz_scores.json"
 
-    random.shuffle(options)
-    correct_index = options.index(correct)
+def get_anime_list():
+    anime_list = get_anilist_user_animelist(OWNER_USERNAME)
+    return [anime["title"]["romaji"] for anime in anime_list]
 
-    embed = discord.Embed(
-        title="🎮 Anime Quiz",
-        description="Quel est cet anime ?",
-        color=discord.Color.blurple()
-    )
-    for i, opt in enumerate(options):
-        embed.add_field(name=f"{i+1}.", value=opt, inline=False)
-    if question.get("image"):
-        embed.set_image(url=question["image"])
+def update_score(user_id, success):
+    scores = load_json(QUIZ_FILE, {})
+    if user_id not in scores:
+        scores[user_id] = {"points": 0, "games": 0}
 
-    await ctx.send(embed=embed)
+    scores[user_id]["games"] += 1
+    if success:
+        scores[user_id]["points"] += 1
 
-    def check(m):
-        return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit()
+    save_json(QUIZ_FILE, scores)
 
-    try:
-        guess = await ctx.bot.wait_for("message", check=check, timeout=15.0)
-        user_answer = int(guess.content) - 1
-    except asyncio.TimeoutError:
-        await ctx.send(f"⏱️ Temps écoulé ! La bonne réponse était : **{correct}**")
-        return
-    except ValueError:
-        await ctx.send("❌ Réponse invalide.")
-        return
+class AnimeQuiz(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.anime_list = get_anime_list()
 
-    if user_answer == correct_index:
-        await ctx.send("✅ Bonne réponse !")
-        scores = load_json("quiz_scores.json", {})
-        uid = str(ctx.author.id)
-        scores[uid] = scores.get(uid, 0) + 1
-        save_json("quiz_scores.json", scores)
-    else:
-        await ctx.send(f"❌ Mauvaise réponse. C'était **{correct}**.")
+    @commands.command(name="animequiz")
+    async def animequiz(self, ctx):
+        anime = random.choice(self.anime_list)
+        await ctx.send(f"🎲 Quel est cet anime ? `{normalize_title(anime)}` (réponds dans les 15 secondes)")
 
-# ✅ !animequizmulti – N questions de suite
-@commands.command(name="animequizmulti")
-async def anime_quiz_multi(ctx, nombre: int = 5):
-    data = load_json("quiz_data.json", [])
-    if not data or nombre < 1:
-        await ctx.send("❌ Pas assez de données ou nombre invalide.")
-        return
-
-    score = 0
-    used = []
-
-    for i in range(nombre):
-        question = random.choice([q for q in data if q not in used])
-        used.append(question)
-        options = question["options"]
-        correct = question["answer"]
-        random.shuffle(options)
-        correct_index = options.index(correct)
-
-        embed = discord.Embed(
-            title=f"Question {i+1}/{nombre}",
-            description="Quel est cet anime ?",
-            color=discord.Color.blurple()
-        )
-        for j, opt in enumerate(options):
-            embed.add_field(name=f"{j+1}.", value=opt, inline=False)
-        if question.get("image"):
-            embed.set_image(url=question["image"])
-        await ctx.send(embed=embed)
-
-        def check(m): return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit()
+        def check(m):
+            return m.author == ctx.author and m.channel == ctx.channel
 
         try:
-            guess = await ctx.bot.wait_for("message", check=check, timeout=15.0)
-            user_answer = int(guess.content) - 1
+            msg = await self.bot.wait_for("message", timeout=15.0, check=check)
         except asyncio.TimeoutError:
-            await ctx.send(f"⏱️ Temps écoulé ! Réponse : **{correct}**")
-            continue
-        except ValueError:
-            await ctx.send("❌ Réponse invalide.")
-            continue
+            await ctx.send(f"⏱️ Temps écoulé ! C'était **{anime}**.")
+            update_score(str(ctx.author.id), False)
+            return
 
-        if user_answer == correct_index:
-            await ctx.send("✅ Bonne réponse !")
-            score += 1
+        if normalize_title(msg.content) == normalize_title(anime):
+            await ctx.send("✅ Bonne réponse ! +1 point")
+            update_score(str(ctx.author.id), True)
         else:
-            await ctx.send(f"❌ Faux. Réponse : **{correct}**")
+            await ctx.send(f"❌ Mauvaise réponse ! C'était **{anime}**.")
+            update_score(str(ctx.author.id), False)
 
-    await ctx.send(f"🏁 Fin du quiz ! Score : **{score}/{nombre}**")
+    @commands.command(name="animequizmulti")
+    async def animequizmulti(self, ctx, count: int = 5):
+        if count < 5 or count > 20:
+            return await ctx.send("❗ Choisis un nombre entre 5 et 20.")
+
+        score = 0
+        for _ in range(count):
+            anime = random.choice(self.anime_list)
+            await ctx.send(f"🎲 `{normalize_title(anime)}`")
+
+            def check(m):
+                return m.author == ctx.author and m.channel == ctx.channel
+
+            try:
+                msg = await self.bot.wait_for("message", timeout=15.0, check=check)
+            except asyncio.TimeoutError:
+                await ctx.send(f"⏱️ Temps écoulé ! C'était **{anime}**.")
+                continue
+
+            if normalize_title(msg.content) == normalize_title(anime):
+                score += 1
+                await ctx.send("✅")
+            else:
+                await ctx.send(f"❌ C'était **{anime}**.")
+
+        if score >= count / 2:
+            await ctx.send(f"🎉 Tu as eu {score}/{count} bonnes réponses ! +{score} points !")
+            for _ in range(score):
+                update_score(str(ctx.author.id), True)
+        else:
+            await ctx.send(f"😢 Seulement {score}/{count} bonnes réponses. Pas de points.")
+            for _ in range(count):
+                update_score(str(ctx.author.id), False)
+
+async def setup(bot):
+    await bot.add_cog(AnimeQuiz(bot))
 
 # ✅ !duel – Joue contre un ami
 @commands.command(name="duel")
