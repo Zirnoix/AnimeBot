@@ -10,7 +10,7 @@ from helpers.json_utils import load_json, save_json
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Récupère le nom d'utilisateur Anilist
+# Récupère le nom d'utilisateur Anilist depuis les variables d'environnement
 OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
 QUIZ_FILE = "quiz_scores.json"
 
@@ -24,6 +24,10 @@ def get_user_anilist(user_id):
 
 
 def get_anilist_user_animelist(username):
+    if not username:
+        logger.error("❌ Nom d'utilisateur Anilist manquant.")
+        return []
+
     query = '''
     query ($username: String) {
       MediaListCollection(userName: $username, type: ANIME) {
@@ -73,30 +77,24 @@ def get_anilist_user_animelist(username):
                 logger.warning(f"❌ Pas de titre dans media : {media}")
                 continue
 
-            logger.info(f"✅ Titre détecté : {titles}")
-
             for key in ("romaji", "english", "native"):
                 if titles.get(key):
                     anime_titles.add(titles[key].lower())
 
+    logger.info(f"🎉 {len(anime_titles)} titres collectés depuis Anilist.")
     return list(anime_titles)
 
 
 def get_anime_list():
-    if not OWNER_USERNAME:
-        logger.error("❌ OWNER_USERNAME est vide ou non défini.")
-        return get_anilist_user_animelist(OWNER_USERNAME)
+    """Récupère et formate la liste des animés vus par l’utilisateur propriétaire."""
+    anime_titles = get_anilist_user_animelist(OWNER_USERNAME)
 
-anime_list = get_anilist_user_animelist(OWNER_USERNAME)
+    if not anime_titles:
+        logger.warning("⚠️ Aucun anime trouvé dans la liste de l'utilisateur.")
+        return []
 
-    if not anime_list:
-        logging.warning("⚠️ Aucun anime trouvé dans la liste de l'utilisateur.")
-    
-    return anime_list
-
-    formatted_titles = [anime.title() for anime in anime_titles if isinstance(anime, str)]
-
-    logger.info(f"🎉 {len(formatted_titles)} animés chargés pour {OWNER_USERNAME}")
+    formatted_titles = [title.title() for title in anime_titles if isinstance(title, str)]
+    logger.info(f"📦 {len(formatted_titles)} animés formatés pour le quiz.")
     return formatted_titles
 
 
