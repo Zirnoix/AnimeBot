@@ -27,7 +27,14 @@ def generate_genre_chart(genre_data: dict, filename: str = "genre_chart.png") ->
     plt.close()
 
     return output_path
-    
+
+def normalize_title(title: str) -> str:
+    # Exemple basique
+    title = title.lower()
+    title = title.replace("’", "'")
+    title = re.sub(r"[^\w\s]", "", title)  # retire la ponctuation
+    return title.strip()
+
 def generate_stats_embed(username, stats):
     embed = discord.Embed(title=f"📊 Stats pour {username}", color=discord.Color.blue())
     for k, v in stats.items():
