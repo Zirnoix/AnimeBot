@@ -6,53 +6,6 @@ import json
 import os
 from modules.utils import load_json, save_json, normalize_title, get_anilist_user_animelist, get_anime_list, update_score, normalize_title
 
-# ✅ !animequiz – Devine 1 anime
-OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
-
-QUIZ_FILE = "quiz_scores.json"
-
-def get_anime_list():
-    anime_list = get_anilist_user_animelist(OWNER_USERNAME)
-    return [anime["title"]["romaji"] for anime in anime_list]
-
-def update_score(user_id, success):
-    scores = load_json(QUIZ_FILE, {})
-    if user_id not in scores:
-        scores[user_id] = {"points": 0, "games": 0}
-
-    scores[user_id]["games"] += 1
-    if success:
-        scores[user_id]["points"] += 1
-
-    save_json(QUIZ_FILE, scores)
-
-class AnimeQuiz(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self.anime_list = get_anime_list()
-
-    @commands.command(name="animequiz")
-    async def animequiz(self, ctx):
-        anime = random.choice(self.anime_list)
-        await ctx.send(f"🎲 Quel est cet anime ? `{normalize_title(anime)}` (réponds dans les 15 secondes)")
-
-        def check(m):
-            return m.author == ctx.author and m.channel == ctx.channel
-
-        try:
-            msg = await self.bot.wait_for("message", timeout=15.0, check=check)
-        except asyncio.TimeoutError:
-            await ctx.send(f"⏱️ Temps écoulé ! C'était **{anime}**.")
-            update_score(str(ctx.author.id), False)
-            return
-
-        if normalize_title(msg.content) == normalize_title(anime):
-            await ctx.send("✅ Bonne réponse ! +1 point")
-            update_score(str(ctx.author.id), True)
-        else:
-            await ctx.send(f"❌ Mauvaise réponse ! C'était **{anime}**.")
-            update_score(str(ctx.author.id), False)
-
     @commands.command(name="animequizmulti")
     async def animequizmulti(self, ctx, count: int = 5):
         if count < 5 or count > 20:
