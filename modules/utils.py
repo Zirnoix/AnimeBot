@@ -3,6 +3,27 @@ import os
 import pytz
 import discord
 import matplotlib.pyplot as plt
+import os
+import random
+from modules.utils import load_json, save_json, normalize_title, get_anilist_user_animelist
+
+OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
+QUIZ_FILE = "quiz_scores.json"
+
+def get_anime_list():
+    anime_list = get_anilist_user_animelist(OWNER_USERNAME)
+    return [anime["title"]["romaji"] for anime in anime_list]
+
+def update_score(user_id, success):
+    scores = load_json(QUIZ_FILE, {})
+    if user_id not in scores:
+        scores[user_id] = {"points": 0, "games": 0}
+
+    scores[user_id]["games"] += 1
+    if success:
+        scores[user_id]["points"] += 1
+
+    save_json(QUIZ_FILE, scores)
 
 TIMEZONE = pytz.timezone("Europe/Paris")
 
