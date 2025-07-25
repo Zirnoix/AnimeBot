@@ -16,7 +16,7 @@ intents.guilds = True
 intents.members = True
 
 # Création du bot
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # Modules à charger
 extensions = [
