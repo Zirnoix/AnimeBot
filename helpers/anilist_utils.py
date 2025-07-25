@@ -26,37 +26,48 @@ def get_anilist_user_animelist(username):
                 english
                 native
               }
+              status
+              format
             }
+            status
           }
         }
       }
     }
     '''
+
     variables = {"username": username}
+
     response = requests.post(
         'https://graphql.anilist.co',
         json={'query': query, 'variables': variables},
         headers={'Content-Type': 'application/json'}
     )
+
     if response.status_code != 200:
         print("Erreur Anilist:", response.text)
         return []
 
     data = response.json()
     entries = data["data"]["MediaListCollection"]["lists"]
+
     anime_titles = set()
 
     for group in entries:
         for entry in group["entries"]:
-            media = entry["media"]
-            titles = media["title"]
-            anime_titles.update([
-                titles.get("romaji", "").lower(),
-                titles.get("english", "").lower(),
-                titles.get("native", "").lower(),
-            ])
+            media = entry.get("media")
+            if not media:
+                continue
 
-    return list(filter(None, anime_titles))
+            titles = media.get("title")
+            if not titles:
+                continue
+
+            for key in ("romaji", "english", "native"):
+                if titles.get(key):
+                    anime_titles.add(titles[key].lower())
+
+    return list(anime_titles)
 
 
 def get_anime_list():
