@@ -25,7 +25,8 @@ def get_user_anilist(username: str = None):
     if response.status_code != 200:
         raise Exception("Erreur lors de la récupération de l'utilisateur AniList")
 
-    return response.json()["data"]["User"]p
+    return response.json()["data"]["User"]
+
 def normalize_title(title):
     nfkd = unicodedata.normalize('NFKD', title)
     cleaned = "".join(c for c in nfkd if not unicodedata.combining(c))
