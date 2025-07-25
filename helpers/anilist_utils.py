@@ -5,11 +5,9 @@ import random
 import re
 from helpers.json_utils import load_json, save_json
 
-print("DEBUG – ANILIST_USERNAME =", os.getenv("ANILIST_USERNAME"))
+print("DEBUG – ANILIST_USERNAME =", os.getenv("ANILIST_USERNAME") or "❌ Non défini")
 
-OWNER_USERNAME = os.getenv("ANILIST_USERNAME")
 QUIZ_FILE = "quiz_scores.json"
-
 
 def get_user_anilist(user_id):
     linked_users = load_json("linked_users.json", {})
@@ -73,7 +71,10 @@ def get_anilist_user_animelist(username):
 
 
 def get_anime_list():
-    return [anime.title() for anime in get_anilist_user_animelist(OWNER_USERNAME)]
+    username = os.getenv("ANILIST_USERNAME")
+    if not username:
+        raise ValueError("ANILIST_USERNAME is not set in environment variables.")
+    return [anime.title() for anime in get_anilist_user_animelist(username)]
 
 
 def normalize_title(title: str) -> str:
