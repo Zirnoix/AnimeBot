@@ -109,10 +109,8 @@ def get_anime_list():
 
 
 def normalize_title(title: str) -> str:
-    title = title.lower()
-    title = title.replace("’", "'")
-    title = re.sub(r"[^\w\s]", "", title)
-    return title.strip()
+    from helpers.title_matcher import normalize
+    return normalize(title)
 
 def get_upcoming_episodes(username):
     query = '''
