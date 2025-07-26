@@ -1,6 +1,0 @@
-discord.py
-requests
-pytz
-babel
-Pillow
-matplotlib
