@@ -3,6 +3,33 @@ import os
 
 ANILIST_API_URL = "https://graphql.anilist.co"
 
+def get_next_airing_episodes():
+    query = '''
+    query {
+      Page(perPage: 10) {
+        media(type: ANIME, sort: NEXT_AIRING_EPISODE) {
+          title {
+            romaji
+          }
+          nextAiringEpisode {
+            airingAt
+            episode
+          }
+        }
+      }
+    }
+    '''
+    response = requests.post(
+        ANILIST_API_URL,
+        json={"query": query},
+        headers={"Content-Type": "application/json"}
+    )
+    if response.status_code != 200:
+        return []
+
+    data = response.json()
+    return data.get("data", {}).get("Page", {}).get("media", [])
+
 def get_next_episode_for_user(anilist_username):
     query = '''
     query ($username: String) {
