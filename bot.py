@@ -16,4 +16,4 @@ async def load_extensions():
             await bot.load_extension(f"cogs.{filename[:-3]}")
 
 asyncio.run(load_extensions())
-bot.run(os.getenv("DISCORD_TOKEN"))
+bot.run(os.getenv("DISCORD_BOT_TOKEN"))
