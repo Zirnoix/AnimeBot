@@ -1,4 +1,60 @@
 import requests
+import os
+
+ANILIST_API_URL = "https://graphql.anilist.co"
+
+def get_next_episode_for_user(anilist_username):
+    query = '''
+    query ($username: String) {
+      MediaListCollection(userName: $username, type: ANIME, status: CURRENT) {
+        lists {
+          entries {
+            media {
+              title {
+                romaji
+              }
+              nextAiringEpisode {
+                airingAt
+                episode
+              }
+            }
+          }
+        }
+      }
+    }
+    '''
+
+    variables = {"username": anilist_username}
+
+    response = requests.post(
+        ANILIST_API_URL,
+        json={"query": query, "variables": variables},
+        headers={"Content-Type": "application/json"}
+    )
+
+    if response.status_code != 200:
+        return None
+
+    data = response.json()
+    entries = data.get("data", {}).get("MediaListCollection", {}).get("lists", [])
+    upcoming = []
+
+    for list_group in entries:
+        for entry in list_group["entries"]:
+            media = entry["media"]
+            next_ep = media.get("nextAiringEpisode")
+            if next_ep:
+                upcoming.append({
+                    "title": media["title"]["romaji"],
+                    "airingAt": next_ep["airingAt"],
+                    "episode": next_ep["episode"]
+                })
+
+    # On retourne l'épisode le plus proche
+    if upcoming:
+        return sorted(upcoming, key=lambda x: x["airingAt"])[0]
+
+    return None
 
 API_URL = "https://graphql.anilist.co"
 
