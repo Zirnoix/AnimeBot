@@ -1,0 +1,1 @@
+# Anilist API integration
