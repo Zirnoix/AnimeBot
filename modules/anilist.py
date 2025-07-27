@@ -3,32 +3,82 @@ import os
 
 ANILIST_API_URL = "https://graphql.anilist.co"
 
-def get_next_airing_episodes():
+def get_user_stats(username):
     query = '''
-    query {
-      Page(perPage: 10) {
-        media(type: ANIME, sort: NEXT_AIRING_EPISODE) {
-          title {
-            romaji
-          }
-          nextAiringEpisode {
-            airingAt
-            episode
+    query ($username: String) {
+      User(name: $username) {
+        statistics {
+          anime {
+            count
+            meanScore
+            minutesWatched
+            episodesWatched
           }
         }
       }
     }
     '''
+    variables = {"username": username}
+
     response = requests.post(
         ANILIST_API_URL,
-        json={"query": query},
+        json={"query": query, "variables": variables},
         headers={"Content-Type": "application/json"}
     )
+
+    if response.status_code != 200:
+        return None
+
+    user_data = response.json().get("data", {}).get("User", {})
+    return user_data.get("statistics", {}).get("anime", None)
+
+def get_next_airing_episodes(username):
+    query = '''
+    query ($username: String) {
+      MediaListCollection(userName: $username, type: ANIME, status: CURRENT) {
+        lists {
+          entries {
+            media {
+              title {
+                romaji
+              }
+              nextAiringEpisode {
+                airingAt
+                episode
+              }
+            }
+          }
+        }
+      }
+    }
+    '''
+    variables = {"username": username}
+
+    response = requests.post(
+        ANILIST_API_URL,
+        json={"query": query, "variables": variables},
+        headers={"Content-Type": "application/json"}
+    )
+
     if response.status_code != 200:
         return []
 
     data = response.json()
-    return data.get("data", {}).get("Page", {}).get("media", [])
+    entries = data.get("data", {}).get("MediaListCollection", {}).get("lists", [])
+    results = []
+
+    for group in entries:
+        for entry in group["entries"]:
+            media = entry["media"]
+            airing = media.get("nextAiringEpisode")
+            if airing:
+                results.append({
+                    "title": media["title"]["romaji"],
+                    "airingAt": airing["airingAt"],
+                    "episode": airing["episode"]
+                })
+
+    return sorted(results, key=lambda x: x["airingAt"])
 
 def get_next_episode_for_user(anilist_username):
     query = '''
