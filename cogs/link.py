@@ -3,7 +3,7 @@ from modules.anilist import fetch_anilist_user_id
 import json
 import os
 
-LINKS_FILE = "data/user_links.json"
+LINKS_FILE = "data/linked_users.json"
 
 class LinkAniList(commands.Cog):
     def __init__(self, bot):
