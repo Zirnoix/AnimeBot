@@ -4,7 +4,7 @@ from modules.anilist import fetch_user_profile
 import json
 import os
 
-LINKS_FILE = "data/linked_user.json"
+LINKS_FILE = "data/linked_users.json"
 
 class AniListProfile(commands.Cog):
     def __init__(self, bot):
