@@ -2,51 +2,57 @@
 
 import json
 import os
-from datetime import datetime, timedelta
 
-SCORES_FILE = "data/quiz_scores.json"
-WINNER_FILE = "data/monthly_winner.json"
+DB_FOLDER = "data"
+DB_FILE = os.path.join(DB_FOLDER, "scores.json")
+MONTHLY_WINNER_FILE = os.path.join(DB_FOLDER, "monthly_winner.json")
+
+def ensure_data_files():
+    if not os.path.exists(DB_FOLDER):
+        os.makedirs(DB_FOLDER)
+
+    if not os.path.exists(DB_FILE):
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+
+    if not os.path.exists(MONTHLY_WINNER_FILE):
+        with open(MONTHLY_WINNER_FILE, "w", encoding="utf-8") as f:
+            json.dump({}, f)
 
 def load_scores():
-    if not os.path.exists(SCORES_FILE):
-        return {}
-    with open(SCORES_FILE, "r", encoding="utf-8") as f:
+    ensure_data_files()
+    with open(DB_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def save_scores(scores):
-    with open(SCORES_FILE, "w", encoding="utf-8") as f:
+    with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(scores, f, ensure_ascii=False, indent=2)
 
-def add_score(user_id, amount):
+def add_score(user_id, points):
     scores = load_scores()
     user_id = str(user_id)
-    scores[user_id] = scores.get(user_id, 0) + amount
+    scores[user_id] = scores.get(user_id, 0) + points
     save_scores(scores)
-
-def get_monthly_winner():
-    if not os.path.exists(WINNER_FILE):
-        return None
-    with open(WINNER_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def set_monthly_winner(winner_id, score):
-    with open(WINNER_FILE, "w", encoding="utf-8") as f:
-        json.dump({
-            "winner_id": winner_id,
-            "score": score,
-            "date": datetime.now().strftime("%Y-%m-%d")
-        }, f, ensure_ascii=False, indent=2)
 
 def reset_monthly_scores():
     scores = load_scores()
     if not scores:
-        return
+        return None  # Aucun score à enregistrer
 
-    top_user = max(scores.items(), key=lambda x: x[1])
-    set_monthly_winner(top_user[0], top_user[1])
-    save_scores({})  # reset scores
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    winner_id, top_score = sorted_scores[0]
 
-def days_until_next_month():
-    now = datetime.now()
-    next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
-    return (next_month - now).days
+    save_monthly_winner(winner_id, top_score)
+
+    # Réinitialiser les scores
+    save_scores({})
+    return winner_id, top_score
+
+def get_monthly_winner():
+    ensure_data_files()
+    with open(MONTHLY_WINNER_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_monthly_winner(user_id, score):
+    with open(MONTHLY_WINNER_FILE, "w", encoding="utf-8") as f:
+        json.dump({"winner": user_id, "score": score}, f, ensure_ascii=False, indent=2)
