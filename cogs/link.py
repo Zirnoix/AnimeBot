@@ -1,39 +1,48 @@
-# cogs/link.py
-
-import discord
 from discord.ext import commands
-from modules.user_settings import link_anilist_account, unlink_anilist_account, get_anilist_username
+from modules.anilist import fetch_anilist_user_id
+import json
+import os
 
-class Link(commands.Cog):
+LINKS_FILE = "data/user_links.json"
+
+class LinkAniList(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        os.makedirs("data", exist_ok=True)
+        if not os.path.exists(LINKS_FILE):
+            with open(LINKS_FILE, "w") as f:
+                json.dump({}, f)
+
+    def save_link(self, discord_id, anilist_id):
+        with open(LINKS_FILE, "r") as f:
+            data = json.load(f)
+        data[str(discord_id)] = anilist_id
+        with open(LINKS_FILE, "w") as f:
+            json.dump(data, f, indent=4)
 
     @commands.command(name="linkanilist")
-    async def link_anilist(self, ctx, username: str):
-        link_anilist_account(ctx.author.id, username)
-        await ctx.send(f"🔗 Ton compte Anilist **{username}** a bien été lié.")
+    async def link_anilist(self, ctx, *, username: str):
+        """Lie ton compte AniList à ton compte Discord."""
+        await ctx.trigger_typing()
+        user_id = await fetch_anilist_user_id(username)
+        if user_id:
+            self.save_link(ctx.author.id, user_id)
+            await ctx.send(f"✅ Ton compte AniList a été lié à `{username}` (ID: {user_id})")
+        else:
+            await ctx.send("❌ Aucun utilisateur AniList trouvé avec ce nom.")
 
     @commands.command(name="unlinkanilist")
     async def unlink_anilist(self, ctx):
-        if not get_anilist_username(ctx.author.id):
-            await ctx.send("❌ Aucun compte Anilist n’est actuellement lié.")
-            return
-
-        unlink_anilist_account(ctx.author.id)
-        await ctx.send("🔓 Ton compte Anilist a bien été délié.")
-
-    @commands.command(name="anilist")
-    async def anilist_profile(self, ctx):
-        username = get_anilist_username(ctx.author.id)
-        if not username:
-            await ctx.send("❌ Tu dois d’abord lier ton compte Anilist avec `!linkanilist <pseudo>`.")
-            return
-
-        embed = discord.Embed(title="🧾 Ton profil Anilist", color=0x1e90ff)
-        embed.add_field(name="Nom d’utilisateur", value=username, inline=False)
-        embed.add_field(name="Lien", value=f"https://anilist.co/user/{username}/", inline=False)
-        embed.set_footer(text="AnimeBot - Anilist Integration")
-        await ctx.send(embed=embed)
+        """Délie ton compte AniList de ton compte Discord."""
+        with open(LINKS_FILE, "r") as f:
+            data = json.load(f)
+        if str(ctx.author.id) in data:
+            del data[str(ctx.author.id)]
+            with open(LINKS_FILE, "w") as f:
+                json.dump(data, f, indent=4)
+            await ctx.send("✅ Ton compte AniList a été délié avec succès.")
+        else:
+            await ctx.send("❌ Aucun compte AniList n’est lié à ton profil Discord.")
 
 async def setup(bot):
-    await bot.add_cog(Link(bot))
+    await bot.add_cog(LinkAniList(bot))
