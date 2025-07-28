@@ -1,37 +1,25 @@
 import discord
 from discord.ext import commands
 from modules.anilist import fetch_user_profile_by_id
-import json
-import os
-
-LINKS_FILE = "data/linked_users.json"
+from modules.user_links import get_link
 
 class AniListProfile(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def get_linked_anilist_id(self, discord_id):
-        if not os.path.exists(LINKS_FILE):
-            return None
-        with open(LINKS_FILE, "r") as f:
-            data = json.load(f)
-        return data.get(str(discord_id), None)
-
     @commands.command(name="anilist")
     async def anilist(self, ctx):
         """Affiche ton profil AniList lié."""
-        print(f"[DEBUG] Commande !anilist exécutée pour {ctx.author.name} ({ctx.author.id})")
+        print(f"[DEBUG] !anilist lancé par {ctx.author.name} ({ctx.author.id})")
 
-        user_id = self.get_linked_anilist_id(ctx.author.id)
-        print(f"[DEBUG] Résultat de get_linked_anilist_id: {user_id}")
+        user_id = get_link(ctx.author.id)
+        print(f"[DEBUG] ID AniList trouvé en base : {user_id}")
 
         if not user_id:
             await ctx.send("❌ Tu n’as pas encore lié ton compte AniList avec `!linkanilist <pseudo>`.")
             return
 
         user = await fetch_user_profile_by_id(user_id)
-        print(f"[DEBUG] fetch_user_profile_by_id → {user}")
-
         if not user:
             await ctx.send("❌ Impossible de récupérer les infos de ton compte AniList.")
             return
