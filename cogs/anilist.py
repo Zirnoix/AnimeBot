@@ -1,10 +1,8 @@
 import discord
 from discord.ext import commands
-from modules.anilist import fetch_user_profile
+from modules.anilist import fetch_user_profile_by_id
 import json
 import os
-
-print("[DEBUG] cogs.anilist.py chargé")
 
 LINKS_FILE = "data/linked_users.json"
 
@@ -22,14 +20,18 @@ class AniListProfile(commands.Cog):
     @commands.command(name="anilist")
     async def anilist(self, ctx):
         """Affiche ton profil AniList lié."""
-        print(f"[DEBUG] Recherche ID Anilist lié pour {ctx.author.id}")
-        print(f"[DEBUG] Résultat trouvé : {user_id}")
+        print(f"[DEBUG] Commande !anilist exécutée pour {ctx.author.name} ({ctx.author.id})")
+
         user_id = self.get_linked_anilist_id(ctx.author.id)
+        print(f"[DEBUG] Résultat de get_linked_anilist_id: {user_id}")
+
         if not user_id:
             await ctx.send("❌ Tu n’as pas encore lié ton compte AniList avec `!linkanilist <pseudo>`.")
             return
 
-        user = await fetch_user_profile(ctx.author.name)
+        user = await fetch_user_profile_by_id(user_id)
+        print(f"[DEBUG] fetch_user_profile_by_id → {user}")
+
         if not user:
             await ctx.send("❌ Impossible de récupérer les infos de ton compte AniList.")
             return
