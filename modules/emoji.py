@@ -5,6 +5,19 @@
     "Expert": "🎯",
     "Champion": "🔥",
     "Légende": "🌌",
+
+}
+
+EMOJIS = {
+    "success": "✅",
+    "error": "❌",
+    "loading": "⌛",
+    "star": "⭐",
+    "calendar": "📅",
+    "clock": "🕒",
+    "link": "🔗",
+    "warning": "⚠️",
+    "info": "ℹ️"
 }
 
 
