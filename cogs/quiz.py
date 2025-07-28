@@ -4,48 +4,88 @@ from modules.score_manager import load_scores, save_scores, add_quiz_point, get_
 from modules.rank_card import generate_rank_card
 from modules.quiz import get_days_until_reset
 import asyncio
+import random
+import aiohttp
 
-class Quiz(commands.Cog):
+ANILIST_API_URL = "https://graphql.anilist.co"
+
+class AnimeQuiz(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     @commands.command(name="animequiz")
     async def anime_quiz(self, ctx):
-        question = fetch_quiz_question()
-        if not question:
-            await ctx.send("❌ Impossible de récupérer une question de quiz.")
+        """Devine l’anime à partir de l’image !"""
+        await ctx.trigger_typing()
+
+        # Récupération d’un anime aléatoire
+        anime = await self.get_random_anime()
+        if not anime:
+            await ctx.send("❌ Impossible de récupérer un anime. Réessaie.")
             return
 
-        embed = discord.Embed(title="🎮 Anime Quiz", description="Quel est cet anime ?", color=0x3498db)
-        embed.set_image(url=question['image'])
-        options = question['options']
-        correct_index = question['answer']
+        title = anime["title"]["romaji"]
+        image_url = anime.get("coverImage", {}).get("extraLarge") or anime.get("coverImage", {}).get("large")
 
-        components = [
-            discord.ui.Button(label=opt, style=discord.ButtonStyle.primary, custom_id=str(i))
-            for i, opt in enumerate(options)
-        ]
+        embed = discord.Embed(
+            title="🎲 Devine l’anime !",
+            description="Tu as 15 secondes pour trouver le nom !",
+            color=discord.Color.blurple()
+        )
+        embed.set_image(url=image_url)
 
-        view = discord.ui.View()
-        for btn in components:
-            view.add_item(btn)
+        await ctx.send(embed=embed)
 
-        message = await ctx.send(embed=embed, view=view)
-
-        def check(interaction):
-            return interaction.user == ctx.author and interaction.message.id == message.id
+        def check(m):
+            return m.channel == ctx.channel and m.author == ctx.author
 
         try:
-            interaction = await self.bot.wait_for("interaction", timeout=15.0, check=check)
+            msg = await self.bot.wait_for("message", timeout=15.0, check=check)
         except asyncio.TimeoutError:
-            await ctx.send(f"⏰ Temps écoulé ! La bonne réponse était : **{options[correct_index]}**")
+            await ctx.send(f"⏱️ Temps écoulé ! La bonne réponse était : **{title}**")
             return
 
-        if int(interaction.data["custom_id"]) == correct_index:
-            await interaction.response.send_message("✅ Bonne réponse ! +1 point")
-            update_score(ctx.author.id, 1)
+        if msg.content.lower().strip() in [
+            title.lower(),
+            anime["title"].get("english", "").lower(),
+            anime["title"].get("native", "").lower()
+        ]:
+            await ctx.send("✅ Bonne réponse !")
         else:
-            await interaction.response.send_message(f"❌ Mauvaise réponse. C'était **{options[correct_index]}**")
+            await ctx.send(f"❌ Mauvaise réponse. C’était : **{title}**")
+
+    async def get_random_anime(self):
+        query = '''
+        query ($page: Int) {
+            Page(perPage: 1, page: $page) {
+                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                    title {
+                        romaji
+                        english
+                        native
+                    }
+                    coverImage {
+                        large
+                        extraLarge
+                    }
+                }
+            }
+        }
+        '''
+        page = random.randint(1, 500)
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(ANILIST_API_URL, json={"query": query, "variables": {"page": page}}) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                try:
+                    return data["data"]["Page"]["media"][0]
+                except (KeyError, IndexError):
+                    return None
+
+async def setup(bot):
+    await bot.add_cog(AnimeQuiz(bot))
 
     @commands.command(name="animequizmulti")
     async def anime_quiz_multi(self, ctx, nombre: int):
