@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from modules.score_manager import load_scores, save_scores, add_quiz_point, get_top_scores, reset_monthly_scores, get_user_rank
 from modules.rank_card import generate_rank_card
-from modules.quiz_reset import get_days_until_reset
+from modules.quiz import get_days_until_reset
 import asyncio
 
 class Quiz(commands.Cog):
