@@ -20,6 +20,8 @@ class AniListProfile(commands.Cog):
     @commands.command(name="anilist")
     async def anilist(self, ctx):
         """Affiche ton profil AniList lié."""
+        print(f"[DEBUG] Recherche ID Anilist lié pour {ctx.author.id}")
+        print(f"[DEBUG] Résultat trouvé : {user_id}")
         user_id = self.get_linked_anilist_id(ctx.author.id)
         if not user_id:
             await ctx.send("❌ Tu n’as pas encore lié ton compte AniList avec `!linkanilist <pseudo>`.")
