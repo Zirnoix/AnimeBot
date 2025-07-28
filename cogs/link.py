@@ -1,7 +1,7 @@
-from discord.ext import commands
-from modules.anilist import fetch_anilist_user_id
 import json
 import os
+from discord.ext import commands
+from modules.anilist import fetch_anilist_user_id
 
 LINKS_FILE = "data/linked_users.json"
 
@@ -21,10 +21,10 @@ class LinkAniList(commands.Cog):
         except (FileNotFoundError, json.JSONDecodeError):
             data = {}
 
-    data[str(discord_id)] = anilist_id
+        data[str(discord_id)] = anilist_id
 
-    with open(LINKS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+        with open(LINKS_FILE, "w") as f:
+            json.dump(data, f, indent=4)
 
     @commands.command(name="linkanilist")
     async def link_anilist(self, ctx, *, username: str):
@@ -42,9 +42,12 @@ class LinkAniList(commands.Cog):
 
     @commands.command(name="unlinkanilist")
     async def unlink_anilist(self, ctx):
-        """Délie ton compte AniList de ton compte Discord."""
-        with open(LINKS_FILE, "r") as f:
-            data = json.load(f)
+        try:
+            with open(LINKS_FILE, "r") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+
         if str(ctx.author.id) in data:
             del data[str(ctx.author.id)]
             with open(LINKS_FILE, "w") as f:
