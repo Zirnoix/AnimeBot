@@ -38,5 +38,8 @@ def remove_link(discord_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM links WHERE discord_id = ?", (str(discord_id),))
+    changes = conn.total_changes
     conn.commit()
     conn.close()
+    return changes > 0
+
