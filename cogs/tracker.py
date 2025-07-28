@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from modules.anilist import link_anilist_account, track_anime, untrack_anime, get_tracked_anime
+from modules.user_settings import link_anilist_account, track_anime, untrack_anime, get_tracked_anime
 
 class Tracker(commands.Cog):
     def __init__(self, bot):
