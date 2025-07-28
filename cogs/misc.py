@@ -1,7 +1,9 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import datetime
 import time
+import os
+import json
 
 class Misc(commands.Cog):
     def __init__(self, bot):
@@ -34,11 +36,14 @@ class Misc(commands.Cog):
     @commands.command(name="todayinhistory")
     async def today_in_history(self, ctx):
         today = datetime.datetime.now().strftime("%m-%d")
-        # Exemple d’anecdote (à remplacer avec une vraie base de données ou API plus tard)
         mock_history = {
-            "07-27": ["✨ 2002 : Diffusion de l’épisode final de *Naruto* au Japon.",
-                      "📚 1995 : Sortie du manga *Great Teacher Onizuka*."],
-            "12-25": ["🎄 Joyeux Noël ! Peu d’animes diffusés ce jour-là."]
+            "07-27": [
+                "✨ 2002 : Diffusion de l’épisode final de *Naruto* au Japon.",
+                "📚 1995 : Sortie du manga *Great Teacher Onizuka*."
+            ],
+            "12-25": [
+                "🎄 Joyeux Noël ! Peu d’animes diffusés ce jour-là."
+            ]
         }
 
         facts = mock_history.get(today, [])
@@ -52,6 +57,23 @@ class Misc(commands.Cog):
 
         embed.set_footer(text="AnimeBot - Culture animée")
         await ctx.send(embed=embed)
+
+    @commands.command(name="setchannel")
+    @commands.has_permissions(administrator=True)
+    async def setchannel(self, ctx):
+        config_path = "config.json"
+        channel_id = ctx.channel.id
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        else:
+            config = {}
+
+        config["notification_channel_id"] = channel_id
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+
+        await ctx.send(f"📢 Ce salon a été défini comme canal de notification !")
 
 async def setup(bot):
     await bot.add_cog(Misc(bot))
