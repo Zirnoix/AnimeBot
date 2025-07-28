@@ -1,6 +1,8 @@
 import requests
 import os
 import random
+import aiohttp
+import asyncio
 
 ANILIST_API_URL = "https://graphql.anilist.co"
 HEADERS = {
@@ -8,6 +10,117 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+async def fetch_anilist_user_id(username):
+    query = '''
+    query ($name: String) {
+      User(name: $name) {
+        id
+      }
+    }
+    '''
+    variables = {"name": username}
+    data = await fetch_anilist_data(query, variables)
+    if data and "User" in data:
+        return data["User"]["id"]
+    return None
+
+# Récupère le planning (prochains épisodes) pour un user donné
+async def fetch_user_airing_schedule(user_id):
+    query = '''
+    query ($userId: Int) {
+      MediaListCollection(userId: $userId, type: ANIME, status: CURRENT) {
+        lists {
+          entries {
+            media {
+              id
+              title {
+                romaji
+              }
+              nextAiringEpisode {
+                airingAt
+                episode
+              }
+            }
+          }
+        }
+      }
+    }
+    '''
+    variables = {"userId": user_id}
+    data = await fetch_anilist_data(query, variables)
+    results = []
+    if data and "MediaListCollection" in data:
+        for lst in data["MediaListCollection"]["lists"]:
+            for entry in lst["entries"]:
+                media = entry["media"]
+                airing = media.get("nextAiringEpisode")
+                if airing:
+                    results.append({
+                        "title": media["title"]["romaji"],
+                        "airingAt": airing["airingAt"],
+                        "episode": airing["episode"]
+                    })
+    return results
+
+# Récupère les stats (score moyen, nombre d’animes vus, etc.)
+async def fetch_user_stats(user_id):
+    query = '''
+    query ($userId: Int) {
+      User(id: $userId) {
+        statistics {
+          anime {
+            count
+            meanScore
+            minutesWatched
+            episodesWatched
+          }
+        }
+      }
+    }
+    '''
+    variables = {"userId": user_id}
+    data = await fetch_anilist_data(query, variables)
+    if data and "User" in data:
+        return data["User"]["statistics"]["anime"]
+    return None
+
+# Récupère les infos de profil Anilist
+async def fetch_user_profile(username):
+    query = '''
+    query ($name: String) {
+      User(name: $name) {
+        id
+        name
+        siteUrl
+        avatar {
+          large
+        }
+        statistics {
+          anime {
+            count
+            meanScore
+            minutesWatched
+          }
+        }
+      }
+    }
+    '''
+    variables = {"name": username}
+    data = await fetch_anilist_data(query, variables)
+    if data and "User" in data:
+        return data["User"]
+    return None
+
+# Requête principale Anilist
+async def fetch_anilist_data(query, variables):
+    async with aiohttp.ClientSession() as session:
+        async with session.post(ANILIST_API_URL, json={"query": query, "variables": variables}) as resp:
+            if resp.status == 200:
+                json_data = await resp.json()
+                return json_data.get("data", None)
+            else:
+                return None
+                
 def run_query(query, variables=None):
     response = requests.post(ANILIST_API_URL, json={"query": query, "variables": variables}, headers=HEADERS)
     if response.status_code != 200:
