@@ -21,15 +21,18 @@ class LinkAniList(commands.Cog):
             json.dump(data, f, indent=4)
 
     @commands.command(name="linkanilist")
-    async def link_anilist(self, ctx, *, username: str):
-        """Lie ton compte AniList à ton compte Discord."""
-        await ctx.trigger_typing()
-        user_id = await fetch_anilist_user_id(username)
-        if user_id:
-            self.save_link(ctx.author.id, user_id)
-            await ctx.send(f"✅ Ton compte AniList a été lié à `{username}` (ID: {user_id})")
-        else:
-            await ctx.send("❌ Aucun utilisateur AniList trouvé avec ce nom.")
+async def link_anilist(self, ctx, *, username: str):
+    print(f"[DEBUG] Commande reçue ! Utilisateur : {username}")
+    await ctx.send("🔍 Je cherche ton profil AniList, attends une seconde...")
+
+    user_id = await fetch_anilist_user_id(username)
+    print(f"[DEBUG] Résultat fetch_anilist_user_id: {user_id}")
+
+    if user_id:
+        self.save_link(ctx.author.id, user_id)
+        await ctx.send(f"✅ Ton compte AniList a été lié à `{username}` (ID: {user_id})")
+    else:
+        await ctx.send("❌ Aucun utilisateur AniList trouvé avec ce nom.")
 
     @commands.command(name="unlinkanilist")
     async def unlink_anilist(self, ctx):
