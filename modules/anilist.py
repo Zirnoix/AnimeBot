@@ -10,6 +10,32 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+async def fetch_user_profile_by_id(user_id):
+    query = '''
+    query ($id: Int) {
+      User(id: $id) {
+        id
+        name
+        siteUrl
+        avatar {
+          large
+        }
+        statistics {
+          anime {
+            count
+            meanScore
+            minutesWatched
+          }
+        }
+      }
+    }
+    '''
+    variables = {"id": user_id}
+    data = await fetch_anilist_data(query, variables)
+    if data and "User" in data:
+        return data["User"]
+    return None
+
 async def fetch_anilist_user_id(username):
     query = '''
     query ($name: String) {
