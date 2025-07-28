@@ -14,12 +14,12 @@ class LinkAniList(commands.Cog):
                 json.dump({}, f)
 
     def save_link(self, discord_id, anilist_id):
-    print(f"[DEBUG] Sauvegarde lien : {discord_id} → {anilist_id}")
-    try:
-        with open(LINKS_FILE, "r") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
+        print(f"[DEBUG] Sauvegarde lien : {discord_id} → {anilist_id}")
+        try:
+            with open(LINKS_FILE, "r") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
 
     data[str(discord_id)] = anilist_id
 
