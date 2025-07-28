@@ -8,3 +8,5 @@ wheels/
 
 # Virtual environments
 .venv
+modules/user_links.db
+
