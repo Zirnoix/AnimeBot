@@ -1,5 +1,7 @@
 import json
 import os
+print("[DEBUG] data dir exists:", os.path.exists("data"))
+print("[DEBUG] writing to:", LINKS_FILE)
 from discord.ext import commands
 from modules.anilist import fetch_anilist_user_id
 
@@ -23,8 +25,9 @@ class LinkAniList(commands.Cog):
 
         data[str(discord_id)] = anilist_id
 
-        with open(LINKS_FILE, "w") as f:
-            json.dump(data, f, indent=4)
+        print("[DEBUG] Fichier écrit :")
+        with open(LINKS_FILE, "r") as f:
+            print(f.read())
 
     @commands.command(name="linkanilist")
     async def link_anilist(self, ctx, *, username: str):
