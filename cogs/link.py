@@ -1,11 +1,11 @@
 import json
 import os
-print("[DEBUG] data dir exists:", os.path.exists("data"))
-print("[DEBUG] writing to:", LINKS_FILE)
 from discord.ext import commands
 from modules.anilist import fetch_anilist_user_id
 
 LINKS_FILE = "data/linked_users.json"
+print("[DEBUG] data dir exists:", os.path.exists("data"))
+print("[DEBUG] writing to:", LINKS_FILE)
 
 class LinkAniList(commands.Cog):
     def __init__(self, bot):
