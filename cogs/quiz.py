@@ -2,14 +2,14 @@ import discord
 from discord.ext import commands
 from modules.score_manager import load_scores, save_scores, add_quiz_point, get_top_scores, reset_monthly_scores, get_user_rank
 from modules.rank_card import generate_rank_card
-from modules.quiz import get_days_until_reset
+from modules.quiz import get_days_until_reset, fetch_quiz_question, get_title, update_score
 import asyncio
 import random
 import aiohttp
 
 ANILIST_API_URL = "https://graphql.anilist.co"
 
-class AnimeQuiz(commands.Cog):
+class Quiz(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
@@ -18,7 +18,6 @@ class AnimeQuiz(commands.Cog):
         """Devine l’anime à partir de l’image !"""
         await ctx.trigger_typing()
 
-        # Récupération d’un anime aléatoire
         anime = await self.get_random_anime()
         if not anime:
             await ctx.send("❌ Impossible de récupérer un anime. Réessaie.")
@@ -83,9 +82,6 @@ class AnimeQuiz(commands.Cog):
                     return data["data"]["Page"]["media"][0]
                 except (KeyError, IndexError):
                     return None
-
-async def setup(bot):
-    await bot.add_cog(AnimeQuiz(bot))
 
     @commands.command(name="animequizmulti")
     async def anime_quiz_multi(self, ctx, nombre: int):
