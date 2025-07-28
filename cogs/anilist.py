@@ -4,6 +4,8 @@ from modules.anilist import fetch_user_profile
 import json
 import os
 
+print("[DEBUG] cogs.anilist.py chargé")
+
 LINKS_FILE = "data/linked_users.json"
 
 class AniListProfile(commands.Cog):
