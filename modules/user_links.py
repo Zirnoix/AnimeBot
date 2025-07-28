@@ -1,10 +1,9 @@
 import sqlite3
 import os
 
-DB_PATH = "data/user_links.db"
+DB_PATH = os.path.join(os.path.dirname(__file__), "user_links.db")
 
 def init_db():
-    os.makedirs("data", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''
@@ -42,4 +41,3 @@ def remove_link(discord_id):
     conn.commit()
     conn.close()
     return changes > 0
-
