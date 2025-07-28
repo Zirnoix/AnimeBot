@@ -1,31 +1,35 @@
-
 import discord
 from discord.ext import commands
+from discord import app_commands
 from discord.ui import View, Button
 
-class HelpView(View):
+class HelpMenu(View):
     def __init__(self, embeds):
         super().__init__(timeout=None)
         self.embeds = embeds
-        self.index = 0
+        self.current_page = 0
         self.message = None
+        self.update_buttons()
 
-        self.previous = Button(label="◀", style=discord.ButtonStyle.secondary)
-        self.next = Button(label="▶", style=discord.ButtonStyle.secondary)
+    def update_buttons(self):
+        self.clear_items()
+        self.add_item(Button(label="⬅️", style=discord.ButtonStyle.primary, custom_id="prev"))
+        self.add_item(Button(label="➡️", style=discord.ButtonStyle.primary, custom_id="next"))
 
-        self.previous.callback = self.go_previous
-        self.next.callback = self.go_next
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return True
 
-        self.add_item(self.previous)
-        self.add_item(self.next)
+    @discord.ui.button(label="⬅️", style=discord.ButtonStyle.primary, custom_id="prev")
+    async def previous_page(self, interaction: discord.Interaction, button: Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
 
-    async def go_previous(self, interaction):
-        self.index = (self.index - 1) % len(self.embeds)
-        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
-
-    async def go_next(self, interaction):
-        self.index = (self.index + 1) % len(self.embeds)
-        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
+    @discord.ui.button(label="➡️", style=discord.ButtonStyle.primary, custom_id="next")
+    async def next_page(self, interaction: discord.Interaction, button: Button):
+        if self.current_page < len(self.embeds) - 1:
+            self.current_page += 1
+            await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
 
 class Help(commands.Cog):
     def __init__(self, bot):
@@ -33,41 +37,48 @@ class Help(commands.Cog):
 
     @commands.command(name="help")
     async def help_command(self, ctx):
-        embeds = []
+        pages = []
 
-        embed1 = discord.Embed(title="🎮 Quiz & Classement", description="\n".join([
-            "`!animequiz` - Trouve le nom de l’anime à partir de l’image",
-            "`!quiztop` - Classement des meilleurs joueurs",
-            "`!myrank` - Ton niveau et titre personnalisé"
-        ]), color=discord.Color.blue())
+        # ℹ️ Commandes Générales
+        embed1 = discord.Embed(title="📘 Aide - Général", description="Commandes d'information et basiques.", color=0x7289da)
+        embed1.add_field(name="!help", value="Affiche ce menu d'aide.", inline=False)
+        embed1.add_field(name="!ping", value="Test de latence du bot.", inline=False)
+        embed1.add_field(name="!uptime", value="Temps de fonctionnement du bot.", inline=False)
+        embed1.add_field(name="!botinfo", value="Informations sur le bot.", inline=False)
+        embed1.add_field(name="!source", value="Lien vers le code source du bot.", inline=False)
+        embed1.add_field(name="!todayinhistory", value="Anecdote animée du jour dans l'histoire.", inline=False)
+        embed1.set_footer(text="AnimeBot - Aide")
 
-        embed2 = discord.Embed(title="🗓️ Planning & Épisodes", description="\n".join([
-            "`!next` - Prochains épisodes à sortir",
-            "`!monnext` - Ton prochain épisode personnel",
-            "`!monplanning` - Ton planning personnel",
-            "`!seasonal` - Animés de la saison actuelle"
-        ]), color=discord.Color.blue())
+        # 👤 Commandes Anilist & Utilisateur
+        embed2 = discord.Embed(title="👤 Aide - Utilisateur & Anilist", description="Liens et stats de ton compte Anilist.", color=0x3498db)
+        embed2.add_field(name="!linkanilist <pseudo>", value="Lie ton compte Anilist.", inline=False)
+        embed2.add_field(name="!unlinkanilist", value="Dé-lie ton compte Anilist.", inline=False)
+        embed2.add_field(name="!anilist", value="Affiche ton profil Anilist lié.", inline=False)
+        embed2.add_field(name="!stats", value="Statistiques détaillées de ton compte Anilist.", inline=False)
+        embed2.set_footer(text="AnimeBot - Aide")
 
-        embed3 = discord.Embed(title="🏆 Défis & Statistiques", description="\n".join([
-            "`!anichallenge` - Défi à compléter",
-            "`!weekly` - Défi de la semaine",
-            "`!complete` - Marque ton défi comme terminé",
-            "`!mystats` - Tes stats de quiz",
-            "`!duelstats` - Tes victoires/défaites en duel"
-        ]), color=discord.Color.blue())
+        # 📺 Commandes Animés & Notifications
+        embed3 = discord.Embed(title="📺 Aide - Suivi & Planning", description="Système de suivi des épisodes et planning.", color=0x9b59b6)
+        embed3.add_field(name="!next", value="Prochain épisode à venir (basé sur le compte du bot).", inline=False)
+        embed3.add_field(name="!monnext", value="Prochain épisode avec ton compte lié.", inline=False)
+        embed3.add_field(name="!planning", value="Planning hebdomadaire des sorties d’animes.", inline=False)
+        embed3.add_field(name="!setchannel", value="Définit le salon pour les alertes de sortie d’épisodes.", inline=False)
+        embed3.set_footer(text="AnimeBot - Aide")
 
-        embed4 = discord.Embed(title="📡 Suivi & Utilitaires", description="\n".join([
-            "`!linkanilist` - Lie ton compte Anilist",
-            "`!anitracker` - Voir les animés suivis",
-            "`!track`/`!untrack` - Gérer les suivis",
-            "`!uptime` - Temps depuis le démarrage du bot",
-            "`!todayinhistory` - Événement historique du jour"
-        ]), color=discord.Color.blue())
+        # 🎮 Commandes Quiz & Classements
+        embed4 = discord.Embed(title="🎮 Aide - Quiz & Classements", description="Jeux, scores et classements mensuels.", color=0xe67e22)
+        embed4.add_field(name="!animequiz", value="Devine l’anime via une image. +1 point par bonne réponse.", inline=False)
+        embed4.add_field(name="!animequizmulti <N>", value="Fait N quiz d’affilée (entre 5 et 20). Gagne si +50% bonnes réponses.", inline=False)
+        embed4.add_field(name="!quiztop", value="Top 10 des meilleurs joueurs du mois.", inline=False)
+        embed4.add_field(name="!myrank", value="Ton score et ton classement actuel.", inline=False)
+        embed4.set_footer(text="AnimeBot - Aide")
 
-        embeds.extend([embed1, embed2, embed3, embed4])
+        pages.extend([embed1, embed2, embed3, embed4])
 
-        view = HelpView(embeds)
-        await ctx.send(embed=embeds[0], view=view)
+        view = HelpMenu(pages)
+        view.update_buttons()
+        msg = await ctx.send(embed=pages[0], view=view)
+        view.message = msg
 
 async def setup(bot):
     await bot.add_cog(Help(bot))
