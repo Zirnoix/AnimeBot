@@ -6,11 +6,6 @@ class Tracker(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="linkanilist")
-    async def linkanilist(self, ctx, username: str):
-        msg = link_anilist_account(ctx.author.id, username)
-        await ctx.send(msg)
-
     @commands.command(name="anitracker")
     async def anitracker(self, ctx):
         embed = await get_tracked_anime(ctx.author.id)
