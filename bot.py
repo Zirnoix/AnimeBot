@@ -2,9 +2,9 @@
 # Il gère le chargement des extensions (cogs), les intents et la configuration du bot.
 
 import discord
+from discord.ext import commands, tasks
 import os
 import asyncio
-from discord.ext import commands, tasks
 import datetime
 import time
 import json
@@ -15,7 +15,7 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():
@@ -39,6 +39,7 @@ if __name__ == "__main__":
 # ---------------- TRACKER LOOP ----------------
 TRACKED_FILE = "tracked_anime.json"
 NOTIFIED_FILE = "notified_cache.json"
+CONFIG_FILE = "config.json"
 ANILIST_API_URL = "https://graphql.anilist.co"
 
 def load_json(path):
@@ -75,6 +76,9 @@ async def tracker_loop():
     print("[Tracker] Lancement de la vérification des épisodes à venir...")
     tracked = load_json(TRACKED_FILE)
     notified = load_json(NOTIFIED_FILE)
+    config = load_json(CONFIG_FILE)
+    channel_id = config.get("notification_channel_id")
+    channel = bot.get_channel(channel_id) if channel_id else None
     now = int(time.time())
 
     for user_id, anime_list in tracked.items():
@@ -94,6 +98,8 @@ async def tracker_loop():
                 embed.set_footer(text="AnimeBot - Suivi personnalisé")
                 try:
                     await user.send(embed=embed)
+                    if channel:
+                        await channel.send(embed=embed)
                     notified[key] = True
                     print(f"[Tracker] Notification envoyée à {user.name} pour {anime}")
                 except:
