@@ -1,7 +1,8 @@
 import json
 import os
 
-USER_SETTINGS_FILE = "linked_users.json"
+os.makedirs("data", exist_ok=True)
+USER_SETTINGS_FILE = "data/linked_users.json"
 
 
 def load_user_settings():
