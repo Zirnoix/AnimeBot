@@ -1,7 +1,21 @@
 import requests
+import random
 import os
 
 ANILIST_API_URL = "https://graphql.anilist.co"
+HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+}
+
+
+def run_query(query, variables=None):
+    response = requests.post(ANILIST_API_URL, json={"query": query, "variables": variables}, headers=HEADERS)
+    if response.status_code != 200:
+        print("Erreur API Anilist:", response.text)
+        return None
+    return response.json()
+
 
 def get_user_stats(username):
     query = '''
@@ -19,18 +33,11 @@ def get_user_stats(username):
     }
     '''
     variables = {"username": username}
-
-    response = requests.post(
-        ANILIST_API_URL,
-        json={"query": query, "variables": variables},
-        headers={"Content-Type": "application/json"}
-    )
-
-    if response.status_code != 200:
+    data = run_query(query, variables)
+    if not data:
         return None
+    return data["data"]["User"]["statistics"]["anime"]
 
-    user_data = response.json().get("data", {}).get("User", {})
-    return user_data.get("statistics", {}).get("anime", None)
 
 def get_next_airing_episodes(username):
     query = '''
@@ -52,103 +59,29 @@ def get_next_airing_episodes(username):
       }
     }
     '''
-    variables = {"username": username}
-
-    response = requests.post(
-        ANILIST_API_URL,
-        json={"query": query, "variables": variables},
-        headers={"Content-Type": "application/json"}
-    )
-
-    if response.status_code != 200:
+    data = run_query(query, {"username": username})
+    if not data:
         return []
-
-    data = response.json()
-    entries = data.get("data", {}).get("MediaListCollection", {}).get("lists", [])
-    results = []
-
-    for group in entries:
+    episodes = []
+    for group in data["data"]["MediaListCollection"]["lists"]:
         for entry in group["entries"]:
-            media = entry["media"]
-            airing = media.get("nextAiringEpisode")
-            if airing:
-                results.append({
-                    "title": media["title"]["romaji"],
-                    "airingAt": airing["airingAt"],
-                    "episode": airing["episode"]
-                })
-
-    return sorted(results, key=lambda x: x["airingAt"])
-
-def get_next_episode_for_user(anilist_username):
-    query = '''
-    query ($username: String) {
-      MediaListCollection(userName: $username, type: ANIME, status: CURRENT) {
-        lists {
-          entries {
-            media {
-              title {
-                romaji
-              }
-              nextAiringEpisode {
-                airingAt
-                episode
-              }
-            }
-          }
-        }
-      }
-    }
-    '''
-
-    variables = {"username": anilist_username}
-
-    response = requests.post(
-        ANILIST_API_URL,
-        json={"query": query, "variables": variables},
-        headers={"Content-Type": "application/json"}
-    )
-
-    if response.status_code != 200:
-        return None
-
-    data = response.json()
-    entries = data.get("data", {}).get("MediaListCollection", {}).get("lists", [])
-    upcoming = []
-
-    for list_group in entries:
-        for entry in list_group["entries"]:
             media = entry["media"]
             next_ep = media.get("nextAiringEpisode")
             if next_ep:
-                upcoming.append({
+                episodes.append({
                     "title": media["title"]["romaji"],
                     "airingAt": next_ep["airingAt"],
                     "episode": next_ep["episode"]
                 })
+    return sorted(episodes, key=lambda x: x["airingAt"])
 
-    # On retourne l'épisode le plus proche
-    if upcoming:
-        return sorted(upcoming, key=lambda x: x["airingAt"])[0]
 
-    return None
+def get_next_episode_for_user(username):
+    episodes = get_next_airing_episodes(username)
+    return episodes[0] if episodes else None
 
-API_URL = "https://graphql.anilist.co"
-
-HEADERS = {
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-}
-
-def run_query(query, variables=None):
-    response = requests.post(API_URL, json={"query": query, "variables": variables}, headers=HEADERS)
-    if response.status_code != 200:
-        print("Erreur API Anilist:", response.text)
-        return None
-    return response.json()
 
 def get_random_anime():
-    import random
     page = random.randint(1, 500)
     query = '''
     query ($page: Int) {
@@ -173,7 +106,8 @@ def get_random_anime():
         return data["data"]["Page"]["media"][0]
     return None
 
-def get_upcoming_episodes(user_anilist_id):
+
+def get_upcoming_episodes(user_id):
     query = '''
     query ($userId: Int) {
       MediaListCollection(userId: $userId, type: ANIME, status_in: [CURRENT, PLANNING]) {
@@ -193,12 +127,12 @@ def get_upcoming_episodes(user_anilist_id):
       }
     }
     '''
-    data = run_query(query, {"userId": user_anilist_id})
+    data = run_query(query, {"userId": user_id})
     if not data:
         return []
     episodes = []
-    for lst in data["data"]["MediaListCollection"]["lists"]:
-        for entry in lst["entries"]:
+    for group in data["data"]["MediaListCollection"]["lists"]:
+        for entry in group["entries"]:
             media = entry["media"]
             next_ep = media.get("nextAiringEpisode")
             if next_ep:
@@ -208,3 +142,36 @@ def get_upcoming_episodes(user_anilist_id):
                     "episode": next_ep["episode"]
                 })
     return episodes
+
+
+def get_duel_stats(user1, user2):
+    query = '''
+    query ($user1: String, $user2: String) {
+      u1: User(name: $user1) {
+        statistics {
+          anime {
+            count
+            meanScore
+            episodesWatched
+          }
+        }
+      }
+      u2: User(name: $user2) {
+        statistics {
+          anime {
+            count
+            meanScore
+            episodesWatched
+          }
+        }
+      }
+    }
+    '''
+    variables = {"user1": user1, "user2": user2}
+    data = run_query(query, variables)
+    if not data:
+        return None
+    return {
+        "user1": data["data"]["u1"]["statistics"]["anime"],
+        "user2": data["data"]["u2"]["statistics"]["anime"]
+    }
