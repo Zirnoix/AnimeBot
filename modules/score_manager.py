@@ -2,7 +2,6 @@ import json
 import os
 from datetime import datetime
 
-SCORES_FILE = "scores.json"
 QUIZ_SCORES_FILE = "data/quiz_scores.json"
 
 def load_scores():
@@ -13,7 +12,7 @@ def load_scores():
 
 
 def save_scores(scores):
-    with open(SCORES_FILE, "w", encoding="utf-8") as f:
+    with open(QUIZ_SCORES_FILE, "w", encoding="utf-8") as f:
         json.dump(scores, f, ensure_ascii=False, indent=2)
 
 
