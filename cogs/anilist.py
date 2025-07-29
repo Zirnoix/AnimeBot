@@ -1,3 +1,6 @@
+import sys
+sys.stdout.write("[DEBUG] cogs.anilist chargé\n")
+sys.stdout.flush()
 import discord
 from discord.ext import commands
 from modules.anilist import fetch_user_profile_by_id
