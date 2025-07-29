@@ -1,4 +1,4 @@
-import discord
+    import discord
 from discord.ext import commands
 from modules.score_manager import load_scores, save_scores, add_quiz_point, get_top_scores, reset_monthly_scores, get_user_rank
 from modules.rank_card import generate_rank_card
@@ -44,11 +44,15 @@ class Quiz(commands.Cog):
             await ctx.send(f"⏱️ Temps écoulé ! La bonne réponse était : **{title}**")
             return
 
-        if msg.content.lower().strip() in [
-            title.lower(),
-            anime["title"].get("english", "").lower(),
-            anime["title"].get("native", "").lower()
-        ]:
+        user_answer = normalize(msg.content)
+        answers = [
+            normalize(title),
+            normalize(anime["title"].get("english", "")),
+            normalize(anime["title"].get("native", ""))
+        ]
+
+        if user_answer in answers:
+
             await ctx.send("✅ Bonne réponse !")
         else:
             await ctx.send(f"❌ Mauvaise réponse. C’était : **{title}**")
