@@ -168,4 +168,5 @@ class Quiz(commands.Cog):
         await ctx.send(file=file)
 
 async def setup(bot):
+    print("[DEBUG] Quiz cog setup() appelé")
     await bot.add_cog(Quiz(bot))
