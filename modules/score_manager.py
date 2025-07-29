@@ -35,6 +35,9 @@ def update_score(user_id, score):
     user_id = str(user_id)
     scores[user_id] = scores.get(user_id, 0) + score
 
+    print(f"[DEBUG] Mise à jour du score : {user_id} → {scores[user_id]}")
+    print(f"[DEBUG] Sauvegarde dans : {QUIZ_SCORES_FILE}")
+
     with open(QUIZ_SCORES_FILE, "w", encoding="utf-8") as f:
         json.dump(scores, f, indent=4, ensure_ascii=False)
         
