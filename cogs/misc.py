@@ -1,3 +1,6 @@
+import sys
+sys.stdout.write("[DEBUG] cogs.misc chargé\n")
+sys.stdout.flush()
 import discord
 from discord.ext import commands, tasks
 import datetime
