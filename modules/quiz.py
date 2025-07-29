@@ -2,6 +2,8 @@ import random
 import json
 import os
 from datetime import datetime, timedelta
+import unicodedata
+import re
 
 QUIZ_DATA_PATH = "data/quiz_data.json"
 RESET_FILE_PATH = "data/quiz_reset.json"
@@ -46,6 +48,12 @@ def get_title(score):
         return "🌱 Amateur"
     else:
         return "👶 Débutant"
+
+def normalize(text):
+    text = text.lower()
+    text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('utf-8')
+    text = re.sub(r'\W+', '', text)
+    return text
 
 def update_score(user_id, score, scores_file="data/quiz_scores.json"):
     if not os.path.exists(scores_file):
