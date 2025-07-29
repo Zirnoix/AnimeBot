@@ -1,5 +1,6 @@
 # D'accord. Je vais commencer par le fichier central : bot.py
 # Il gère le chargement des extensions (cogs), les intents et la configuration du bot.
+print("⏳ Le fichier bot.py s'exécute")
 
 import discord
 from discord.ext import commands, tasks
