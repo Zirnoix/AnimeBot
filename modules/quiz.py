@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta
 import unicodedata
 import re
+import aiohttp
 
 QUIZ_DATA_PATH = "data/quiz_data.json"
 RESET_FILE_PATH = "data/quiz_reset.json"
@@ -67,3 +68,33 @@ def update_score(user_id, score, scores_file="data/quiz_scores.json"):
 
     with open(scores_file, "w") as f:
         json.dump(scores, f, indent=4)
+
+async def get_random_anime():
+    query = '''
+    query ($page: Int) {
+        Page(perPage: 1, page: $page) {
+            media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                title {
+                    romaji
+                    english
+                    native
+                }
+                coverImage {
+                    large
+                    extraLarge
+                }
+            }
+        }
+    }
+    '''
+    page = random.randint(1, 500)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(ANILIST_API_URL, json={"query": query, "variables": {"page": page}}) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+            try:
+                return data["data"]["Page"]["media"][0]
+            except (KeyError, IndexError):
+                return None
