@@ -80,14 +80,14 @@ class Quiz(commands.Cog):
     
         leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
         desc = ""
-
         for i, (uid, score) in enumerate(leaderboard, 1):
             try:
+                await ctx.send(f"[DEBUG] Je vais chercher l’utilisateur {uid}")
                 user = await self.bot.fetch_user(int(uid))
+                await ctx.send(f"[DEBUG] Utilisateur trouvé : {user.name}")
                 desc += f"**{i}.** {user.name} — {score} points ({get_title(score)})\n"
             except Exception as e:
-                await ctx.send(f"❌ Erreur pour l’ID {uid} : {e}")
-                continue
+                await ctx.send(f"❌ Erreur avec l’ID {uid} : {e}")
 
         if not desc:
             await ctx.send("⚠️ Aucun utilisateur valide trouvé.")
