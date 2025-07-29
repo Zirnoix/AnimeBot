@@ -1,3 +1,6 @@
+import sys
+sys.stdout.write("[DEBUG] cogs.help chargé\n")
+sys.stdout.flush()
 import discord
 from discord.ext import commands
 
