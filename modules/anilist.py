@@ -154,30 +154,35 @@ def run_query(query, variables=None):
         return None
     return response.json()
 
-def get_random_anime():
-    page = random.randint(1, 500)
+async def get_random_anime():
     query = '''
     query ($page: Int) {
-      Page(page: $page, perPage: 1) {
-        media(type: ANIME, isAdult: false, sort: SCORE_DESC) {
-          id
-          title {
-            romaji
-            english
-            native
-          }
-          description(asHtml: false)
-          coverImage {
-            large
-          }
+        Page(perPage: 1, page: $page) {
+            media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                title {
+                    romaji
+                    english
+                    native
+                }
+                coverImage {
+                    large
+                    extraLarge
+                }
+            }
         }
-      }
     }
     '''
-    data = run_query(query, {"page": page})
-    if data:
-        return data["data"]["Page"]["media"][0]
-    return None
+    page = random.randint(1, 500)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(ANILIST_API_URL, json={"query": query, "variables": {"page": page}}) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+            try:
+                return data["data"]["Page"]["media"][0]
+            except (KeyError, IndexError):
+                return None
 
 def get_user_stats(username):
     query = '''
