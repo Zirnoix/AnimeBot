@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from modules.score_manager import load_scores, save_scores, add_quiz_point, get_top_scores, reset_monthly_scores, get_user_rank
 from modules.rank_card import generate_rank_card
-from modules.quiz import get_days_until_reset, fetch_quiz_question, get_title, update_score
+from modules.quiz import get_days_until_reset, fetch_quiz_question, get_title, update_score, get_random_anime
 import asyncio
 import random
 import aiohttp
@@ -20,8 +20,7 @@ class Quiz(commands.Cog):
         print("[DEBUG] !animequiz appelée")
         await ctx.trigger_typing()
 
-        anime = await self.get_random_anime()
-        print(f"[DEBUG] Anime reçu : {anime}")
+        anime = await get_random_anime()
 
         if not anime:
             await ctx.send("❌ Impossible de récupérer un anime. Réessaie.")
