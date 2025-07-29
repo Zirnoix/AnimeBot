@@ -1,3 +1,6 @@
+import sys
+sys.stdout.write("[DEBUG] cogs.stats chargé\n")
+sys.stdout.flush()
 import discord
 from discord.ext import commands
 from modules.anilist import get_user_stats, get_duel_stats
