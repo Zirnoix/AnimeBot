@@ -31,7 +31,7 @@ class Quiz(commands.Cog):
                 await ctx.send("✅ Étape 1 OK")
 
                 await ctx.send("🧪 Étape 2 : Je vais chercher un anime")
-                anime = await self.get_random_anime()
+                anime = await get_random_anime()
 
                 if not anime:
                     await ctx.send("❌ Impossible de récupérer un anime.")
