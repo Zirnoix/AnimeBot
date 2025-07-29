@@ -68,38 +68,39 @@ class Quiz(commands.Cog):
 
 
     @commands.command(name="quiztop")
-    async def quiztop(self, ctx):
-        scores = load_scores()
-        if not scores:
-            await ctx.send("🏆 Aucun score enregistré pour l’instant.")
-            return
+async def quiztop(self, ctx):
+    await ctx.send("🔍 Début du quiztop")
 
-        leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
-        desc = ""
+    scores = load_scores()
+    if not scores:
+        await ctx.send("🏆 Aucun score enregistré pour l’instant.")
+        return
 
-        for i, (uid, score) in enumerate(leaderboard, 1):
-            try:
-                user = await self.bot.fetch_user(int(uid))
-            except Exception as e:
-                await ctx.send(f"❌ Erreur fetch_user({uid}) : {e}")
-                continue
+    await ctx.send("✅ Scores chargés")
+    
+    leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
+    desc = ""
 
-            try:
-                title = get_title(score)
-            except Exception as e:
-                title = "⛔️"
-                await ctx.send(f"❌ Erreur titre pour {user.name} : {e}")
+    for i, (uid, score) in enumerate(leaderboard, 1):
+        try:
+            user = await self.bot.fetch_user(int(uid))
+            desc += f"**{i}.** {user.name} — {score} points ({get_title(score)})\n"
+        except Exception as e:
+            await ctx.send(f"❌ Erreur pour l’ID {uid} : {e}")
+            continue
 
-            desc += f"**{i}.** {user.name} — {score} points ({title})\n"
+    if not desc:
+        await ctx.send("⚠️ Aucun utilisateur valide trouvé.")
+        return
 
-        if not desc:
-            await ctx.send("❌ Aucun utilisateur valide pour le classement.")
-            return
+    days_left = get_days_until_reset()
 
-        days_left = get_days_until_reset()
+    try:
         embed = discord.Embed(title="🏆 Classement Quiz", description=desc, color=0xf1c40f)
         embed.set_footer(text=f"🏁 Réinitialisation dans {days_left} jour(s).")
         await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send(f"❌ Erreur lors de l’envoi de l’embed : {e}")
 
     @commands.command(name="myrank")
     async def myrank(self, ctx):
