@@ -25,6 +25,11 @@ async def on_ready():
     if not tracker_loop.is_running():
         tracker_loop.start()
 
+async def on_command_error(ctx, error):
+    """Affiche les erreurs dans Discord plutôt que dans la console."""
+    await ctx.send(f"❌ Une erreur est survenue : `{type(error).__name__}` — {str(error)}")
+
+
 async def load_extensions():
     for filename in os.listdir("cogs"):
         if filename.endswith(".py") and not filename.startswith("_") and filename != "challenge.py":
