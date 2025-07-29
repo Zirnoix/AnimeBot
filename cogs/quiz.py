@@ -27,49 +27,50 @@ class Quiz(commands.Cog):
 
         try:
             await ctx.send("🧪 Étape 1 : Je vais afficher `typing`")
-            await ctx.trigger_typing()
-            await ctx.send("✅ Étape 1 OK")
+            async with ctx.typing():
+                await ctx.send("✅ Étape 1 OK")
 
-            await ctx.send("🧪 Étape 2 : Je vais chercher un anime")
-            anime = await self.get_random_anime()
+                await ctx.send("🧪 Étape 2 : Je vais chercher un anime")
+                anime = await self.get_random_anime()
 
-            if not anime:
-                await ctx.send("❌ Impossible de récupérer un anime.")
-                return
+                if not anime:
+                    await ctx.send("❌ Impossible de récupérer un anime.")
+                    return
 
-            await ctx.send("✅ Étape 2 OK")
+                await ctx.send("✅ Étape 2 OK")
 
-            title = anime["title"]["romaji"]
-            image_url = anime.get("coverImage", {}).get("extraLarge") or anime.get("coverImage", {}).get("large")
+                title = anime["title"]["romaji"]
+                image_url = anime.get("coverImage", {}).get("extraLarge") or anime.get("coverImage", {}).get("large")
 
-            embed = discord.Embed(
-                title="🎲 Devine l’anime !",
-                description="Tu as 15 secondes pour trouver le nom !",
-                color=discord.Color.blurple()
-            )
-            embed.set_image(url=image_url)
-            await ctx.send(embed=embed)
+                embed = discord.Embed(
+                    title="🎲 Devine l’anime !",
+                    description="Tu as 15 secondes pour trouver le nom !",
+                    color=discord.Color.blurple()
+                )
+                embed.set_image(url=image_url)
+                await ctx.send(embed=embed)
 
-            def check(m):
-                return m.channel == ctx.channel and m.author == ctx.author
-    
-            msg = await self.bot.wait_for("message", timeout=15.0, check=check)
+                def check(m):
+                    return m.channel == ctx.channel and m.author == ctx.author
 
-            if normalize(msg.content) in [
-                normalize(title),
-                normalize(anime["title"].get("english", "")),
-                normalize(anime["title"].get("native", ""))
-            ]:
-                await ctx.send("✅ Bonne réponse !")
-                update_score(ctx.author.id, 1)
-            else:
-                await ctx.send(f"❌ Mauvaise réponse. C’était : **{title}**")
+                msg = await self.bot.wait_for("message", timeout=15.0, check=check)
+
+                if normalize(msg.content) in [
+                    normalize(title),
+                    normalize(anime["title"].get("english", "")),
+                    normalize(anime["title"].get("native", ""))
+                ]:
+                    await ctx.send("✅ Bonne réponse !")
+                    update_score(ctx.author.id, 1)
+                else:
+                    await ctx.send(f"❌ Mauvaise réponse. C’était : **{title}**")
 
         except asyncio.TimeoutError:
             await ctx.send(f"⏱️ Temps écoulé ! La bonne réponse était : **{title}**")
 
         except Exception as e:
             await ctx.send(f"❌ Erreur pendant le quiz : {e}")
+
 
     @commands.command(name="quiztop")
     async def quiztop(self, ctx):
