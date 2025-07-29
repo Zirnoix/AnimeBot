@@ -1,3 +1,6 @@
+import sys
+sys.stdout.write("[DEBUG] cogs.tracker chargé\n")
+sys.stdout.flush()
 import discord
 from discord.ext import commands
 from modules.user_settings import link_anilist_account, track_anime, untrack_anime, get_tracked_anime
