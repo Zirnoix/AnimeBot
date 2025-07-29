@@ -68,22 +68,38 @@ class Quiz(commands.Cog):
 
 
     @commands.command(name="quiztop")
-    async def quiztop(self, ctx):
-        scores = load_scores()
-        if not scores:
-            await ctx.send("🏆 Aucun score enregistré pour l’instant.")
-            return
+async def quiztop(self, ctx):
+    scores = load_scores()
+    if not scores:
+        await ctx.send("🏆 Aucun score enregistré pour l’instant.")
+        return
 
-        leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
-        desc = ""
-        for i, (uid, score) in enumerate(leaderboard, 1):
+    leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
+    desc = ""
+
+    for i, (uid, score) in enumerate(leaderboard, 1):
+        try:
             user = await self.bot.fetch_user(int(uid))
-            desc += f"**{i}.** {user.name} — {score} points ({get_title(score)})\n"
+        except Exception as e:
+            await ctx.send(f"❌ Erreur fetch_user({uid}) : {e}")
+            continue
 
-        days_left = get_days_until_reset()
-        embed = discord.Embed(title="🏆 Classement Quiz", description=desc, color=0xf1c40f)
-        embed.set_footer(text=f"🏁 Réinitialisation dans {days_left} jour(s).")
-        await ctx.send(embed=embed)
+        try:
+            title = get_title(score)
+        except Exception as e:
+            title = "⛔️"
+            await ctx.send(f"❌ Erreur titre pour {user.name} : {e}")
+
+        desc += f"**{i}.** {user.name} — {score} points ({title})\n"
+
+    if not desc:
+        await ctx.send("❌ Aucun utilisateur valide pour le classement.")
+        return
+
+    days_left = get_days_until_reset()
+    embed = discord.Embed(title="🏆 Classement Quiz", description=desc, color=0xf1c40f)
+    embed.set_footer(text=f"🏁 Réinitialisation dans {days_left} jour(s).")
+    await ctx.send(embed=embed)
 
     @commands.command(name="myrank")
     async def myrank(self, ctx):
