@@ -1,6 +1,6 @@
 import sys
 sys.stdout.write("[DEBUG] cogs.quiz chargé\n")
-sys.stdout.flush()=
+sys.stdout.flush()
 import discord
 from discord.ext import commands
 from modules.score_manager import load_scores, update_score
