@@ -15,6 +15,8 @@ class Quiz(commands.Cog):
 
     @commands.command(name="animequiz")
     async def anime_quiz(self, ctx):
+        await ctx.send("📩 Commande reçue ! Je commence le quiz...")
+        # (la suite du code)
         print("[DEBUG] !animequiz appelée")
         await ctx.trigger_typing()
 
