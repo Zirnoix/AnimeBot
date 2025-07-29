@@ -15,16 +15,16 @@ class Quiz(commands.Cog):
 
     @commands.command(name="animequiz")
     async def anime_quiz(self, ctx):
+        await ctx.send("🔍 Début de la commande anime_quiz()")
         await ctx.send("📩 Commande reçue ! Je commence le quiz...")
-        # (la suite du code)
-        print("[DEBUG] !animequiz appelée")
+        await ctx.send("📡 Je vais chercher un anime...")
         await ctx.trigger_typing()
 
-        anime = await get_random_anime()
+        anime = await get_random_anime()  # 👈 Assure-toi que cette fonction est bien importée
 
         if not anime:
             await ctx.send("❌ Impossible de récupérer un anime. Réessaie.")
-            return
+                return
 
         title = anime["title"]["romaji"]
         print(f"[DEBUG] Titre sélectionné : {title}")
@@ -61,37 +61,6 @@ class Quiz(commands.Cog):
             await ctx.send("✅ Bonne réponse !")
         else:
             await ctx.send(f"❌ Mauvaise réponse. C’était : **{title}**")
-
-
-    async def get_random_anime(self):
-        query = '''
-        query ($page: Int) {
-            Page(perPage: 1, page: $page) {
-                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
-                    title {
-                        romaji
-                        english
-                        native
-                    }
-                    coverImage {
-                        large
-                        extraLarge
-                    }
-                }
-            }
-        }
-        '''
-        page = random.randint(1, 500)
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(ANILIST_API_URL, json={"query": query, "variables": {"page": page}}) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-                try:
-                    return data["data"]["Page"]["media"][0]
-                except (KeyError, IndexError):
-                    return None
 
     @commands.command(name="animequizmulti")
     async def anime_quiz_multi(self, ctx, nombre: int):
@@ -167,6 +136,39 @@ class Quiz(commands.Cog):
         img = generate_rank_card(ctx.author, points)
         file = discord.File(fp=img, filename="rank.png")
         await ctx.send(file=file)
+
+async def get_random_anime():
+    query = '''
+    query ($page: Int) {
+        Page(perPage: 1, page: $page) {
+            media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                title {
+                    romaji
+                    english
+                    native
+                }
+                coverImage {
+                    large
+                    extraLarge
+                }
+            }
+        }
+    }
+    '''
+    page = random.randint(1, 500)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://graphql.anilist.co", json={"query": query, "variables": {"page": page}}) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+            try:
+                return data["data"]["Page"]["media"][0]
+            except (KeyError, IndexError):
+                return None
+                
+def normalize(text):
+    return ''.join(e for e in text.lower() if e.isalnum())
 
 async def setup(bot):
     print("[DEBUG] Quiz cog setup() appelé")
