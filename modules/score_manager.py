@@ -26,14 +26,23 @@ def update_score(user_id, score):
     if not os.path.exists("data"):
         os.makedirs("data")
 
-    scores = load_scores()
+    if not os.path.exists(QUIZ_SCORES_FILE):
+        scores = {}
+    else:
+        with open(QUIZ_SCORES_FILE, "r", encoding="utf-8") as f:
+            scores = json.load(f)
+
     user_id = str(user_id)
     scores[user_id] = scores.get(user_id, 0) + score
 
     print(f"[DEBUG] Mise à jour du score : {user_id} → {scores[user_id]}")
     print(f"[DEBUG] Sauvegarde dans : {QUIZ_SCORES_FILE}")
 
-    save_scores(scores)  # ✅ Une seule écriture suffit
+    # ✅ C'est ça qui enregistre réellement !
+    with open(QUIZ_SCORES_FILE, "w", encoding="utf-8") as f:
+        json.dump(scores, f, ensure_ascii=False, indent=2)
+        print("[DEBUG] Sauvegarde terminée avec succès")
+
         
 def get_top_scores(limit=10):
     scores = load_scores()
