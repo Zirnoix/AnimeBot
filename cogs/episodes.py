@@ -1,3 +1,6 @@
+import sys
+sys.stdout.write("[DEBUG] cogs.episodes chargé\n")
+sys.stdout.flush()
 import discord
 from discord.ext import commands
 from modules.anilist import get_next_episode_for_user, get_next_airing_episodes
