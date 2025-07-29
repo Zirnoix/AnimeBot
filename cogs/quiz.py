@@ -15,16 +15,21 @@ class Quiz(commands.Cog):
 
     @commands.command(name="animequiz")
     async def anime_quiz(self, ctx):
-        """Devine l’anime à partir de l’image !"""
+        print("[DEBUG] !animequiz appelée")
         await ctx.trigger_typing()
 
         anime = await self.get_random_anime()
+        print(f"[DEBUG] Anime reçu : {anime}")
+
         if not anime:
             await ctx.send("❌ Impossible de récupérer un anime. Réessaie.")
             return
 
         title = anime["title"]["romaji"]
+        print(f"[DEBUG] Titre sélectionné : {title}")
+
         image_url = anime.get("coverImage", {}).get("extraLarge") or anime.get("coverImage", {}).get("large")
+        print(f"[DEBUG] Image URL : {image_url}")
 
         embed = discord.Embed(
             title="🎲 Devine l’anime !",
@@ -34,28 +39,28 @@ class Quiz(commands.Cog):
         embed.set_image(url=image_url)
 
         await ctx.send(embed=embed)
+        print("[DEBUG] Embed envoyé")
 
         def check(m):
             return m.channel == ctx.channel and m.author == ctx.author
 
         try:
             msg = await self.bot.wait_for("message", timeout=15.0, check=check)
+            print(f"[DEBUG] Message reçu : {msg.content}")
         except asyncio.TimeoutError:
             await ctx.send(f"⏱️ Temps écoulé ! La bonne réponse était : **{title}**")
+            print("[DEBUG] Timeout utilisateur")
             return
 
-        user_answer = normalize(msg.content)
-        answers = [
+        if normalize(msg.content) in [
             normalize(title),
             normalize(anime["title"].get("english", "")),
             normalize(anime["title"].get("native", ""))
-        ]
-
-        if user_answer in answers:
-
+        ]:
             await ctx.send("✅ Bonne réponse !")
         else:
             await ctx.send(f"❌ Mauvaise réponse. C’était : **{title}**")
+
 
     async def get_random_anime(self):
         query = '''
