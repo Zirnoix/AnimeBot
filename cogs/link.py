@@ -1,3 +1,6 @@
+import sys
+sys.stdout.write("[DEBUG] cogs.link chargé\n")
+sys.stdout.flush()
 import discord
 from discord.ext import commands
 from modules.anilist import fetch_anilist_user_id
