@@ -57,8 +57,10 @@ class Quiz(commands.Cog):
 
                 if normalize(msg.content) in [
                     normalize(title),
-                    normalize(anime["title"].get("english", "")),
-                    normalize(anime["title"].get("native", ""))
+                    normalize(anime["title"].get("english") or ""),
+                    normalize(anime["title"].get("native") or "")
+                ]:
+
                 ]:
                     await ctx.send("✅ Bonne réponse !")
                     update_score(ctx.author.id, 1)
