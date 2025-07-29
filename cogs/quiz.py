@@ -60,8 +60,7 @@ class Quiz(commands.Cog):
                     normalize(anime["title"].get("english") or ""),
                     normalize(anime["title"].get("native") or "")
                 ]:
-
-                ]:
+                    
                     await ctx.send("✅ Bonne réponse !")
                     update_score(ctx.author.id, 1)
                 else:
