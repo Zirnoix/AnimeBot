@@ -27,7 +27,13 @@ async def on_ready():
 async def load_extensions():
     for filename in os.listdir("cogs"):
         if filename.endswith(".py") and not filename.startswith("_") and filename != "challenge.py":
-            await bot.load_extension(f"cogs.{filename[:-3]}")
+            module_name = f"cogs.{filename[:-3]}"
+            print(f"[DEBUG] Chargement de : {module_name}")
+            try:
+                await bot.load_extension(module_name)
+                print(f"[DEBUG] ✅ {module_name} chargé avec succès")
+            except Exception as e:
+                print(f"[DEBUG] ❌ Échec chargement {module_name} : {e}")
 
 async def main():
     await load_extensions()
