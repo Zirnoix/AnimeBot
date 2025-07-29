@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 SCORES_FILE = "scores.json"
-
+QUIZ_SCORES_FILE = "data/quiz_scores.json"
 
 def load_scores():
     if os.path.exists(SCORES_FILE):
@@ -23,18 +23,21 @@ def add_quiz_point(user_id):
     scores[user_id] = scores.get(user_id, 0) + 1
     save_scores(scores)
 
-def update_score(user_id, score, scores_file="data/quiz_scores.json"):
-    if not os.path.exists(scores_file):
+def update_score(user_id, score):
+    if not os.path.exists("data"):
+        os.makedirs("data")
+
+    if not os.path.exists(QUIZ_SCORES_FILE):
         scores = {}
     else:
-        with open(scores_file, "r") as f:
+        with open(QUIZ_SCORES_FILE, "r", encoding="utf-8") as f:
             scores = json.load(f)
 
     user_id = str(user_id)
     scores[user_id] = scores.get(user_id, 0) + score
 
-    with open(scores_file, "w") as f:
-        json.dump(scores, f, indent=4)
+    with open(QUIZ_SCORES_FILE, "w", encoding="utf-8") as f:
+        json.dump(scores, f, indent=4, ensure_ascii=False)
         
 def get_top_scores(limit=10):
     scores = load_scores()
