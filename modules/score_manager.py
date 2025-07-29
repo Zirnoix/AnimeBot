@@ -6,8 +6,8 @@ SCORES_FILE = "scores.json"
 QUIZ_SCORES_FILE = "data/quiz_scores.json"
 
 def load_scores():
-    if os.path.exists(SCORES_FILE):
-        with open(SCORES_FILE, "r", encoding="utf-8") as f:
+    if os.path.exists(QUIZ_SCORES_FILE):
+        with open(QUIZ_SCORES_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return {}
 
