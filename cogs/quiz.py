@@ -23,21 +23,14 @@ class Quiz(commands.Cog):
 
     @commands.command(name="animequiz")
     async def anime_quiz(self, ctx):
-        await ctx.send("📩 Commande reçue ! Je commence le quiz...")
-
         try:
-            await ctx.send("🧪 Étape 1 : Je vais afficher `typing`")
             async with ctx.typing():
-                await ctx.send("✅ Étape 1 OK")
 
-                await ctx.send("🧪 Étape 2 : Je vais chercher un anime")
                 anime = await get_random_anime()
 
                 if not anime:
                     await ctx.send("❌ Impossible de récupérer un anime.")
                     return
-
-                await ctx.send("✅ Étape 2 OK")
 
                 title = anime["title"]["romaji"]
                 image_url = anime.get("coverImage", {}).get("extraLarge") or anime.get("coverImage", {}).get("large")
@@ -63,6 +56,7 @@ class Quiz(commands.Cog):
                     
                     await ctx.send("✅ Bonne réponse !")
                     update_score(ctx.author.id, 1)
+                    await ctx.send("💾 Score mis à jour !")
                 else:
                     await ctx.send(f"❌ Mauvaise réponse. C’était : **{title}**")
 
