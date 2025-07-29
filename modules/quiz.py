@@ -56,19 +56,6 @@ def normalize(text):
     text = re.sub(r'\W+', '', text)
     return text
 
-def update_score(user_id, score, scores_file="data/quiz_scores.json"):
-    if not os.path.exists(scores_file):
-        scores = {}
-    else:
-        with open(scores_file, "r") as f:
-            scores = json.load(f)
-
-    user_id = str(user_id)
-    scores[user_id] = scores.get(user_id, 0) + score
-
-    with open(scores_file, "w") as f:
-        json.dump(scores, f, indent=4)
-
 async def get_random_anime():
     query = '''
     query ($page: Int) {
