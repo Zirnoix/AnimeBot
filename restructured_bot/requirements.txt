@@ -1,3 +1,4 @@
+--only-binary=:all:
 discord.py
 aiohttp
 requests
