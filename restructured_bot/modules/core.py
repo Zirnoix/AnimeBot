@@ -578,7 +578,8 @@ def get_title_for_level(level: int) -> str:
 ###############################################################################
 
 def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisode") -> io.BytesIO:
-    print(">>> GENERATE_NEXT_IMAGE CALLED")
+    with open("image_debug.log", "a", encoding="utf-8") as f:
+    f.write(">>> GENERATE_NEXT_IMAGE CALLED\\n")
 
     width, height = 900, 500
     cover_width = int(width * 0.45)
