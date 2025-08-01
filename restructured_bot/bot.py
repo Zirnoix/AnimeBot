@@ -8,13 +8,11 @@ username are pulled from environment variables via ``modules.core``.
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os  # Needed for dynamic cog loading
 import pytz  # Needed in tasks for timezone calculations
-
 import discord
 from discord.ext import commands, tasks
-
 from .modules import core
 
 
@@ -26,7 +24,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # Record the time the bot started for uptime calculations
-bot.uptime_start = datetime.utcnow()
+bot.uptime_start = datetime.now(pytz.utc)
 
 ###############################################################################
 # Event hooks
