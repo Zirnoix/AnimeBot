@@ -684,6 +684,7 @@ def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisod
     buf = io.BytesIO()
     card.save(buf, format="JPEG", quality=90)
     buf.seek(0)
+    card.save("debug_output.jpg", format="JPEG")
     return buf
 
 
