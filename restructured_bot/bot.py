@@ -26,7 +26,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # Record the time the bot started for uptime calculations
-bot.uptime_start = datetime.utcnow()
+bot.uptime_start = datetime.now(pytz.utc)
 
 ###############################################################################
 # Event hooks
