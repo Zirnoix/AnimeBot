@@ -598,6 +598,8 @@ def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisod
         response = requests.get(ep.get("image"), timeout=10)
         cover = Image.open(io.BytesIO(response.content)).convert("RGB")
     except Exception:
+        import traceback
+        print("[ERREUR] generate_next_image:", traceback.format_exc())
         # Fallback to solid color if the image cannot be fetched
         cover = Image.new("RGB", (cover_width, height), color=(50, 50, 50))
     # Resize and crop cover to fit
@@ -714,6 +716,7 @@ def generate_stats_card(
             img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
             return img
         except Exception:
+            print("[ERREUR] generate_user_stats_card:", traceback.format_exc())
             return Image.new("RGBA", (left_width, left_width), color=(80, 80, 80, 255))
     if avatar_url:
         avatar = fetch_avatar(avatar_url)
@@ -826,6 +829,7 @@ def generate_genre_chart(top_genres: list[tuple[str, int, int]], title: str = "G
             try:
                 return ImageFont.truetype(path, size)
             except Exception:
+                print("[ERREUR] generate_genre_chart:", traceback.format_exc())
                 continue
         return ImageFont.load_default()
     font_title = load_font_chart(32)
@@ -897,6 +901,7 @@ def generate_profile_card(
             resp = requests.get(url, timeout=10)
             return Image.open(io.BytesIO(resp.content)).convert("RGBA")
         except Exception:
+            print("[ERREUR] generate_profile_card:", traceback.format_exc())
             return Image.new("RGBA", (left_width, left_width), color=(80, 80, 80, 255))
     if avatar_url:
         avatar = fetch_avatar(avatar_url)
