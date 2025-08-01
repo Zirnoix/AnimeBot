@@ -578,55 +578,40 @@ def get_title_for_level(level: int) -> str:
 ###############################################################################
 
 def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisode") -> io.BytesIO:
-    """Generate a stylised image announcing the next episode.
+    print(">>> GENERATE_NEXT_IMAGE CALLED")
 
-    Args:
-        ep: A dict representing the episode with keys ``title``, ``episode`` and ``image``.
-        dt: A timezone-aware datetime of the airing time.
-        tagline: A short string displayed at the bottom of the card.
-
-    Returns:
-        A BytesIO object containing the JPEG image data.
-    """
-    # Image dimensions
     width, height = 900, 500
     cover_width = int(width * 0.45)
-    # Create background
     card = Image.new("RGB", (width, height), color=(20, 20, 20))
-    # Fetch cover image
+
     try:
         response = requests.get(ep.get("image"), timeout=10)
         cover = Image.open(io.BytesIO(response.content)).convert("RGB")
     except Exception:
         import traceback
         print("[ERREUR] generate_next_image:", traceback.format_exc())
-        # Fallback to solid color if the image cannot be fetched
         cover = Image.new("RGB", (cover_width, height), color=(50, 50, 50))
-    # Resize and crop cover to fit
+
     cover_ratio = cover.width / cover.height
     target_ratio = cover_width / height
     if cover_ratio > target_ratio:
-        # Cover is wider, crop horizontally
         new_height = height
         new_width = int(height * cover_ratio)
         resized = cover.resize((new_width, new_height))
         left = (new_width - cover_width) // 2
         cover = resized.crop((left, 0, left + cover_width, height))
     else:
-        # Cover is taller, crop vertically
         new_width = cover_width
         new_height = int(cover_width / cover_ratio)
         resized = cover.resize((new_width, new_height))
         top = (new_height - height) // 2
         cover = resized.crop((0, top, cover_width, top + height))
-    # Paste cover onto card
+
     card.paste(cover, (0, 0))
-    # Dark overlay on right side
     overlay = Image.new("RGBA", (width - cover_width, height), (0, 0, 0, 180))
     card.paste(overlay, (cover_width, 0), overlay)
-    # Prepare drawing context
     draw = ImageDraw.Draw(card)
-    # Load fonts
+
     def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
         paths = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -639,15 +624,14 @@ def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisod
             except Exception:
                 continue
         return ImageFont.load_default()
+
     font_title = load_font("Bold", 34)
     font_sub = load_font("Regular", 24)
     font_small = load_font("Regular", 20)
-    # Starting positions
+
     x0 = cover_width + 30
     y = 30
-    # Draw title (wrapped if too long)
     title = ep.get("title", "Titre inconnu")
-    # Simple wrapping: split by words to fit within the right panel width
     max_width = width - cover_width - 40
     words = title.split()
     lines = []
@@ -667,23 +651,22 @@ def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisod
         draw.text((x0, y), line, font=font_title, fill=(255, 255, 255))
         y += font_title.getsize(line)[1] + 2
     y += 10
-    # Episode number
+
     ep_num = ep.get("episode")
     draw.text((x0, y), f"Épisode {ep_num}", font=font_sub, fill=(255, 215, 0))
     y += font_sub.getsize("Épisode 00")[1] + 10
-    # Airing date and time
+
     day_fr = JOURS_FR.get(dt.strftime("%A"), dt.strftime("%A"))
     date_str = dt.strftime("%d %b %Y • %H:%M")
     draw.text((x0, y), f"{day_fr} {date_str}", font=font_sub, fill=(200, 200, 200))
-    # Tagline at bottom
+
     tagline_w, tagline_h = draw.textsize(tagline, font=font_small)
     draw.text((x0, height - tagline_h - 30), tagline, font=font_small, fill=(150, 150, 150))
-    # Export to BytesIO
+
     buf = io.BytesIO()
     card.save(buf, format="JPEG", quality=90)
     buf.seek(0)
     return buf
-
 
 def generate_stats_card(
     user_name: str,
