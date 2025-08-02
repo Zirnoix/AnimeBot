@@ -34,10 +34,28 @@ bot.uptime_start = datetime.now(pytz.utc)
 
 @bot.command()
 async def debugnext(ctx):
-    try:
-        await ctx.send(file=discord.File("next_debug.jpg"))
-    except Exception as e:
-        await ctx.send(f"❌ Erreur : {e}")
+    from datetime import datetime
+    from modules import core
+
+    dummy_ep = {
+        "title": "Test Debug Anime",
+        "episode": 99,
+        "image": ""  # pas d'image ici car version simplifiée
+    }
+
+    dt = datetime.now()
+    buf = core.generate_next_image(dummy_ep, dt)
+
+    if buf is None:
+        await ctx.send("❌ L'image n’a pas été générée.")
+        return
+
+    # Sauvegarde en local pour test (facultatif)
+    with open("next_debug.jpg", "wb") as f:
+        f.write(buf.read())
+        buf.seek(0)
+
+    await ctx.send("📤 Image générée :", file=discord.File(buf, filename="test.jpg"))
 
 @bot.event
 async def on_ready() -> None:
