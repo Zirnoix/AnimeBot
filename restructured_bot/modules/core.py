@@ -578,112 +578,62 @@ def get_title_for_level(level: int) -> str:
 ###############################################################################
 
 def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisode") -> io.BytesIO:
-    from PIL import Image, ImageDraw, ImageFont
-    import io, requests
+    from PIL import ImageFilter
 
-    # Dimensions
     width, height = 900, 500
-    cover_width = int(width * 0.45)
 
-    # Créer fond noir
-    card = Image.new("RGB", (width, height), color=(20, 20, 20))
-
-    # Charger image de couverture
+    # Chargement de l'image
     try:
-        response = requests.get(ep.get("image", ""), timeout=10)
+        response = requests.get(ep.get("image"), timeout=10)
         cover = Image.open(io.BytesIO(response.content)).convert("RGB")
     except Exception:
-        cover = Image.new("RGB", (cover_width, height), color=(50, 50, 50))
+        cover = Image.new("RGB", (width, height), color=(30, 30, 30))
 
-    # Redimensionner et recadrer
-    cover_ratio = cover.width / cover.height
-    target_ratio = cover_width / height
-    if cover_ratio > target_ratio:
-        new_height = height
-        new_width = int(height * cover_ratio)
-        resized = cover.resize((new_width, new_height))
-        left = (new_width - cover_width) // 2
-        cover = resized.crop((left, 0, left + cover_width, height))
-    else:
-        new_width = cover_width
-        new_height = int(cover_width / cover_ratio)
-        resized = cover.resize((new_width, new_height))
-        top = (new_height - height) // 2
-        cover = resized.crop((0, top, cover_width, top + height))
+    # Redimensionner l'image en fond et la flouter
+    bg = cover.resize((width, height)).filter(ImageFilter.GaussianBlur(12))
 
-    # Ajouter la cover à gauche
-    card.paste(cover, (0, 0))
+    # Ajouter un overlay sombre
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 180))
+    bg.paste(overlay, (0, 0), overlay)
 
-    # Overlay noir transparent à droite
-    overlay = Image.new("RGBA", (width - cover_width, height), (0, 0, 0, 180))
-    card.paste(overlay, (cover_width, 0), overlay)
+    draw = ImageDraw.Draw(bg)
 
-    draw = ImageDraw.Draw(card)
+    # Fontes
+    def load_font(size: int) -> ImageFont.FreeTypeFont:
+        try:
+            return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
+        except Exception:
+            return ImageFont.load_default()
 
-    # Charger polices
-    def load_font(size):
-        for path in [
-            "./DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        ]:
-            try:
-                return ImageFont.truetype(path, size)
-            except:
-                continue
-        return ImageFont.load_default()
+    font_title = load_font(42)
+    font_info = load_font(28)
+    font_tagline = load_font(20)
 
-    font_title = load_font(34)
-    font_sub = load_font(24)
-    font_small = load_font(20)
-
-    # Affichage texte
-    x0 = cover_width + 30
-    y = 30
-
-    # Titre multi-lignes
+    # Texte : titre
     title = ep.get("title", "Titre inconnu")
-    max_width = width - cover_width - 40
-    lines, current = [], ""
-    for word in title.split():
-        test = (current + " " + word).strip()
-        bbox = draw.textbbox((0, 0), test, font=font_title)
-        w = bbox[2] - bbox[0]
-        if w <= max_width:
-            current = test
-        else:
-            lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
+    draw.text((40, 30), title, font=font_title, fill="white")
 
-    for line in lines:
-        draw.text((x0, y), line, font=font_title, fill=(255, 255, 255))
-        y += font_title.getbbox(line)[3] + 2
-    y += 10
+    # Texte : épisode
+    ep_num = ep.get("episode")
+    draw.text((40, 100), f"Épisode {ep_num}", font=font_info, fill="#ffd700")
 
-    # Numéro d’épisode
-    ep_num = ep.get("episode", "?")
-    draw.text((x0, y), f"Épisode {ep_num}", font=font_sub, fill=(255, 215, 0))
-    y += font_sub.getbbox("Épisode 00")[3] + 10
-
-    # Date d’air
-    import datetime
-    JOURS_FR = {
-        "Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi",
-        "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"
-    }
+    # Texte : date FR
     day_fr = JOURS_FR.get(dt.strftime("%A"), dt.strftime("%A"))
-    date_str = dt.strftime("%d %b %Y • %H:%M")
-    draw.text((x0, y), f"{day_fr} {date_str}", font=font_sub, fill=(200, 200, 200))
+    date_str = f"{day_fr} {dt.strftime('%d %b %Y • %H:%M')}"
+    draw.text((40, 150), date_str, font=font_info, fill="#cccccc")
 
-    # Slogan tout en bas
-    tagline_w = draw.textbbox((0, 0), tagline, font=font_small)[2]
-    draw.text((x0, height - 40), tagline, font=font_small, fill=(150, 150, 150))
+    # Texte : genres avec émojis
+    genres = ep.get("genres", [])
+    genre_line = " ".join(f"{genre_emoji([g])} {g}" for g in genres[:3])
+    draw.text((40, 200), genre_line, font=font_info, fill="#b0b0b0")
 
-    # Export
+    # Texte : tagline
+    w, h = draw.textbbox((0, 0), tagline, font=font_tagline)[2:]
+    draw.text((width - w - 40, height - h - 30), tagline, font=font_tagline, fill="#aaaaaa")
+
+    # Sauvegarder
     buf = io.BytesIO()
-    card.save(buf, format="JPEG", quality=90)
+    bg.save(buf, format="JPEG", quality=90)
     buf.seek(0)
     return buf
 
