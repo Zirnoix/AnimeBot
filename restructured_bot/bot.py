@@ -195,7 +195,7 @@ async def load_extensions() -> None:
     """Dynamically load all cogs in the cogs package."""
     for filename in os.listdir(os.path.join(os.path.dirname(__file__), 'cogs')):
         if filename.endswith('.py') and not filename.startswith('_'):
-            module = f"{__package__}.cogs.{filename[:-3]}"
+            module = f"cogs.{filename[:-3]}"  # ⬅️ CHANGE ICI !
             try:
                 await bot.load_extension(module)
                 print(f"[DEBUG] ✅ {module} chargé")
