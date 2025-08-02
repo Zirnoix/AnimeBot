@@ -9,7 +9,7 @@ import requests
 from .genre_emoji import genre_emojis
 
 # === CONFIGURATION ===
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 ANILIST_USERNAME = os.getenv("ANILIST_USERNAME")
 TIMEZONE = pytz.timezone("Europe/Paris")
 
