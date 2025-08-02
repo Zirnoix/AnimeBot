@@ -10,7 +10,7 @@ from datetime import datetime
 import discord
 from discord.ext import commands
 
-from ..modules import core
+from restructured_bot.modules import core
 
 
 class Utils(commands.Cog):
