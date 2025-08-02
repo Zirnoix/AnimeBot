@@ -35,12 +35,12 @@ bot.uptime_start = datetime.now(pytz.utc)
 @bot.command()
 async def debugnext(ctx):
     from datetime import datetime
-    from modules import core
+    import restructured_bot.modules.core as core
 
     dummy_ep = {
         "title": "Test Debug Anime",
         "episode": 99,
-        "image": ""  # pas d'image ici car version simplifiée
+        "image": ""  # inutilisé ici
     }
 
     dt = datetime.now()
@@ -49,11 +49,6 @@ async def debugnext(ctx):
     if buf is None:
         await ctx.send("❌ L'image n’a pas été générée.")
         return
-
-    # Sauvegarde en local pour test (facultatif)
-    with open("next_debug.jpg", "wb") as f:
-        f.write(buf.read())
-        buf.seek(0)
 
     await ctx.send("📤 Image générée :", file=discord.File(buf, filename="test.jpg"))
 
