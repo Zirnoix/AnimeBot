@@ -26,7 +26,7 @@ class Quiz(commands.Cog):
 
     async def _get_random_anime(self, sort_option: str = "SCORE_DESC") -> dict | None:
         """Fetch a random anime using the given sort option."""
-        for _ in range(10):
+        for _ in range 10:
             page = random.randint(1, 500)
             query = f'''
             query {{
@@ -248,7 +248,7 @@ class Quiz(commands.Cog):
         for i, (uid, score) in enumerate(leaderboard, 1):
             try:
                 user = await self.bot.fetch_user(int(uid))
-                lines.append(f"{i}. **{user.display_name}** — {score} pts (Titre : {core.get_title_for_level(score)})")
+                lines.append(f"{i}. **{user.display_name}** — {score} pts (Titre : {core.get_title_for_level(score)})")
             except Exception:
                 continue
         desc = "\n".join(lines)
@@ -260,7 +260,7 @@ class Quiz(commands.Cog):
                 winner_user = await self.bot.fetch_user(int(winner_data.get("uid")))
                 won_at = datetime.fromisoformat(winner_data.get("timestamp"))
                 month = won_at.strftime("%B %Y")
-                winner_text = f"🥇 Vainqueur {month} : **{winner_user.display_name}**"
+                winner_text = f"🥇 Vainqueur {month} : **{winner_user.display_name}**"
             except Exception:
                 pass
         # Countdown to next reset
