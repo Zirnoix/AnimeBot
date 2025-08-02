@@ -12,8 +12,7 @@ import discord
 from discord.ext import commands
 from datetime import datetime
 
-from ..modules import core
-from modules.core import generate_next_image
+from modules import core, anilist
 
 
 class Episodes(commands.Cog):
@@ -65,30 +64,52 @@ class Episodes(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="next")
-    async def next_episode(self, ctx: commands.Context) -> None:
-        """Affiche le prochain épisode à venir dans la liste du bot (compte global)."""
-        episodes = core.get_upcoming_episodes(core.ANILIST_USERNAME)
-        if not episodes:
-            await ctx.send("📭 Aucun épisode à venir trouvé dans la liste configurée.")
-            return
-        next_ep = min(episodes, key=lambda e: e["airingAt"])
-        dt = datetime.fromtimestamp(next_ep["airingAt"], tz=core.TIMEZONE)
-        # Generate image card
+    async def next_episode(self, ctx):
+        """Affiche le prochain épisode à venir pour un utilisateur."""
+        user_id = str(ctx.author.id)
         try:
-            buf = core.generate_next_image(next_ep, dt, tagline="Prochain épisode")
-            file = discord.File(buf, filename="next.jpg")
-            embed = discord.Embed(title="🎬 Prochain épisode", color=discord.Color.blurple())
-            embed.set_image(url="attachment://next.jpg")
-            await ctx.send(file=file)
-        except Exception:
-            # Fallback to text embed if image generation fails
-            embed = discord.Embed(
-                title="🎬 Prochain épisode",
-                description=f"{next_ep['title']} — Épisode {next_ep['episode']}",
-                color=discord.Color.blurple(),
+            airing = anilist.get_next_airing(user_id)
+            if not airing:
+                await ctx.send("❌ Aucun épisode à venir trouvé ou AniList non lié.")
+                return
+
+            ep = airing["media"]
+            dt = datetime.fromtimestamp(airing["airingAt"])
+            tagline = "Prochain épisode"
+            genres = ep.get("genres", [])
+
+            # Générer l’image stylée
+            buf = core.generate_next_image_styled(
+                ep={
+                    "title": ep.get("title", {}).get("romaji", "Titre inconnu"),
+                    "episode": airing["episode"],
+                    "image": ep.get("coverImage", {}).get("extraLarge", None),
+                    "genres": genres,
+                    "total_eps": ep.get("episodes", "?"),
+                },
+                dt=dt,
+                tagline=tagline
             )
-            embed.add_field(name="Date", value=dt.strftime("%d/%m/%Y à %H:%M"), inline=False)
-            await ctx.send(embed=embed)
+
+            if not buf:
+                await ctx.send("❌ Impossible de générer l’image.")
+                return
+
+            file = discord.File(buf, filename="next.jpg")
+            embed = discord.Embed(
+                title="📺 Prochain épisode",
+                color=discord.Color.dark_purple()
+            )
+            embed.set_image(url="attachment://next.jpg")
+            await ctx.send(embed=embed, file=file)
+
+        except Exception as e:
+            await ctx.send(f"❌ Une erreur est survenue : `{type(e).__name__}` — {e}")
+            import traceback
+            traceback.print_exc()
+
+async def setup(bot):
+    await bot.add_cog(Episodes(bot))
 
     @commands.command(name="monnext")
     async def my_next(self, ctx: commands.Context) -> None:
