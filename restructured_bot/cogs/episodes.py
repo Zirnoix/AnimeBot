@@ -12,7 +12,7 @@ import discord
 from discord.ext import commands
 from datetime import datetime
 
-from modules import core, anilist
+from ..modules import core, anilist
 
 
 class Episodes(commands.Cog):
@@ -25,7 +25,7 @@ class Episodes(commands.Cog):
     async def prochains(self, ctx: commands.Context, *args: str) -> None:
         """Affiche les prochains épisodes à venir pour le compte AniList configuré.
 
-        Utilisation : ``!prochains [genre] [nombre|all]``. Vous pouvez
+        Utilisation : ``!prochains [genre] [nombre|all]``. Vous pouvez
         spécifier un genre pour filtrer et un nombre maximum d'entrées (ou
         ``all`` pour tout afficher, limité à 100).
         """
@@ -64,7 +64,7 @@ class Episodes(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="next")
-    async def next_episode(self, ctx):
+    async def next_episode(self, ctx: commands.Context) -> None:
         """Affiche le prochain épisode à venir pour un utilisateur."""
         user_id = str(ctx.author.id)
         try:
@@ -108,9 +108,6 @@ class Episodes(commands.Cog):
             import traceback
             traceback.print_exc()
 
-async def setup(bot):
-    await bot.add_cog(Episodes(bot))
-
     @commands.command(name="monnext")
     async def my_next(self, ctx: commands.Context) -> None:
         """Affiche le prochain épisode à venir pour l'utilisateur ayant lié son compte AniList."""
@@ -124,7 +121,7 @@ async def setup(bot):
             return
         next_ep = min(episodes, key=lambda e: e["airingAt"])
         dt = datetime.fromtimestamp(next_ep["airingAt"], tz=core.TIMEZONE)
-        # Generate personalised image card
+        # Générer l’image personnalisée
         try:
             buf = core.generate_next_image(next_ep, dt, tagline="Ton prochain épisode")
             file = discord.File(buf, filename="mynext.jpg")
@@ -132,7 +129,7 @@ async def setup(bot):
             embed.set_image(url="attachment://mynext.jpg")
             await ctx.send(embed=embed, file=file)
         except Exception:
-            # Fallback to text embed if image generation fails
+            # Fallback vers un embed texte si la génération d'image échoue
             embed = discord.Embed(
                 title="🎬 Ton prochain épisode à venir",
                 description=f"{next_ep['title']} — Épisode {next_ep['episode']}",
@@ -155,7 +152,7 @@ async def setup(bot):
             jour = core.JOURS_FR[dt.strftime("%A")]
             time_str = dt.strftime("%H:%M")
             planning[jour].append(f"• {ep['title']} — Ép. {ep['episode']} ({time_str})")
-        # Send an embed per day that has entries
+        # Envoi d’un embed par jour contenant des épisodes
         for day, items in planning.items():
             if not items:
                 continue
@@ -188,7 +185,7 @@ async def setup(bot):
             date_fr = core.format_date_fr(dt, "EEEE d MMMM")
             heure = dt.strftime('%H:%M')
             embed.add_field(name=f"{emoji} {ep['title']} – Épisode {ep['episode']}", value=f"🕒 {date_fr} à {heure}", inline=False)
-        # Set thumbnail to first entry's image
+        # Utiliser la vignette de l'image du premier anime listé
         if episodes:
             embed.set_thumbnail(url=episodes[0].get("image"))
         await ctx.send(embed=embed)
