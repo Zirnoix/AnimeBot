@@ -59,12 +59,12 @@ class Profile(commands.Cog):
             # Fallback text representation
             lines = [
                 f"🎴 Carte Membre – {ctx.author.display_name}",
-                f"Niveau : {level}",
-                f"XP : {xp}/{next_xp}",
-                f"Score Quiz : {quiz_score}",
+                f"Niveau : {level}",
+                f"XP : {xp}/{next_xp}",
+                f"Score Quiz : {quiz_score}",
             ]
             if mini_scores:
-                lines.append("Mini‑jeux :")
+                lines.append("Mini‑jeux :")
                 # Human‑readable names for mini‑games
                 mapping = {
                     "animequiz": "Quiz",
@@ -78,7 +78,7 @@ class Profile(commands.Cog):
                 for g, v in mini_scores.items():
                     # Default to capitalised key if not mapped
                     name = mapping.get(g, g.replace("_", " ").capitalize())
-                    lines.append(f"- {name} : {v}")
+                    lines.append(f"- {name} : {v}")
             await ctx.send("\n".join(lines))
 
 
