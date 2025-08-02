@@ -78,7 +78,7 @@ class Episodes(commands.Cog):
             file = discord.File(buf, filename="next.jpg")
             embed = discord.Embed(title="🎬 Prochain épisode", color=discord.Color.blurple())
             embed.set_image(url="attachment://next.jpg")
-            await ctx.send(embed=embed, file=file)
+            await ctx.send(file=file)
         except Exception:
             # Fallback to text embed if image generation fails
             embed = discord.Embed(
