@@ -577,36 +577,113 @@ def get_title_for_level(level: int) -> str:
 # to the default Pillow font.
 ###############################################################################
 
-def generate_next_image(ep: dict, dt: datetime, tagline: str = "Test debug") -> io.BytesIO:
-    """Version simplifiée de l’image pour test : fond noir avec texte statique."""
+def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisode") -> io.BytesIO:
     from PIL import Image, ImageDraw, ImageFont
-    import io
+    import io, requests
 
-    # Créer une image noire
-    width, height = 800, 400
-    image = Image.new("RGB", (width, height), color=(0, 0, 0))
+    # Dimensions
+    width, height = 900, 500
+    cover_width = int(width * 0.45)
 
-    draw = ImageDraw.Draw(image)
+    # Créer fond noir
+    card = Image.new("RGB", (width, height), color=(20, 20, 20))
 
-    # Texte au centre
-    text = "✅ TEST IMAGE OK"
-    font = ImageFont.load_default()
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    draw.text(
-        ((width - text_width) // 2, (height - text_height) // 2),
-        text,
-        fill=(255, 255, 255),
-        font=font,
-    )
+    # Charger image de couverture
+    try:
+        response = requests.get(ep.get("image", ""), timeout=10)
+        cover = Image.open(io.BytesIO(response.content)).convert("RGB")
+    except Exception:
+        cover = Image.new("RGB", (cover_width, height), color=(50, 50, 50))
 
-    # Sauvegarde temporaire pour debug
-    image.save("next_debug.jpg", format="JPEG")
+    # Redimensionner et recadrer
+    cover_ratio = cover.width / cover.height
+    target_ratio = cover_width / height
+    if cover_ratio > target_ratio:
+        new_height = height
+        new_width = int(height * cover_ratio)
+        resized = cover.resize((new_width, new_height))
+        left = (new_width - cover_width) // 2
+        cover = resized.crop((left, 0, left + cover_width, height))
+    else:
+        new_width = cover_width
+        new_height = int(cover_width / cover_ratio)
+        resized = cover.resize((new_width, new_height))
+        top = (new_height - height) // 2
+        cover = resized.crop((0, top, cover_width, top + height))
 
-    # Conversion en BytesIO pour Discord
+    # Ajouter la cover à gauche
+    card.paste(cover, (0, 0))
+
+    # Overlay noir transparent à droite
+    overlay = Image.new("RGBA", (width - cover_width, height), (0, 0, 0, 180))
+    card.paste(overlay, (cover_width, 0), overlay)
+
+    draw = ImageDraw.Draw(card)
+
+    # Charger polices
+    def load_font(size):
+        for path in [
+            "./DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        ]:
+            try:
+                return ImageFont.truetype(path, size)
+            except:
+                continue
+        return ImageFont.load_default()
+
+    font_title = load_font(34)
+    font_sub = load_font(24)
+    font_small = load_font(20)
+
+    # Affichage texte
+    x0 = cover_width + 30
+    y = 30
+
+    # Titre multi-lignes
+    title = ep.get("title", "Titre inconnu")
+    max_width = width - cover_width - 40
+    lines, current = [], ""
+    for word in title.split():
+        test = (current + " " + word).strip()
+        bbox = draw.textbbox((0, 0), test, font=font_title)
+        w = bbox[2] - bbox[0]
+        if w <= max_width:
+            current = test
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+
+    for line in lines:
+        draw.text((x0, y), line, font=font_title, fill=(255, 255, 255))
+        y += font_title.getbbox(line)[3] + 2
+    y += 10
+
+    # Numéro d’épisode
+    ep_num = ep.get("episode", "?")
+    draw.text((x0, y), f"Épisode {ep_num}", font=font_sub, fill=(255, 215, 0))
+    y += font_sub.getbbox("Épisode 00")[3] + 10
+
+    # Date d’air
+    import datetime
+    JOURS_FR = {
+        "Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi",
+        "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"
+    }
+    day_fr = JOURS_FR.get(dt.strftime("%A"), dt.strftime("%A"))
+    date_str = dt.strftime("%d %b %Y • %H:%M")
+    draw.text((x0, y), f"{day_fr} {date_str}", font=font_sub, fill=(200, 200, 200))
+
+    # Slogan tout en bas
+    tagline_w = draw.textbbox((0, 0), tagline, font=font_small)[2]
+    draw.text((x0, height - 40), tagline, font=font_small, fill=(150, 150, 150))
+
+    # Export
     buf = io.BytesIO()
-    image.save(buf, format="JPEG")
+    card.save(buf, format="JPEG", quality=90)
     buf.seek(0)
     return buf
 
