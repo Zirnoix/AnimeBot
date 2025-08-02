@@ -623,6 +623,7 @@ def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisod
 
     # Texte : genres avec émojis
     # Icônes d’émojis visuels pour les genres
+    genres = ep.get("genres", [])
     x = 40
     y = 200
     for g in genres[:3]:
