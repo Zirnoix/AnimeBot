@@ -476,16 +476,15 @@ JOURS_FR = {
     "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"
 }
 
-def genre_emoji(genres: list[str]) -> str:
-    emojis = {
-        "Action": "⚔️", "Comedy": "😂", "Drama": "🎭", "Fantasy": "🧙‍♂️",
-        "Romance": "💕", "Sci-Fi": "🚀", "Horror": "👻", "Mystery": "🕵️",
-        "Sports": "🏅", "Music": "🎵", "Slice of Life": "🍃"
-    }
-    for g in genres:
-        if g in emojis:
-            return emojis[g]
-    return "🎬"
+def get_genre_icon(genre: str) -> Image.Image | None:
+    path = GENRE_ICON_PATHS.get(genre)
+    if path and os.path.exists(path):
+        try:
+            icon = Image.open(path).convert("RGBA")
+            return icon.resize((42, 42))  # taille ajustable ici
+        except Exception:
+            return None
+    return None
 
 def build_embed(ep: dict, dt: datetime) -> 'discord.Embed':
     """Construct a simple embed announcing the release of an episode.
@@ -495,7 +494,7 @@ def build_embed(ep: dict, dt: datetime) -> 'discord.Embed':
     discord.py. Keeping it here avoids a circular import.
     """
     import discord  # imported locally to avoid optional import at module level
-    emoji = genre_emoji(ep.get("genres", []))
+    emoji = get_genre_icon(ep.get("genres", []))
     embed = discord.Embed(
         title=f"{emoji} {ep['title']} — Épisode {ep['episode']}",
         description=f"📅 {JOURS_FR[dt.strftime('%A')]} {dt.strftime('%d/%m')} à {dt.strftime('%H:%M')}",
@@ -624,7 +623,7 @@ def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisod
 
     # Texte : genres avec émojis
     genres = ep.get("genres", [])
-    genre_line = " ".join(f"{genre_emoji([g])} {g}" for g in genres[:3])
+    genre_line = " ".join(f"{get_genre_icon([g])} {g}" for g in genres[:3])
     draw.text((40, 200), genre_line, font=font_info, fill="#b0b0b0")
 
     # Texte : tagline
