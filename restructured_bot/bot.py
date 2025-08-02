@@ -15,7 +15,7 @@ import pytz  # Needed in tasks for timezone calculations
 import discord
 from discord.ext import commands, tasks
 
-from .modules import core
+import restructured_bot.modules.core as core
 
 
 intents = discord.Intents.default()
