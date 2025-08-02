@@ -50,13 +50,13 @@ class Tracker(commands.Cog):
                 )
                 await ctx.send(embed=embed)
             return
-        # Normalise action
+        # Normalize action
         act = action.lower()
         if act in {"add", "ajouter", "suivre"}:
             if not anime:
                 await ctx.send("❌ Merci de préciser le titre de l'anime à ajouter.")
                 return
-            # Prevent duplicates by normalising
+            # Prevent duplicates by normalizing
             normalized = core.normalize(anime)
             for existing in current_list:
                 if core.normalize(existing) == normalized:
