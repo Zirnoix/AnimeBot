@@ -622,9 +622,14 @@ def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisod
     draw.text((40, 150), date_str, font=font_info, fill="#cccccc")
 
     # Texte : genres avec émojis
-    genres = ep.get("genres", [])
-    genre_line = " ".join(f"{get_genre_icon([g])} {g}" for g in genres[:3])
-    draw.text((40, 200), genre_line, font=font_info, fill="#b0b0b0")
+    # Icônes d’émojis visuels pour les genres
+    x = 40
+    y = 200
+    for g in genres[:3]:
+        icon = get_genre_icon(g)
+        if icon:
+            bg.paste(icon, (x, y), icon)
+            x += icon.width + 12
 
     # Texte : tagline
     w, h = draw.textbbox((0, 0), tagline, font=font_tagline)[2:]
