@@ -32,6 +32,13 @@ bot.uptime_start = datetime.now(pytz.utc)
 # Event hooks
 ###############################################################################
 
+@bot.command()
+async def debugnext(ctx):
+    try:
+        await ctx.send(file=discord.File("next_debug.jpg"))
+    except Exception as e:
+        await ctx.send(f"❌ Erreur : {e}")
+
 @bot.event
 async def on_ready() -> None:
     now = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
