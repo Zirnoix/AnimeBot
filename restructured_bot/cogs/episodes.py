@@ -12,7 +12,7 @@ import discord
 from discord.ext import commands
 from datetime import datetime
 
-from ..modules import core, anilist
+from restructured_bot.modules import core
 
 
 class Episodes(commands.Cog):
