@@ -6,7 +6,7 @@ from datetime import datetime
 import pytz
 import requests
 
-from .genre_emoji import genre_emoji
+from .genre_emoji import genre_emojis
 
 # === CONFIGURATION ===
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
