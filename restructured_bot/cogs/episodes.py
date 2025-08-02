@@ -13,6 +13,7 @@ from discord.ext import commands
 from datetime import datetime
 
 from ..modules import core
+from modules.core import generate_next_image
 
 
 class Episodes(commands.Cog):
