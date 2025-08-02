@@ -79,7 +79,7 @@ class Episodes(commands.Cog):
             genres = ep.get("genres", [])
 
             # Générer l’image stylée
-            buf = core.generate_next_image_styled(
+            buf = core.generate_next_image(
                 ep={
                     "title": ep.get("title", {}).get("romaji", "Titre inconnu"),
                     "episode": airing["episode"],
