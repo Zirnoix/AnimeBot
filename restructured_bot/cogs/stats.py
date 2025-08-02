@@ -11,7 +11,7 @@ from __future__ import annotations
 import discord
 from discord.ext import commands
 
-from ..modules import core
+from restructured_bot.modules import core
 
 
 class Stats(commands.Cog):
