@@ -148,7 +148,7 @@ async def monthly_reset():
 async def load_extensions():
     for filename in os.listdir(os.path.join(os.path.dirname(__file__), 'cogs')):
         if filename.endswith('.py') and not filename.startswith('_'):
-            module = f"cogs.{filename[:-3]}"
+            module = f"restructured_bot.cogs.{filename[:-3]}"
             try:
                 await bot.load_extension(module)
                 print(f"[DEBUG] ✅ {module} chargé")
