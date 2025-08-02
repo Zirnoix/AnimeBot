@@ -49,7 +49,7 @@ class Link(commands.Cog):
         links = core.load_links()
         uid1, uid2 = str(ctx.author.id), str(opponent.id)
         if uid1 not in links or uid2 not in links:
-            await ctx.send("❗ Les deux joueurs doivent avoir lié leur compte avec `!linkanilist`." )
+            await ctx.send("❗ Les deux joueurs doivent avoir lié leur compte avec `!linkanilist`.")
             return
         user1, user2 = links[uid1], links[uid2]
         query = '''
