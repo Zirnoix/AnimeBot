@@ -1,12 +1,12 @@
 """
 Mini‑games commands.
 
-This cog regroupe plusieurs petits jeux pour divertir les utilisateurs :
-* **Higher/Lower** : devinez quel anime est le plus populaire.
-* **Guess Year** : devinez l’année de diffusion d’un anime.
-* **Higher Mean** : devinez quelle série a la meilleure note moyenne.
-* **Guess Episodes** : devinez le nombre d’épisodes d’une série.
-* **Guess Genre** : trouvez un des genres principaux d’un anime.
+This cog regroupe plusieurs petits jeux pour divertir les utilisateurs :
+* **Higher/Lower** : devinez quel anime est le plus populaire.
+* **Guess Year** : devinez l’année de diffusion d’un anime.
+* **Higher Mean** : devinez quelle série a la meilleure note moyenne.
+* **Guess Episodes** : devinez le nombre d’épisodes d’une série.
+* **Guess Genre** : trouvez un des genres principaux d’un anime.
 
 Les jeux attribuent de l’XP et enregistrent un mini‑score afin de
 récompenser les joueurs les plus actifs.
@@ -60,7 +60,7 @@ class MiniGames(commands.Cog):
         choice1, choice2 = random.sample(media_list, 2)
         # Compose embed presenting the two options
         embed = discord.Embed(
-            title="⬆️⬇️ Mini‑jeu : Quel anime est le plus populaire ?",
+            title="⬆️⬇️ Mini‑jeu : Quel anime est le plus populaire ?",
             description=(
                 "Réponds `1` ou `2` selon ton intuition.\n"
                 "1️⃣ {t1}\n"
@@ -85,19 +85,19 @@ class MiniGames(commands.Cog):
         pop2 = choice2.get("popularity", 0)
         correct = "1" if pop1 >= pop2 else "2"
         if answer == correct:
-            await ctx.send(f"✅ Bravo ! **{choice1['title']['romaji']}** a une popularité de {pop1} et **{choice2['title']['romaji']}** de {pop2}. Tu gagnes 5 XP !")
+            await ctx.send(f"✅ Bravo! **{choice1['title']['romaji']}** a une popularité de {pop1} et **{choice2['title']['romaji']}** de {pop2}. Tu gagnes 5 XP !")
             core.add_xp(ctx.author.id, 5)
             # Record mini-game score
             core.add_mini_score(ctx.author.id, "higherlower", 1)
         else:
-            await ctx.send(f"❌ Mauvais choix. **{choice1['title']['romaji']}** : {pop1}, **{choice2['title']['romaji']}** : {pop2}.")
+            await ctx.send(f"❌ Mauvais choix. **{choice1['title']['romaji']}** : {pop1}, **{choice2['title']['romaji']}** : {pop2}.")
 
     @commands.command(name="guessyear")
     async def guess_year(self, ctx: commands.Context) -> None:
         """Devine l’année de diffusion d’un anime au hasard.
 
         Le bot choisit un anime populaire et te demande son année de sortie. Tu as
-        15 secondes pour répondre. Une réponse exacte ou avec une marge de ±1 an
+        15 secondes pour répondre. Une réponse exacte ou avec une marge de ±1 an
         rapporte 8 XP, sinon la bonne année est affichée.
         """
         await ctx.send("🗓️ Chargement d’un anime…")
@@ -126,10 +126,10 @@ class MiniGames(commands.Cog):
             await ctx.send("❌ L’année de cet anime est indisponible.")
             return
         embed = discord.Embed(
-            title="📅 Mini‑jeu : Devine l’année !",
+            title="📅 Mini‑jeu : Devine l’année !",
             description=(
                 f"En quelle année **{title}** a‑t‑il commencé à être diffusé ?\n"
-                "Réponds par une année (ex : `2015`)."
+                "Réponds par une année (ex : `2015`)."
             ),
             color=discord.Color.purple(),
         )
@@ -190,7 +190,7 @@ class MiniGames(commands.Cog):
         t1, s1 = a1["title"]["romaji"], a1.get("meanScore", 0)
         t2, s2 = a2["title"]["romaji"], a2.get("meanScore", 0)
         embed = discord.Embed(
-            title="🎖️ Mini‑jeu : Quelle note est la plus haute ?",
+            title="🎖️ Mini‑jeu : Quelle note est la plus haute ?",
             description=(
                 "Réponds `1` ou `2` selon toi.\n"
                 f"1️⃣ {t1}\n"
@@ -209,11 +209,11 @@ class MiniGames(commands.Cog):
         answer = msg.content.strip()
         correct = "1" if s1 >= s2 else "2"
         if answer == correct:
-            await ctx.send(f"✅ Bien joué ! **{t1}** : {s1}/100 – **{t2}** : {s2}/100. Tu gagnes 5 XP !")
+            await ctx.send(f"✅ Bien joué ! **{t1}** : {s1}/100 – **{t2}** : {s2}/100. Tu gagnes 5 XP !")
             core.add_xp(ctx.author.id, 5)
             core.add_mini_score(ctx.author.id, "highermean", 1)
         else:
-            await ctx.send(f"❌ Mauvais choix. **{t1}** : {s1}/100, **{t2}** : {s2}/100.")
+            await ctx.send(f"❌ Mauvais choix. **{t1}** : {s1}/100, **{t2}** : {s2}/100.")
 
     @commands.command(name="guessepisodes")
     async def guess_episodes(self, ctx: commands.Context) -> None:
@@ -221,7 +221,7 @@ class MiniGames(commands.Cog):
 
         Le bot choisit au hasard un anime non‑adulte dont le nombre
         d'épisodes est connu. Réponds par un entier ; une réponse
-        exacte ou dans une marge de ±10 % (ou ±5 épisodes) rapporte 8 XP.
+        exacte ou dans une marge de ±10 % (ou ±5 épisodes) rapporte 8 XP.
         """
         await ctx.send("🎬 Sélection d’un anime…")
         anime = None
@@ -253,10 +253,10 @@ class MiniGames(commands.Cog):
         title = anime["title"]["romaji"]
         episodes = anime["episodes"]
         embed = discord.Embed(
-            title="🎞️ Mini‑jeu : Combien d’épisodes ?",
+            title="🎞️ Mini‑jeu : Combien d’épisodes ?",
             description=(
                 f"Combien d’épisodes compte **{title}** ?\n"
-                "Réponds par un nombre (ex : `24`)."
+                "Réponds par un nombre (ex : `24`)."
             ),
             color=discord.Color.blue(),
         )
@@ -277,11 +277,11 @@ class MiniGames(commands.Cog):
         except ValueError:
             await ctx.send(f"❌ Ce n’est pas un nombre valide. **{title}** a **{episodes}** épisodes.")
             return
-        # Tolérance : ±10 % ou ±5 épisodes (le plus grand des deux)
+        # Tolérance : ±10 % ou ±5 épisodes (le plus grand des deux)
         tolerance = max(int(episodes * 0.1), 5)
         if abs(guessed - episodes) <= tolerance:
             await ctx.send(
-                f"✅ Bravo ! **{title}** compte {episodes} épisodes (tu as répondu {guessed}). Tu gagnes 8 XP !"
+                f"✅ Bravo ! **{title}** compte {episodes} épisodes (tu as répondu {guessed}). Tu gagnes 8 XP !"
             )
             core.add_xp(ctx.author.id, 8)
             core.add_mini_score(ctx.author.id, "guessepisodes", 1)
@@ -327,10 +327,10 @@ class MiniGames(commands.Cog):
         title = anime["title"]["romaji"]
         genres = [g.lower() for g in anime.get("genres", [])]
         embed = discord.Embed(
-            title="🎭 Mini‑jeu : Devine le genre !",
+            title="🎭 Mini‑jeu : Devine le genre !",
             description=(
                 f"Quel est un des genres de **{title}** ?\n"
-                "Réponds par un genre (ex : `Action`, `Romance`)."
+                "Réponds par un genre (ex : `Action`, `Romance`)."
             ),
             color=discord.Color.magenta(),
         )
@@ -351,7 +351,7 @@ class MiniGames(commands.Cog):
             core.add_xp(ctx.author.id, 5)
             core.add_mini_score(ctx.author.id, "guessgenre", 1)
         else:
-            await ctx.send(f"❌ Mauvaise réponse. Les genres de **{title}** étaient : {', '.join(anime['genres'])}.")
+            await ctx.send(f"❌ Mauvaise réponse. Les genres de **{title}** étaient : {', '.join(anime['genres'])}.")
 
 
 async def setup(bot: commands.Bot) -> None:
