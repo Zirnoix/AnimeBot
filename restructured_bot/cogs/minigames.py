@@ -3,28 +3,32 @@
 import random
 import discord
 from discord.ext import commands
-from restructured_bot.modules import core
+from restructured_bot.core import (
+    get_user_level, get_user_xp, add_user_xp,
+    increment_minigame_score, get_random_anime,
+    get_all_genres
+)
 
 class MiniGames(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     def get_user_data(self, user_id):
-        level = core.get_user_level(user_id)
-        xp = core.get_user_xp(user_id)
+        level = get_user_level(user_id)
+        xp = get_user_xp(user_id)
         return level, xp
 
     def update_user_data(self, user_id, xp_gain):
-        core.add_user_xp(user_id, xp_gain)
-        core.increment_minigame_score(user_id, "guess")
+        add_user_xp(user_id, xp_gain)
+        increment_minigame_score(user_id, "guess")
 
     @commands.command(name="higherlower")
     async def higher_lower(self, ctx):
-        anime1 = core.get_random_anime()
-        anime2 = core.get_random_anime()
+        anime1 = get_random_anime()
+        anime2 = get_random_anime()
 
         while anime1["id"] == anime2["id"]:
-            anime2 = core.get_random_anime()
+            anime2 = get_random_anime()
 
         score1 = anime1.get("averageScore") or 0
         score2 = anime2.get("averageScore") or 0
@@ -55,9 +59,9 @@ class MiniGames(commands.Cog):
         else:
             await ctx.send(f"❌ Mauvaise réponse. {selected['title']['romaji']} a {selected['averageScore']} de score.")
 
-    @commands.command(name="higherman")
-    async def higher_man(self, ctx):
-        animes = [core.get_random_anime() for _ in range(4)]
+    @commands.command(name="highermean")
+    async def higher_mean(self, ctx):
+        animes = [get_random_anime() for _ in range(4)]
         scores = [(a, a.get("averageScore", 0)) for a in animes]
         winner = max(scores, key=lambda x: x[1])[0]
 
@@ -87,7 +91,7 @@ class MiniGames(commands.Cog):
 
     @commands.command(name="guessyear")
     async def guess_year(self, ctx):
-        anime = core.get_random_anime()
+        anime = get_random_anime()
         correct_year = anime.get("startDate", {}).get("year")
 
         if not correct_year:
@@ -124,7 +128,7 @@ class MiniGames(commands.Cog):
 
     @commands.command(name="guessepisode")
     async def guess_episode(self, ctx):
-        anime = core.get_random_anime()
+        anime = get_random_anime()
         ep_count = anime.get("episodes")
 
         if not ep_count or ep_count > 200:
@@ -161,7 +165,7 @@ class MiniGames(commands.Cog):
 
     @commands.command(name="guessgenre")
     async def guess_genre(self, ctx):
-        anime = core.get_random_anime()
+        anime = get_random_anime()
         genres = anime.get("genres", [])
 
         if not genres:
@@ -169,7 +173,7 @@ class MiniGames(commands.Cog):
             return
 
         correct_genre = genres[0]
-        all_genres = core.get_all_genres()
+        all_genres = get_all_genres()
         options = [correct_genre]
         while len(options) < 4:
             g = random.choice(all_genres)
