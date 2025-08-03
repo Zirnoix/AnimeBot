@@ -1,32 +1,36 @@
+# restructured_bot/cogs/link.py
+
 import discord
 from discord.ext import commands
+from restructured_bot.modules import core, database, anilist
 
-from restructured_bot.modules import core
+class AniListLink(commands.Cog):
+    """Commandes pour lier ou délier son compte AniList."""
 
-class Link(commands.Cog):
-    """Cog pour lier ou délier son compte AniList."""
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     @commands.command(name="linkanilist")
-    async def link_anilist(self, ctx: commands.Context, pseudo: str) -> None:
-        """Lie votre compte AniList (pseudo) à votre profil Discord."""
-        data = core.load_links()
-        data[str(ctx.author.id)] = pseudo
-        core.save_links(data)
-        await ctx.send(f"✅ Ton compte AniList **{pseudo}** a été lié à ton profil Discord.")
-
-    @commands.command(name="unlink")
-    async def unlink(self, ctx: commands.Context) -> None:
-        """Délie (supprime) le compte AniList lié à votre profil Discord."""
-        data = core.load_links()
+    async def link_anilist(self, ctx: commands.Context, *, username: str):
+        """Lie votre compte AniList à votre compte Discord."""
         user_id = str(ctx.author.id)
-        if user_id in data:
-            data.pop(user_id, None)
-            core.save_links(data)
-            await ctx.send("🔗 Ton lien AniList a bien été supprimé.")
-        else:
-            await ctx.send("❌ Aucun compte AniList n’était lié à ton profil.")
+        user_data = anilist.query_anilist(username)
 
-async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(Link(bot))
+        if not user_data:
+            await ctx.send("❌ Nom d’utilisateur AniList invalide ou introuvable.")
+            return
+
+        database.save_anilist_link(user_id, user_data["id"], user_data["name"])
+        await ctx.send(f"✅ Compte AniList **{user_data['name']}** lié avec succès à {ctx.author.mention}.")
+
+    @commands.command(name="unlinkanilist")
+    async def unlink_anilist(self, ctx: commands.Context):
+        """Délie votre compte AniList de votre compte Discord."""
+        user_id = str(ctx.author.id)
+        if database.remove_anilist_link(user_id):
+            await ctx.send(f"🔗 Le lien avec votre compte AniList a été supprimé.")
+        else:
+            await ctx.send("❌ Aucun compte AniList n’est actuellement lié à votre profil.")
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(AniListLink(bot))
