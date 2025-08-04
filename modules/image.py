@@ -1,5 +1,38 @@
+# modules/image.py (ajoute tout à la fin du fichier)
+
 from PIL import Image, ImageDraw, ImageFont
+import requests
+from io import BytesIO
+from datetime import datetime
 import os
+
+def generate_next_anime_image(title, episode, airing_time, cover_url):
+    width, height = 800, 400
+    bg_color = (30, 30, 30)
+    font_title = ImageFont.truetype("assets/fonts/DejaVuSans.ttf", 38)
+    font_info = ImageFont.truetype("assets/fonts/DejaVuSans.ttf", 24)
+
+    image = Image.new("RGB", (width, height), color=bg_color)
+    draw = ImageDraw.Draw(image)
+
+    # Télécharger l’image de couverture
+    response = requests.get(cover_url)
+    cover = Image.open(BytesIO(response.content)).resize((260, 360))
+    image.paste(cover, (20, 20))
+
+    # Infos à afficher
+    draw.text((300, 40), title, font=font_title, fill=(255, 255, 255))
+    draw.text((300, 120), f"Épisode {episode}", font=font_info, fill=(200, 200, 200))
+
+    dt = datetime.fromtimestamp(airing_time)
+    date_str = dt.strftime("%A %d %B %Y à %Hh%M")
+    draw.text((300, 170), f"Diffusion : {date_str}", font=font_info, fill=(200, 200, 200))
+
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
 
 def save_user_card(username: str, xp: int, rank: str, path: str):
     os.makedirs("data", exist_ok=True)
