@@ -238,3 +238,7 @@ class GuessGames(commands.Cog):
             score_manager.update_guess_score(str(ctx.author.id), "guessop", 5)
         else:
             await ctx.send(f"❌ Mauvaise réponse ! C’était : **{correct_anime}**.")
+
+async def setup(bot):
+    await bot.add_cog(Guess(bot))
+
