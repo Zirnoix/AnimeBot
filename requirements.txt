@@ -2,4 +2,3 @@ discord.py[voice]
 aiohttp
 requests
 Pillow
-python-dotoenv
