@@ -22,7 +22,20 @@ class AniListCog(commands.Cog):
             await ctx.send("🗑️ Compte AniList délié avec succès.")
         else:
             await ctx.send("⚠️ Aucun compte AniList n'était lié.")
+            
+    @commands.command(name="stats")
+    async def anilist_stats(self, ctx):
+        """📊 Statistiques détaillées de ton compte AniList"""
+        username = get_anilist_username(str(ctx.author.id))
+        if not username:
+            await ctx.send("⚠️ Tu dois d’abord lier ton compte avec `!linkanilist <pseudo>`.")
+            return
 
+        embed = await get_anilist_stats(username)
+        if embed:
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send("❌ Impossible de récupérer les statistiques AniList.")
     @commands.command(name="anilist")
     async def anilist_profile(self, ctx, user: discord.User = None):
         target = user or ctx.author
