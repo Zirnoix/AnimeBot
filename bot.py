@@ -42,15 +42,10 @@ async def on_ready():
 
 @bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
-        return
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("⚠️ Argument manquant.")
-    elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("🚫 Tu n’as pas la permission de faire ça.")
-    else:
-        await ctx.send("❌ Une erreur est survenue.")
-        raise error
+    import traceback
+    tb = ''.join(traceback.format_exception(type(error), error, error.__traceback__))
+    await ctx.send(f"```py\n{tb[:1900]}```")
+
 
 async def main():
     for cog in COGS:
