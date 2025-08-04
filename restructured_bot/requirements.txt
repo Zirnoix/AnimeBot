@@ -1,7 +1,0 @@
-discord.py
-aiohttp
-requests
-pillow==10.4.0
-python-dotenv
-Babel
-pytz
