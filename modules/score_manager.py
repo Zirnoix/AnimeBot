@@ -3,7 +3,8 @@
 import json
 import os
 
-SCORES_FILE = "data/quiz_scores.json"
+QUIZ_SCORES_FILE = "data/quiz_scores.json"
+GAME_SCORES_FILE = "data/game_scores.json"
 DUELS_FILE = "data/duel_scores.json"
 GUESS_FILE = "data/guess_scores.json"
 
@@ -19,19 +20,25 @@ def save_scores(scores, file_path):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(scores, f, ensure_ascii=False, indent=2)
 
-# --- QUIZ CLASSIQUE ---
+# === GESTION QUIZ ===
 
-def update_quiz_score(user_id: str, score: int):
-    scores = load_scores(SCORES_FILE)
-    scores[user_id] = scores.get(user_id, 0) + score
-    save_scores(scores, SCORES_FILE)
+def load_quiz_scores():
+    if os.path.exists(QUIZ_SCORES_FILE):
+        with open(QUIZ_SCORES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-def get_quiz_score(user_id: str) -> int:
-    return load_scores(SCORES_FILE).get(user_id, 0)
+def save_quiz_scores(scores):
+    with open(QUIZ_SCORES_FILE, "w", encoding="utf-8") as f:
+        json.dump(scores, f, ensure_ascii=False, indent=2)
 
-def get_quiz_leaderboard(limit: int = 10):
-    scores = load_scores(SCORES_FILE)
-    return sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
+def update_quiz_score(user_id, points):
+    scores = load_quiz_scores()
+    scores[user_id] = scores.get(user_id, 0) + points
+    save_quiz_scores(scores)
+
+def get_quiz_score(user_id):
+    return load_quiz_scores().get(user_id, 0)
 
 # --- DUELS ---
 
@@ -52,31 +59,25 @@ def get_duel_stats(user_id: str):
     stats = load_scores(DUELS_FILE)
     return stats.get(user_id, {"wins": 0, "losses": 0})
 
-# --- GUESS GAMES (guessyear, guessgenre, etc.) ---
+# === GESTION MINI-JEUX "GUESS" ===
 
-def get_user_scores(user_id):
-    """Retourne tous les scores d’un utilisateur sous forme de dict"""
-    if not os.path.exists(SCORE_FILE):
-        return {}
-    with open(SCORE_FILE, "r", encoding="utf-8") as f:
-        scores = json.load(f)
-    return scores.get(user_id, {})
+def load_game_scores():
+    if os.path.exists(GAME_SCORES_FILE):
+        with open(GAME_SCORES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-def update_guess_score(user_id: str, game_type: str, points: int):
-    """
-    Ajoute des points à un mini-jeu spécifique.
-    game_type: "guessyear", "guessgenre", "episodes", etc.
-    """
-    scores = load_scores(GUESS_FILE)
+def save_game_scores(scores):
+    with open(GAME_SCORES_FILE, "w", encoding="utf-8") as f:
+        json.dump(scores, f, ensure_ascii=False, indent=2)
+
+def update_game_score(user_id, game_mode, points):
+    scores = load_game_scores()
     if user_id not in scores:
         scores[user_id] = {}
-    scores[user_id][game_type] = scores[user_id].get(game_type, 0) + points
-    save_scores(scores, GUESS_FILE)
+    scores[user_id][game_mode] = scores[user_id].get(game_mode, 0) + points
+    save_game_scores(scores)
 
-def get_user_guess_scores(user_id: str):
-    scores = load_scores(GUESS_FILE)
+def get_user_scores(user_id):
+    scores = load_game_scores()
     return scores.get(user_id, {})
-
-def get_total_guess_score(user_id: str):
-    scores = get_user_guess_scores(user_id)
-    return sum(scores.values())
