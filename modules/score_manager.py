@@ -54,6 +54,14 @@ def get_duel_stats(user_id: str):
 
 # --- GUESS GAMES (guessyear, guessgenre, etc.) ---
 
+def get_user_scores(user_id):
+    """Retourne tous les scores d’un utilisateur sous forme de dict"""
+    if not os.path.exists(SCORE_FILE):
+        return {}
+    with open(SCORE_FILE, "r", encoding="utf-8") as f:
+        scores = json.load(f)
+    return scores.get(user_id, {})
+
 def update_guess_score(user_id: str, game_type: str, points: int):
     """
     Ajoute des points à un mini-jeu spécifique.
