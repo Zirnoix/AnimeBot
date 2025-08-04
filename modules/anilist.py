@@ -2,6 +2,7 @@
 
 import aiohttp
 import os
+import requests
 
 ANILIST_USERNAME = os.getenv("ANILIST_USERNAME")
 ANILIST_API_URL = "https://graphql.anilist.co"
@@ -41,3 +42,59 @@ async def get_anilist_user_id(username: str):
     variables = {"name": username}
     data = await fetch_anilist(query, variables)
     return data["data"]["User"]["id"] if data["data"].get("User") else None
+
+def get_random_characters(n=4):
+    characters = []
+    tries = 0
+    while len(characters) < n and tries < 10:
+        page = random.randint(1, 1000)
+        query = '''
+        query ($page: Int) {
+          Page(page: $page, perPage: 1) {
+            characters(sort: FAVOURITES_DESC) {
+              name {
+                full
+              }
+              image {
+                large
+              }
+            }
+          }
+        }
+        '''
+        response = requests.post(
+            "https://graphql.anilist.co",
+            json={"query": query, "variables": {"page": page}},
+            headers={"Content-Type": "application/json"}
+        )
+        try:
+            data = response.json()["data"]["Page"]["characters"][0]
+            if data["name"]["full"] not in [c["name"]["full"] for c in characters]:
+                characters.append(data)
+        except Exception:
+            pass
+        tries += 1
+    return characters
+
+def get_random_title():
+    page = random.randint(1, 10000)
+    query = '''
+    query ($page: Int) {
+      Page(page: $page, perPage: 1) {
+        media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+          title {
+            romaji
+          }
+        }
+      }
+    }
+    '''
+    response = requests.post(
+        "https://graphql.anilist.co",
+        json={"query": query, "variables": {"page": page}},
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        return response.json()["data"]["Page"]["media"][0]["title"]["romaji"]
+    except Exception:
+        return "Inconnu"
