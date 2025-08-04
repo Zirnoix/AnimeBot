@@ -2,10 +2,10 @@
 
 import discord
 from discord.ext import commands
-import os
-
-from modules import xp_manager, score_manager, image
-
+from modules.xp_manager import get_xp, get_rank_title
+from modules.score_manager import get_user_scores
+from modules.image import generate_profile_card
+import asyncio
 
 class Profile(commands.Cog):
     def __init__(self, bot):
@@ -13,37 +13,51 @@ class Profile(commands.Cog):
 
     @commands.command(name="mycard")
     async def mycard(self, ctx):
-        user = ctx.author
-        user_id = str(user.id)
-        username = user.display_name
+        """📇 Affiche ta carte de profil"""
+        user_id = str(ctx.author.id)
 
-        # XP et rang
-        xp = xp_manager.get_xp(user_id)
-        rank = xp_manager.get_rank_title(xp)
+        # XP + Rang
+        xp = get_xp(user_id)
+        rank = get_rank_title(xp)
 
-        # Points de quiz
-        quiz_score = score_manager.get_quiz_score(user_id)
+        # Scores mini-jeux
+        scores = get_user_scores(user_id)
+        total_quiz = scores.get("animequiz", 0)
+        total_year = scores.get("guessyear", 0)
+        total_genre = scores.get("guessgenre", 0)
+        total_episode = scores.get("guessepisode", 0)
+        total_character = scores.get("guesscharacter", 0)
+        total_op = scores.get("guessop", 0)
 
-        # Est-ce qu’il est dans le top quiz ?
-        top_users = [uid for uid, _ in score_manager.get_quiz_leaderboard()]
-        in_top = user_id in top_users
+        # Badges à afficher
+        badges = []
+        if total_quiz >= 10: badges.append("🎓 Quiz Master")
+        if total_year >= 5: badges.append("📅 Time Traveler")
+        if total_op >= 3: badges.append("🎵 Audio Addict")
+        if xp >= 500: badges.append("🏅 XP Warrior")
 
-        # Scores guess
-        guess_scores = score_manager.get_user_guess_scores(user_id)
-
-        # Générer l'image
-        card_path = f"data/{user_id}_card.png"
-        image.save_profile_card(username, rank, quiz_score, in_top, guess_scores, card_path)
-
-        # Envoyer l'image
-        file = discord.File(card_path, filename="profile.png")
-        embed = discord.Embed(
-            title=f"📇 Carte de {username}",
-            color=discord.Color.purple()
+        # Image à générer
+        image_bytes = await asyncio.to_thread(generate_profile_card,
+            username=str(ctx.author),
+            avatar_url=ctx.author.display_avatar.url,
+            xp=xp,
+            rank=rank,
+            quiz_score=total_quiz,
+            year_score=total_year,
+            genre_score=total_genre,
+            episode_score=total_episode,
+            character_score=total_character,
+            op_score=total_op,
+            badges=badges
         )
-        embed.set_image(url="attachment://profile.png")
-        await ctx.send(file=file, embed=embed)
 
+        file = discord.File(image_bytes, filename="mycard.png")
+        embed = discord.Embed(
+            title=f"📇 Profil de {ctx.author.display_name}",
+            color=0x1abc9c
+        )
+        embed.set_image(url="attachment://mycard.png")
+        await ctx.send(embed=embed, file=file)
 
 async def setup(bot):
     await bot.add_cog(Profile(bot))
