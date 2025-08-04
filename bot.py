@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import os
 import asyncio
 import datetime
+from datetime import datetime, timezone
 
 # Charger les variables d’environnement (Render gère ça automatiquement)
 load_dotenv()
@@ -18,7 +19,7 @@ intents.messages = True
 intents.reactions = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-bot.launch_time = datetime.datetime.utcnow()
+bot.launch_time = datetime.now(timezone.utc)
 
 # Liste de tous les cogs à charger (tu peux en rajouter ici)
 COGS = [
