@@ -98,3 +98,37 @@ def get_random_title():
         return response.json()["data"]["Page"]["media"][0]["title"]["romaji"]
     except Exception:
         return "Inconnu"
+
+async def get_next_airing_anime_data():
+    query = '''
+    query {
+      Page(perPage: 1) {
+        media(type: ANIME, sort: NEXT_AIRING_EPISODE) {
+          title {
+            romaji
+          }
+          coverImage {
+            large
+          }
+          nextAiringEpisode {
+            episode
+            airingAt
+          }
+        }
+      }
+    }
+    '''
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://graphql.anilist.co", json={"query": query}) as response:
+            if response.status != 200:
+                return None
+            data = await response.json()
+
+    anime = data["data"]["Page"]["media"][0]
+    return {
+        "title": anime["title"]["romaji"],
+        "episode": anime["nextAiringEpisode"]["episode"],
+        "airing_time": anime["nextAiringEpisode"]["airingAt"],
+        "cover_url": anime["coverImage"]["large"]
+    }
