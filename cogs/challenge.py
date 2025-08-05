@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 import discord
 from discord.ext import commands
 
-from ..modules import core
+from modules import core
 
 
 class Challenge(commands.Cog):
