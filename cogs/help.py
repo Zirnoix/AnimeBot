@@ -2,75 +2,48 @@
 
 import discord
 from discord.ext import commands
+from discord.ext.commands import CommandNotFound
 
 class CustomHelp(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        bot.remove_command("help")  # Supprime la commande par défaut
 
     @commands.command(name="help")
-    async def custom_help(self, ctx):
+    async def help_command(self, ctx):
         embed = discord.Embed(
-            title="📚 Commandes disponibles",
-            description="Voici la liste des commandes organisées par catégorie :",
-            color=0xf1c40f
+            title="📚 Menu d'Aide",
+            description="Voici la liste des commandes disponibles :",
+            color=discord.Color.gold()
         )
 
         embed.add_field(
-            name="🎮 Quiz et Mini-jeux",
-            value=(
-                "`!animequiz` - Quiz solo sur les animés\n"
-                "`!animequizmulti` - Quiz multi-joueurs\n"
-                "`!guessyear` - Devine l’année de diffusion\n"
-                "`!guessgenre` - Devine le genre de l’anime\n"
-                "`!guessepisode` - Trouve le numéro d’épisode\n"
-                "`!guesscharacter` - Devine le personnage\n"
-                "`!guessop` - Trouve l’opening audio"
-            ),
+            name="🎮 Quiz & Mini-jeux",
+            value="`!animequiz`, `!guessyear`, `!guessgenre`, `!guessepisode`, `!guesscharacter`, `!guessop`",
             inline=False
         )
-
         embed.add_field(
-            name="📊 Stats et Profils",
-            value=(
-                "`!mycard` - Affiche ta carte de joueur\n"
-                "`!mystats` - Affiche tes stats globales\n"
-                "`!myrank` - Affiche ton rang XP"
-            ),
+            name="📊 Statistiques & Profil",
+            value="`!myrank`, `!mycard`, `!stats`, `!quiztop`",
             inline=False
         )
-
         embed.add_field(
-            name="🎥 AniList",
-            value=(
-                "`!linkanilist` - Lier ton compte AniList\n"
-                "`!unlinkanilist` - Supprimer le lien\n"
-                "`!anilist` - Voir ton profil\n"
-                "`!stats` - Statistiques de visionnage"
-            ),
+            name="📅 Planning & Notifications",
+            value="`!planning`, `!next`, `!monnext`, `!track`, `!untrack`",
             inline=False
         )
-
         embed.add_field(
-            name="📆 Planning et Notifications",
-            value=(
-                "`!planning` - Planning du jour\n"
-                "`!next` - Prochain épisode à venir\n"
-                "`!setchannel` - Activer les notifs auto\n"
-                "`!disablechannel` - Désactiver les notifs"
-            ),
+            name="🔗 AniList",
+            value="`!linkanilist`, `!unlinkanilist`, `!anilist`, `!duel`",
             inline=False
         )
-
         embed.add_field(
-            name="⚙️ Divers",
-            value=(
-                "`!ping` - Latence du bot\n"
-                "`!uptime` - Depuis combien de temps il tourne\n"
-                "`!botinfo` - Infos système\n"
-                "`!source` - Lien du code du bot"
-            ),
+            name="⚙️ Utilitaires",
+            value="`!ping`, `!botinfo`, `!uptime`, `!source`, `!help`",
             inline=False
         )
+        embed.set_footer(text="AnimeBot • Parlez à un admin si vous avez un souci avec une commande.")
+        embed.set_thumbnail(url=self.bot.user.avatar.url if self.bot.user.avatar else discord.Embed.Empty)
 
         await ctx.send(embed=embed)
 
