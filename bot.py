@@ -38,7 +38,7 @@ async def on_ready():
     logging.info(f"Connecté en tant que {bot.user} (ID: {bot.user.id})")
 
 # Récupérer le token du bot depuis les variables d'environnement et démarrer le bot
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 if not TOKEN:
     logging.error("Le token Discord n'a pas été trouvé. Veuillez le définir dans les variables d'environnement.")
 else:
