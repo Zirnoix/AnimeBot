@@ -3,6 +3,7 @@
 import aiohttp
 import os
 import requests
+import datetime
 
 ANILIST_USERNAME = os.getenv("ANILIST_USERNAME")
 ANILIST_API_URL = "https://graphql.anilist.co"
@@ -99,6 +100,52 @@ def get_random_title():
     except Exception:
         return "Inconnu"
 
+
+def get_next_airing_anime():
+    query = """
+    query {
+      Page(perPage: 10) {
+        media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
+          id
+          title {
+            romaji
+            english
+            native
+          }
+          nextAiringEpisode {
+            airingAt
+            episode
+          }
+          coverImage {
+            large
+          }
+        }
+      }
+    }
+    """
+    url = "https://graphql.anilist.co"
+    response = requests.post(url, json={"query": query}, headers={"Content-Type": "application/json"})
+    
+    if response.status_code != 200:
+        return []
+
+    results = []
+    data = response.json()["data"]["Page"]["media"]
+    now = datetime.datetime.utcnow().timestamp()
+
+    for anime in data:
+        airing = anime.get("nextAiringEpisode")
+        if airing and airing["airingAt"] > now:
+            results.append({
+                "id": anime["id"],
+                "title": anime["title"]["romaji"],
+                "episode": airing["episode"],
+                "airing_at": airing["airingAt"],
+                "image": anime["coverImage"]["large"]
+            })
+
+    return results
+    
 async def get_next_airing_anime_data():
     query = '''
     query {
