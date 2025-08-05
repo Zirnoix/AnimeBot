@@ -6,6 +6,58 @@ from io import BytesIO
 from datetime import datetime
 import os
 
+FONT_PATH = "assets/fonts/DejaVuSans.ttf"
+OUTPUT_DIR = "data/cards"
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def generate_profile_card(user_name: str, quiz_points: int, guess_points: int, guess_year_points: int, titles: list, output_path: str = None):
+    width, height = 800, 400
+    card = Image.new("RGB", (width, height), (30, 30, 30))
+    draw = ImageDraw.Draw(card)
+
+    try:
+        font_title = ImageFont.truetype(FONT_PATH, 36)
+        font_text = ImageFont.truetype(FONT_PATH, 24)
+    except:
+        font_title = font_text = None  # fallback if font missing
+
+    draw.text((30, 30), f"Profil de {user_name}", font=font_title, fill=(255, 255, 255))
+    draw.text((30, 100), f"🎮 AnimeQuiz : {quiz_points} pts", font=font_text, fill=(255, 255, 255))
+    draw.text((30, 150), f"🧠 Guess Genre : {guess_points} pts", font=font_text, fill=(255, 255, 255))
+    draw.text((30, 200), f"📅 Guess Year : {guess_year_points} pts", font=font_text, fill=(255, 255, 255))
+    draw.text((30, 250), f"🏆 Titres : {', '.join(titles) if titles else 'Aucun'}", font=font_text, fill=(255, 255, 255))
+
+    if not output_path:
+        output_path = os.path.join(OUTPUT_DIR, f"{user_name}_profile_card.png")
+
+    card.save(output_path)
+    return output_path
+
+def generate_stats_image(stats: dict, output_path: str = None):
+    width, height = 800, 600
+    card = Image.new("RGB", (width, height), (40, 40, 40))
+    draw = ImageDraw.Draw(card)
+
+    try:
+        font_title = ImageFont.truetype(FONT_PATH, 36)
+        font_text = ImageFont.truetype(FONT_PATH, 22)
+    except:
+        font_title = font_text = None
+
+    draw.text((30, 30), "📊 Statistiques Anime", font=font_title, fill=(255, 255, 255))
+
+    y = 100
+    for key, value in stats.items():
+        draw.text((30, y), f"{key}: {value}", font=font_text, fill=(255, 255, 255))
+        y += 40
+
+    if not output_path:
+        output_path = os.path.join(OUTPUT_DIR, "stats_card.png")
+
+    card.save(output_path)
+    return output_path
+    
 def generate_next_anime_image(title, episode, airing_time, cover_url):
     width, height = 800, 400
     bg_color = (30, 30, 30)
