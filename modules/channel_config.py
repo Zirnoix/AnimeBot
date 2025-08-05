@@ -36,3 +36,10 @@ def clear_channel(guild_id: str, key: str):
 # ✅ Ajout pour compatibilité avec tracker.py / scheduler.py
 def get_configured_channel_id(guild_id: int):
     return get_channel(guild_id, "anilist_tracking")
+
+def save_configured_channel_id(guild_id: str, channel_id: int):
+    set_channel(guild_id, "airing_notifications", channel_id)
+
+def remove_configured_channel_id(guild_id: str):
+    clear_channel(guild_id, "airing_notifications")
+
