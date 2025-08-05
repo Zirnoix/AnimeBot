@@ -1,3 +1,5 @@
+# cogs/guess.py
+
 import discord
 from discord.ext import commands
 import random
@@ -18,14 +20,9 @@ class GuessGames(commands.Cog):
         )
 
     async def ask_question(self, ctx, title, question, options, correct_index, score_type, score_value=5):
-        embed = discord.Embed(
-            title=title,
-            description=question,
-            color=discord.Color.green()
-        )
+        embed = discord.Embed(title=title, description=question, color=discord.Color.green())
         for i, option in enumerate(options):
             embed.add_field(name=f"{i+1}️⃣", value=str(option), inline=False)
-
         await ctx.send(embed=embed)
 
         try:
@@ -125,7 +122,7 @@ class GuessGames(commands.Cog):
             correct_index=choices.index(episodes),
             score_type="guessepisode"
         )
-      
+
     @commands.command(name="guesscharacter")
     async def guess_character(self, ctx):
         characters = anilist.get_random_characters(4)
@@ -147,7 +144,6 @@ class GuessGames(commands.Cog):
         embed.set_image(url=correct_image)
         for i, opt in enumerate(options):
             embed.add_field(name=f"{i+1}️⃣", value=opt, inline=False)
-
         await ctx.send(embed=embed)
 
         try:
@@ -162,7 +158,7 @@ class GuessGames(commands.Cog):
             score_manager.update_guess_score(str(ctx.author.id), "guesscharacter", 5)
         else:
             await ctx.send(f"❌ Mauvaise réponse ! Il fallait répondre : **{correct_name}**.")
-          
+
     @commands.command(name="guessop")
     async def guess_op(self, ctx):
         if not ctx.author.voice or not ctx.author.voice.channel:
@@ -185,27 +181,22 @@ class GuessGames(commands.Cog):
         correct_anime = selected_file.replace(".mp3", "")
         choices = [correct_anime]
 
-        # Générer 3 titres aléatoires supplémentaires (faux)
         while len(choices) < 4:
             alt = anilist.get_random_title()
             if alt not in choices:
                 choices.append(alt)
-
         random.shuffle(choices)
         correct_index = choices.index(correct_anime)
 
-        # Connexion au vocal
         try:
             vc = await voice_channel.connect()
         except:
             await ctx.send("❌ Impossible de rejoindre le vocal.")
             return
 
-        # Lecture du fichier audio avec FFmpeg
         audio_source = discord.FFmpegPCMAudio(os.path.join(audio_folder, selected_file))
         vc.play(audio_source)
 
-        # Envoyer l'embed avec les choix
         embed = discord.Embed(
             title="🎵 Guess the Opening!",
             description="De quel anime vient cet opening ?",
@@ -213,15 +204,10 @@ class GuessGames(commands.Cog):
         )
         for i, title in enumerate(choices):
             embed.add_field(name=f"{i+1}️⃣", value=title, inline=False)
-
         await ctx.send(embed=embed)
 
         def check(m):
-            return (
-                m.author == ctx.author and
-                m.channel == ctx.channel and
-                m.content.isdigit()
-            )
+            return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit()
 
         try:
             msg = await self.bot.wait_for("message", timeout=30.0, check=check)
@@ -240,5 +226,4 @@ class GuessGames(commands.Cog):
             await ctx.send(f"❌ Mauvaise réponse ! C’était : **{correct_anime}**.")
 
 async def setup(bot):
-    await bot.add_cog(Guess(bot))
-
+    await bot.add_cog(GuessGames(bot))
