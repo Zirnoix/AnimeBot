@@ -14,8 +14,6 @@ from datetime import datetime, timedelta
 import discord
 from discord.ext import commands
 
-from modules import core
-
 
 class Challenge(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
