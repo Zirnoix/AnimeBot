@@ -15,7 +15,7 @@ import os
 import sys
 import pytz
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List
 import discord
 from discord.ext import commands, tasks
