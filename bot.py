@@ -129,11 +129,12 @@ class AnimeBot(commands.Bot):
         # Requête simple test
         test_query = """
         query {
-            Site {
-                id
-            }
+          Media(id: 1, type: ANIME) {
+            id
+          }
         }
         """
+
         response = query_anilist(test_query)
 
         if response:
