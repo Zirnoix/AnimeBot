@@ -12,11 +12,9 @@ et sont présentées sous forme de cartes personnalisées ou d'embeds Discord.
 """
 
 from __future__ import annotations
-
 import discord
 from discord.ext import commands
 from datetime import datetime
-
 from modules import core
 
 
@@ -134,54 +132,151 @@ class Episodes(commands.Cog):
 
     @commands.command(name="monnext")
     async def my_next(self, ctx: commands.Context) -> None:
-        """Affiche le prochain épisode pour l'utilisateur.
+        """Affiche le prochain épisode pour l'utilisateur depuis sa liste AniList.
 
-        Similaire à !next mais utilise la liste personnelle de l'utilisateur.
         Nécessite d'avoir lié son compte AniList au préalable.
-
-        Génère une carte personnalisée avec :
-        - Le titre de l'anime
-        - Le numéro d'épisode
-        - La date et heure de sortie
-        - Une image de l'anime
+        Génère une carte visuelle personnalisée avec les infos de l'épisode.
 
         Args:
             ctx: Le contexte de la commande
         """
-        # Code existant...
+        # Vérifier si l'utilisateur a lié son compte
+        links = core.load_links()
+        user_id = str(ctx.author.id)
+
+        if user_id not in links:
+            await ctx.send("❌ Tu dois d'abord lier ton compte AniList avec `!linkanilist <pseudo>`")
+            return
+
+        # Récupérer les épisodes depuis la liste de l'utilisateur
+        episodes = core.get_upcoming_episodes(links[user_id])
+
+        if not episodes:
+            await ctx.send("📭 Aucun épisode à venir trouvé dans ta liste.")
+            return
+
+        next_ep = min(episodes, key=lambda e: e["airingAt"])
+        dt = datetime.fromtimestamp(next_ep["airingAt"], tz=core.TIMEZONE)
+
+        # Générer l'image personnalisée
+        try:
+            buf = core.generate_next_image(next_ep, dt, tagline="Ton prochain épisode")
+            file = discord.File(buf, filename="next.jpg")
+            embed = discord.Embed(title="🎬 Ton prochain épisode", color=discord.Color.blurple())
+            embed.set_image(url="attachment://next.jpg")
+            await ctx.send(embed=embed, file=file)
+        except Exception:
+            # Fallback en cas d'erreur de génération d'image
+            embed = discord.Embed(
+                title="🎬 Ton prochain épisode",
+                description=f"{next_ep['title']} — Épisode {next_ep['episode']}",
+                color=discord.Color.blurple(),
+            )
+            embed.add_field(name="Date", value=dt.strftime("%d/%m/%Y à %H:%M"), inline=False)
+            await ctx.send(embed=embed)
 
     @commands.command(name="planning")
     async def planning(self, ctx: commands.Context) -> None:
         """Affiche le planning hebdomadaire global des épisodes.
 
-        Organise les épisodes par jour de la semaine et envoie un embed
-        distinct pour chaque jour contenant des sorties.
-
-        Format :
-        - Un embed par jour
-        - Liste des épisodes avec leur heure de sortie
-        - Limité aux 10 premiers épisodes par jour
+        Organise les épisodes par jour de la semaine dans des embeds distincts.
+        Utilise la liste globale configurée.
 
         Args:
             ctx: Le contexte de la commande
         """
-        # Code existant...
+        episodes = core.get_upcoming_episodes(core.ANILIST_USERNAME)
+
+        if not episodes:
+            await ctx.send("📭 Aucun épisode prévu cette semaine.")
+            return
+
+        # Organiser les épisodes par jour
+        planning: dict[str, list] = {}
+        for ep in episodes:
+            dt = datetime.fromtimestamp(ep["airingAt"], tz=core.TIMEZONE)
+            jour = core.JOURS_FR[dt.strftime("%A")]
+            if jour not in planning:
+                planning[jour] = []
+            planning[jour].append((ep, dt))
+
+        # Créer un embed par jour
+        for jour, episodes_jour in planning.items():
+            # Trier par heure et limiter à 10 épisodes
+            episodes_jour.sort(key=lambda x: x[1])
+            episodes_jour = episodes_jour[:10]
+
+            embed = discord.Embed(
+                title=f"📅 Planning {jour}",
+                color=discord.Color.blurple(),
+            )
+
+            for ep, dt in episodes_jour:
+                heure = dt.strftime("%H:%M")
+                emoji = core.genre_emoji(ep.get("genres", []))
+                embed.add_field(
+                    name=f"{emoji} {ep['title']} — Épisode {ep['episode']}",
+                    value=f"⏰ {heure}",
+                    inline=False
+                )
+
+            await ctx.send(embed=embed)
 
     @commands.command(name="monplanning")
     async def mon_planning(self, ctx: commands.Context) -> None:
-        """Affiche le planning personnel de l'utilisateur.
+        """Affiche le planning hebdomadaire personnel de l'utilisateur.
 
-        Nécessite d'avoir lié son compte AniList au préalable.
-        Affiche les 10 prochains épisodes à venir dans un embed avec :
-        - Titre de l'anime avec emoji de genre
-        - Numéro d'épisode
-        - Date et heure de sortie en français
-        - Miniature du premier anime de la liste
+        Nécessite d'avoir lié son compte AniList.
+        Organise les épisodes par jour depuis la liste personnelle.
 
         Args:
             ctx: Le contexte de la commande
         """
-        # Code existant...
+        # Vérifier si l'utilisateur a lié son compte
+        links = core.load_links()
+        user_id = str(ctx.author.id)
+
+        if user_id not in links:
+            await ctx.send("❌ Tu dois d'abord lier ton compte AniList avec `!linkanilist <pseudo>`")
+            return
+
+        # Récupérer les épisodes de l'utilisateur
+        episodes = core.get_upcoming_episodes(links[user_id])
+
+        if not episodes:
+            await ctx.send("📭 Aucun épisode prévu cette semaine dans ta liste.")
+            return
+
+        # Organiser les épisodes par jour
+        planning: dict[str, list] = {}
+        for ep in episodes:
+            dt = datetime.fromtimestamp(ep["airingAt"], tz=core.TIMEZONE)
+            jour = core.JOURS_FR[dt.strftime("%A")]
+            if jour not in planning:
+                planning[jour] = []
+            planning[jour].append((ep, dt))
+
+        # Créer un embed par jour
+        for jour, episodes_jour in planning.items():
+            # Trier par heure et limiter à 10 épisodes
+            episodes_jour.sort(key=lambda x: x[1])
+            episodes_jour = episodes_jour[:10]
+
+            embed = discord.Embed(
+                title=f"📅 Ton planning {jour}",
+                color=discord.Color.blurple(),
+            )
+
+            for ep, dt in episodes_jour:
+                heure = dt.strftime("%H:%M")
+                emoji = core.genre_emoji(ep.get("genres", []))
+                embed.add_field(
+                    name=f"{emoji} {ep['title']} — Épisode {ep['episode']}",
+                    value=f"⏰ {heure}",
+                    inline=False
+                )
+
+            await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot) -> None:
