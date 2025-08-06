@@ -67,6 +67,7 @@ class FileConfig:
     CONFIG = os.path.join(DATA_DIR, "config.json")
     GUESSOP_SCORES = os.path.join(DATA_DIR, "guessop_scores.json")
     GUESSCHAR_SCORES = os.path.join(DATA_DIR, "guesschar_scores.json")
+    WINNER_FILE = os.path.join("data", "winner.json")
 
 # Variables d'environnement et constantes
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
