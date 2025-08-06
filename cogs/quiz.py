@@ -14,10 +14,9 @@ import logging
 import difflib
 from datetime import datetime
 from typing import Optional, Set, Dict, List, Tuple
-
+from modules.core import normalize
 import discord
 from discord.ext import commands
-
 from modules import core
 
 logger = logging.getLogger(__name__)
