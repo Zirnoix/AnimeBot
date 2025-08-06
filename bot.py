@@ -53,7 +53,7 @@ class AnimeBot(commands.Bot):
         super().__init__(
             command_prefix="!",
             intents=intents,
-            help_command=commands.DefaultHelpCommand(),
+            help_command=None,
             case_insensitive=True
         )
         self.uptime_start = datetime.now(timezone.utc)
