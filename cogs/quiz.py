@@ -14,7 +14,7 @@ import logging
 import difflib
 from datetime import datetime
 from typing import Optional, Set, Dict, List, Tuple
-from modules.core import normalize
+from modules.core import normalize, FileConfig
 import discord
 from discord.ext import commands
 from modules import core
