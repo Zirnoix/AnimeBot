@@ -94,7 +94,10 @@ class AnimeBot(commands.Bot):
         self.check_new_episodes.start()
         self.monthly_reset.start()
         self.check_anilist_status.start()
-        logger.info("Tâches périodiques démarrées")
+
+        # 🔁 Force un premier check immédiat d'AniList au lancement
+        self.loop.create_task(self.check_anilist_status())
+
 
     @tasks.loop(seconds=3600)
     async def update_title_cache(self) -> None:
