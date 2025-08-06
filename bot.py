@@ -59,6 +59,7 @@ class AnimeBot(commands.Bot):
         self.uptime_start = datetime.now(timezone.utc)
         self.title_cache_refresh_rate = 3600  # Rafraîchir le cache toutes les heures
         self.last_episodes: Dict[str, List[int]] = {}  # Pour éviter les notifications en double
+        self.anilist_online = True  # État actuel de l’API AniList
 
     async def setup_hook(self) -> None:
         """Configure le bot au démarrage."""
@@ -92,6 +93,7 @@ class AnimeBot(commands.Bot):
         self.send_daily_summaries.start()
         self.check_new_episodes.start()
         self.monthly_reset.start()
+        self.check_anilist_status.start()
         logger.info("Tâches périodiques démarrées")
 
     @tasks.loop(seconds=3600)
@@ -115,6 +117,38 @@ class AnimeBot(commands.Bot):
                 await self._process_user_summary(user_id, prefs, current_time, current_day)
         except Exception as e:
             logger.error(f"Erreur dans send_daily_summaries: {str(e)}")
+
+    @tasks.loop(minutes=5)
+    async def check_anilist_status(self) -> None:
+        """Vérifie si l'API AniList est en ligne ou non."""
+        from modules.core import query_anilist
+
+        # Requête simple test
+        test_query = """
+        query {
+            Site {
+                id
+            }
+        }
+        """
+        response = query_anilist(test_query)
+
+        if response:
+            if not self.anilist_online:
+                # L'API était down et revient
+                self.anilist_online = True
+                logger.info("✅ AniList est de nouveau en ligne.")
+                channel = await self._get_notification_channel()
+                if channel:
+                    await channel.send("✅ AniList est de nouveau en ligne. Le bot fonctionne à nouveau normalement.")
+        else:
+            if self.anilist_online:
+                # L'API vient de tomber
+                self.anilist_online = False
+                logger.warning("⚠️ AniList est hors ligne.")
+                channel = await self._get_notification_channel()
+                if channel:
+                    await channel.send("⚠️ AniList est actuellement indisponible. Certaines commandes peuvent ne pas fonctionner.")
 
     @tasks.loop(minutes=10)
     async def check_new_episodes(self) -> None:
