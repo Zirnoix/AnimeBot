@@ -4,4 +4,4 @@ requests
 Pillow
 python-dotenv
 Babel
-
+pytz
