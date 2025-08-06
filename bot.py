@@ -72,20 +72,19 @@ class AnimeBot(commands.Bot):
         logger.info("------")
 
     async def load_extensions(self) -> None:
-        """Charge tous les cogs depuis le dossier cogs."""
-        try:
-            # Chemin absolu vers le dossier des cogs
-            cogs_dir = os.path.join(os.path.dirname(__file__), "cogs")
-            for filename in os.listdir(cogs_dir):
-                if filename.endswith(".py") and not filename.startswith("_"):
-                    extension = f"bot.cogs.{filename[:-3]}"
-                    try:
-                        await self.load_extension(extension)
-                        logger.info(f"Extension chargée : {filename}")
-                    except Exception as e:
-                        logger.error(f"Échec du chargement de l'extension {filename}: {str(e)}")
-        except Exception as e:
-            logger.error(f"Erreur lors du chargement des extensions : {str(e)}")
+    """Charge tous les cogs depuis le dossier cogs."""
+    try:
+        cogs_dir = os.path.join(os.path.dirname(__file__), "cogs")
+        for filename in os.listdir(cogs_dir):
+            if filename.endswith(".py") and not filename.startswith("_"):
+                extension = f"cogs.{filename[:-3]}"
+                try:
+                    await self.load_extension(extension)
+                    logger.info(f"Extension chargée : {filename}")
+                except Exception as e:
+                    logger.error(f"Échec du chargement de l'extension {filename}: {str(e)}")
+    except Exception as e:
+        logger.error(f"Erreur lors du chargement des extensions : {str(e)}")
 
     def start_tasks(self) -> None:
         """Démarre toutes les tâches périodiques."""
