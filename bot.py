@@ -17,7 +17,6 @@ import pytz
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
-
 import discord
 from discord.ext import commands, tasks
 
@@ -57,7 +56,7 @@ class AnimeBot(commands.Bot):
             help_command=None,
             case_insensitive=True
         )
-        self.uptime_start = datetime.utcnow()
+        self.uptime_start = datetime.now(timezone.utc)
         self.title_cache_refresh_rate = 3600  # Rafraîchir le cache toutes les heures
         self.last_episodes: Dict[str, List[int]] = {}  # Pour éviter les notifications en double
 
