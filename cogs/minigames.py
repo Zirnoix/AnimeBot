@@ -23,15 +23,57 @@ from discord.ext import commands
 
 from modules import core
 
+class HigherLowerView(View):
+    def __init__(self, ctx, choice1, choice2):
+        super().__init__(timeout=20)
+        self.ctx = ctx
+        self.choice1 = choice1
+        self.choice2 = choice2
+        self.result_sent = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user != self.ctx.author:
+            await interaction.response.send_message("❌ Ce mini‑jeu n’est pas pour toi.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="1️⃣", style=discord.ButtonStyle.primary)
+    async def button_1(self, interaction: discord.Interaction, button: Button):
+        await self.resolve(interaction, "1")
+
+    @discord.ui.button(label="2️⃣", style=discord.ButtonStyle.success)
+    async def button_2(self, interaction: discord.Interaction, button: Button):
+        await self.resolve(interaction, "2")
+
+    async def resolve(self, interaction: discord.Interaction, answer: str):
+        if self.result_sent:
+            return
+        self.result_sent = True
+
+        pop1 = self.choice1.get("popularity", 0)
+        pop2 = self.choice2.get("popularity", 0)
+        correct = "1" if pop1 >= pop2 else "2"
+
+        if answer == correct:
+            await interaction.response.send_message(
+                f"✅ Bravo ! **{self.choice1['title']['romaji']}** ({pop1}) vs **{self.choice2['title']['romaji']}** ({pop2})\nTu gagnes **5 XP** !"
+            )
+            core.add_xp(self.ctx.author.id, 5)
+            core.add_mini_score(self.ctx.author.id, "higherlower", 1)
+        else:
+            await interaction.response.send_message(
+                f"❌ Mauvais choix. **{self.choice1['title']['romaji']}** : {pop1}, **{self.choice2['title']['romaji']}** : {pop2}."
+            )
+        self.stop()
 
 class MiniGames(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
     @commands.command(name="higherlower")
-    async def higher_lower(self, ctx: commands.Context) -> None:
-        """Devine quel anime est le plus populaire sur AniList."""
+    async def higher_lower(self, ctx: commands.Context):
         await ctx.send("🎲 Préparation du mini‑jeu…")
+
         page = random.randint(1, 10)
         query = '''
         query ($page: Int) {
@@ -39,7 +81,7 @@ class MiniGames(commands.Cog):
             media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
               title { romaji }
               popularity
-              coverImage { medium }
+              coverImage { extraLarge }
             }
           }
         }
@@ -48,42 +90,36 @@ class MiniGames(commands.Cog):
         if not data or not data.get("data"):
             await ctx.send("❌ Impossible de récupérer des données pour le mini‑jeu.")
             return
+
         media_list = data["data"]["Page"]["media"]
         if len(media_list) < 2:
             await ctx.send("❌ Pas assez de données pour jouer.")
             return
+
         choice1, choice2 = random.sample(media_list, 2)
 
         embed = discord.Embed(
-            title="⬆️⬇️ Mini‑jeu : Quel anime est le plus populaire ?",
+            title="⬆️⬇️ Quel anime est le plus populaire ?",
             description=(
-                "Réponds `1` ou `2` selon ton intuition.\n"
-                "1️⃣ {t1}\n"
-                "2️⃣ {t2}"
-            ).format(t1=choice1["title"]["romaji"], t2=choice2["title"]["romaji"]),
+                "Clique sur **1️⃣** ou **2️⃣** pour choisir :\n\n"
+                "**1️⃣** {a1}\n"
+                "**2️⃣** {a2}"
+            ).format(a1=choice1["title"]["romaji"], a2=choice2["title"]["romaji"]),
             color=discord.Color.orange(),
         )
-        if choice1.get("coverImage") and choice2.get("coverImage"):
-            embed.set_thumbnail(url=choice1["coverImage"]["medium"])
-        await ctx.send(embed=embed)
+        embed.set_image(url=choice1["coverImage"]["extraLarge"])
 
-        def check(m: discord.Message) -> bool:
-            return m.author == ctx.author and m.channel == ctx.channel and m.content.strip() in {"1", "2"}
+        embed2 = discord.Embed(color=discord.Color.orange())
+        embed2.set_image(url=choice2["coverImage"]["extraLarge"])
+
+        view = HigherLowerView(ctx, choice1, choice2)
+
+        await ctx.send(embeds=[embed, embed2], view=view)
 
         try:
-            msg = await self.bot.wait_for("message", timeout=15.0, check=check)
-            answer = msg.content.strip()
-            pop1 = choice1.get("popularity", 0)
-            pop2 = choice2.get("popularity", 0)
-            correct = "1" if pop1 >= pop2 else "2"
-            if answer == correct:
-                await ctx.send(f"✅ Bravo ! **{choice1['title']['romaji']}** a une popularité de {pop1} et **{choice2['title']['romaji']}** de {pop2}. Tu gagnes 5 XP !")
-                core.add_xp(ctx.author.id, 5)
-                core.add_mini_score(ctx.author.id, "higherlower", 1)
-            else:
-                await ctx.send(f"❌ Mauvais choix. **{choice1['title']['romaji']}** : {pop1}, **{choice2['title']['romaji']}** : {pop2}.")
+            await view.wait()
         except asyncio.TimeoutError:
-            await ctx.send("⏰ Temps écoulé ! Jeu annulé.")
+            await ctx.send("⏰ Temps écoulé !")
 
     @commands.command(name="guessyear")
     async def guess_year(self, ctx: commands.Context) -> None:
