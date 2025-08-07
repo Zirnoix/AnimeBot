@@ -756,6 +756,60 @@ def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisod
     buf.seek(0)
     return buf
 
+def generate_profile_card(user_name, avatar_url, level, xp, next_xp, quiz_score, mini_scores):
+    # Image de fond
+    width, height = 800, 400
+    bg = Image.new("RGBA", (width, height), (25, 25, 30))
+    draw = ImageDraw.Draw(bg)
+
+    # Avatar Discord (arrondi)
+    avatar_size = 150
+    try:
+        response = requests.get(avatar_url, timeout=5)
+        avatar = Image.open(BytesIO(response.content)).convert("RGBA").resize((avatar_size, avatar_size))
+    except Exception:
+        avatar = Image.new("RGBA", (avatar_size, avatar_size), (80, 80, 255))
+
+    mask = Image.new("L", (avatar_size, avatar_size), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, avatar_size, avatar_size), fill=255)
+    avatar.putalpha(mask)
+    bg.paste(avatar, (40, 40), avatar)
+
+    # Polices (à adapter si besoin)
+    try:
+        font_title = ImageFont.truetype("arialbd.ttf", 32)
+        font_text = ImageFont.truetype("arial.ttf", 20)
+    except IOError:
+        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
+        font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+
+    # Infos principales
+    draw.text((220, 40), f"{user_name}", font=font_title, fill=(255, 255, 255))
+    draw.text((220, 90), f"Niveau {level} – {xp}/{next_xp} XP", font=font_text, fill=(200, 200, 200))
+    draw.text((220, 120), f"🏆 Score Quiz : {quiz_score}", font=font_text, fill=(230, 230, 230))
+    draw.text((220, 160), "🎮 Mini‑jeux :", font=font_text, fill=(255, 255, 255))
+
+    # Statistiques mini-jeux
+    y = 190
+    mapping = {
+        "animequiz": "Quiz",
+        "higherlower": "Higher/Lower",
+        "highermean": "Higher/Mean",
+        "guessyear": "Guess Year",
+        "guessepisodes": "Guess Episodes",
+        "guessgenre": "Guess Genre",
+        "duel": "Duel",
+    }
+    for key, val in mini_scores.items():
+        name = mapping.get(key, key.replace("_", " ").capitalize())
+        draw.text((240, y), f"- {name} : {val}", font=font_text, fill=(180, 180, 180))
+        y += 28
+
+    # Enregistrement en mémoire
+    buffer = BytesIO()
+    bg.save(buffer, format="JPEG")
+    buffer.seek(0)
+    return buffer
 
 ###############################################################################
 # Fonctions utilitaires et formatage
