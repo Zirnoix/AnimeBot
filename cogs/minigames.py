@@ -122,26 +122,29 @@ class MiniGames(commands.Cog):
         img1 = Image.open(BytesIO(img1_bytes)).convert("RGBA")
         img2 = Image.open(BytesIO(img2_bytes)).convert("RGBA")
 
-        # Ajustement des tailles pour qu'elles soient alignées
+        # Redimensionne les deux images à même hauteur
         max_height = max(img1.height, img2.height)
         img1 = img1.resize((int(img1.width * max_height / img1.height), max_height))
         img2 = img2.resize((int(img2.width * max_height / img2.height), max_height))
 
-        # Création de l’image fusionnée
-        total_width = img1.width + img2.width
-        combined = Image.new("RGBA", (total_width, max_height))
-        combined.paste(img1, (0, 0))
-        combined.paste(img2, (img1.width, 0))
+        # Ajoute une séparation verticale de 10px
+        separator_width = 10
+        total_width = img1.width + img2.width + separator_width
+        combined = Image.new("RGBA", (total_width, max_height), (0, 0, 0, 255))  # fond noir
 
-        # Sauvegarde temporaire
+        # Colle img1, la séparation, puis img2
+        combined.paste(img1, (0, 0))
+        # Rien à faire pour la séparation, elle est déjà noire
+        combined.paste(img2, (img1.width + separator_width, 0))
+
+        # Convertit et envoie
         buffer = BytesIO()
         combined.save(buffer, format="PNG")
         buffer.seek(0)
         file = discord.File(buffer, filename="duel.png")
 
-        # Embed avec image fusionnée
-        view = HigherLowerView(ctx, choice1, choice2)
         embed.set_image(url="attachment://duel.png")
+        view = HigherLowerView(ctx, choice1, choice2)
         await ctx.send(embed=embed, view=view, file=file)
 
 
