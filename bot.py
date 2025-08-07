@@ -102,6 +102,7 @@ class AnimeBot(commands.Bot):
     @tasks.loop(seconds=3600)
     async def update_title_cache(self) -> None:
         """Met à jour périodiquement le cache des titres."""
+        await asyncio.sleep(10)
         try:
             await asyncio.to_thread(core.update_title_cache)
             logger.info("Cache des titres mis à jour avec succès")
@@ -111,6 +112,7 @@ class AnimeBot(commands.Bot):
     @tasks.loop(minutes=1)
     async def send_daily_summaries(self) -> None:
         """Envoie les résumés quotidiens aux utilisateurs."""
+        await asyncio.sleep(10)
         try:
             now = datetime.now(core.TIMEZONE)
             current_time = now.strftime("%H:%M")
