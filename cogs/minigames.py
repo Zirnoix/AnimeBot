@@ -140,6 +140,7 @@ class MiniGames(commands.Cog):
         file = discord.File(buffer, filename="duel.png")
 
         # Embed avec image fusionnée
+        view = HigherLowerView(ctx, choice1, choice2)
         embed.set_image(url="attachment://duel.png")
         await ctx.send(embed=embed, view=view, file=file)
 
