@@ -290,35 +290,27 @@ def save_tracker(data: dict) -> None:
 # API AniList et requêtes
 ###############################################################################
 
+import time  # en haut du fichier
+
 def query_anilist(query: str, variables: dict | None = None) -> dict | None:
-    """Exécute une requête GraphQL sur l'API AniList.
-
-    Args:
-        query: Requête GraphQL
-        variables: Variables pour la requête
-
-    Returns:
-        Données de réponse ou None en cas d'erreur
-    """
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "AnimeBot/1.0 (https://github.com/Zirnoix/AnimeBot)"  # Obligatoire !
-    }
-
+    """Exécute une requête GraphQL sur l'API AniList."""
     try:
+        time.sleep(1)  # ← 🛑 petite pause de 1 sec à chaque requête
         response = requests.post(
             "https://graphql.anilist.co",
             json={"query": query, "variables": variables or {}},
-            headers=headers,
+            headers={"Content-Type": "application/json"},
             timeout=10
         )
+        if response.status_code == 429:
+            logger.warning("🚫 Rate limit atteint ! On stoppe cette requête.")
+            return None
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"Erreur HTTP AniList ({response.status_code}): {response.text}")
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         logger.error(f"Erreur requête AniList: {e}")
-    return None
+        return None
+
 
 
 def get_upcoming_episodes(username: str) -> list[dict]:
