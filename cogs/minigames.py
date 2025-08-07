@@ -12,7 +12,9 @@ This cog regroupe plusieurs petits jeux pour divertir les utilisateurs :
 """
 
 from __future__ import annotations
-
+import aiohttp
+from PIL import Image
+from io import BytesIO
 import random
 import asyncio
 import os
@@ -107,14 +109,40 @@ class MiniGames(commands.Cog):
             ).format(a1=choice1["title"]["romaji"], a2=choice2["title"]["romaji"]),
             color=discord.Color.orange(),
         )
-        embed.set_image(url=choice1["coverImage"]["extraLarge"])
+        # Récupération des deux images
+        url1 = choice1["coverImage"]["extraLarge"]
+        url2 = choice2["coverImage"]["extraLarge"]
 
-        embed2 = discord.Embed(color=discord.Color.orange())
-        embed2.set_image(url=choice2["coverImage"]["extraLarge"])
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url1) as resp1:
+                img1_bytes = await resp1.read()
+            async with session.get(url2) as resp2:
+                img2_bytes = await resp2.read()
 
-        view = HigherLowerView(ctx, choice1, choice2)
+        img1 = Image.open(BytesIO(img1_bytes)).convert("RGBA")
+        img2 = Image.open(BytesIO(img2_bytes)).convert("RGBA")
 
-        await ctx.send(embeds=[embed, embed2], view=view)
+        # Ajustement des tailles pour qu'elles soient alignées
+        max_height = max(img1.height, img2.height)
+        img1 = img1.resize((int(img1.width * max_height / img1.height), max_height))
+        img2 = img2.resize((int(img2.width * max_height / img2.height), max_height))
+
+        # Création de l’image fusionnée
+        total_width = img1.width + img2.width
+        combined = Image.new("RGBA", (total_width, max_height))
+        combined.paste(img1, (0, 0))
+        combined.paste(img2, (img1.width, 0))
+
+        # Sauvegarde temporaire
+        buffer = BytesIO()
+        combined.save(buffer, format="PNG")
+        buffer.seek(0)
+        file = discord.File(buffer, filename="duel.png")
+
+        # Embed avec image fusionnée
+        embed.set_image(url="attachment://duel.png")
+        await ctx.send(embed=embed, view=view, file=file)
+
 
         try:
             await view.wait()
