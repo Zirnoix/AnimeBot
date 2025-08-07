@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'assets')
+WINNER_FILE = os.path.join(DATA_DIR, "winner.json")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)
 
@@ -67,7 +68,6 @@ class FileConfig:
     CONFIG = os.path.join(DATA_DIR, "config.json")
     GUESSOP_SCORES = os.path.join(DATA_DIR, "guessop_scores.json")
     GUESSCHAR_SCORES = os.path.join(DATA_DIR, "guesschar_scores.json")
-    WINNER_FILE = os.path.join("data", "winner.json")
 
 # Variables d'environnement et constantes
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
