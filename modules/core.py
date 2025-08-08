@@ -315,7 +315,9 @@ def save_tracker(data: dict) -> None:
 import time  # en haut du fichier
 
 
-async def query_anilist(query: str, variables: dict = None) -> dict:
+import requests
+
+def query_anilist(query: str, variables: dict = None) -> dict:
     url = "https://graphql.anilist.co"
     headers = {
         "Content-Type": "application/json",
@@ -323,23 +325,16 @@ async def query_anilist(query: str, variables: dict = None) -> dict:
     }
     payload = {"query": query, "variables": variables or {}}
 
-    for _ in range(3):  # Essaye jusqu’à 3 fois
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-                    elif resp.status == 429:
-                        logger.warning("🚫 Rate limit atteint ! On stoppe cette requête.")
-                        await asyncio.sleep(2)  # petite pause
-                        continue
-                    else:
-                        logger.error(f"Erreur HTTP AniList ({resp.status}) : {await resp.text()}")
-                        break
-        except Exception as e:
-            logger.error(f"Erreur lors de la requête AniList : {e}")
-            await asyncio.sleep(1)
-    return {}
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {}
+    except Exception as e:
+        print(f"[AniList] Erreur : {e}")
+        return {}
+
 
 def save_anime_cache(anime_list: list[dict]) -> None:
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
@@ -350,70 +345,8 @@ def load_cached_titles() -> list[dict]:
         with open(CACHE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return []
-
-async def fetch_balanced_anime_cache() -> list[dict]:
-    """Récupère un mélange équilibré de 10 000 animes depuis AniList."""
-    logger.info("🚀 Démarrage de la récupération du cache d’animes AniList...")
-
-    query = '''
-    query ($page: Int, $sort: [MediaSort]) {
-      Page(perPage: 50, page: $page) {
-        media(type: ANIME, isAdult: false, sort: $sort) {
-          id
-          title { romaji english native }
-          description
-          coverImage { large extraLarge }
-          genres
-          meanScore
-          popularity
-          status
-          season
-          seasonYear
-          episodes
-        }
-      }
-    }
-    '''
-
-    # Plusieurs tiers pour élargir la variété
-    tiers = [
-        {"name": "Top", "range": range(1, 61), "sort": "POPULARITY_DESC"},
-        {"name": "Score", "range": range(1, 41), "sort": "SCORE_DESC"},
-        {"name": "Trending", "range": range(1, 41), "sort": "TRENDING_DESC"},
-        {"name": "OldSchool", "range": range(30, 61), "sort": "POPULARITY_DESC"},
-    ]
-
-    anime_list = []
-    seen_ids = set()
-
-    for tier in tiers:
-        for page in tier["range"]:
-            try:
-                await asyncio.sleep(1.2)  # ⏱️ Respect strict du quota (1 req/sec)
-                data = await query_anilist(query, {"page": page, "sort": [tier["sort"]]})
-                if data and "data" in data and "Page" in data["data"]:
-                    media_list = data["data"]["Page"]["media"]
-                    for anime in media_list:
-                        if anime["id"] not in seen_ids:
-                            seen_ids.add(anime["id"])
-                            anime_list.append(anime)
-
-                if len(anime_list) >= 10000:
-                    logger.info("✅ Objectif de 10 000 animés atteint, on arrête.")
-                    break
-
-            except Exception as e:
-                logger.warning(f"❌ Erreur à la page {page} du tier {tier['name']}: {e}")
-                continue
-
-        if len(anime_list) >= 10000:
-            break
-
-    logger.info(f"✅ {len(anime_list)} animés enregistrés dans le cache.")
-    save_anime_cache(anime_list)
-    return anime_list
     
-async def get_upcoming_episodes(username: str) -> list[dict]:
+def get_upcoming_episodes(username: str) -> list[dict]:
     """Récupère les prochains épisodes pour un utilisateur.
 
     Args:
@@ -440,7 +373,7 @@ async def get_upcoming_episodes(username: str) -> list[dict]:
     }
     '''
     try:
-        data = await query_anilist(query, {"name": username})
+        data = query_anilist(query, {"name": username})
         if not data or "data" not in data:
             return []
 
@@ -466,7 +399,7 @@ async def get_upcoming_episodes(username: str) -> list[dict]:
         return []
 
 
-async def get_anime_details(media_id: int) -> Optional[dict]:
+def get_anime_details(media_id: int) -> Optional[dict]:
     """Récupère les détails d'un anime spécifique.
 
     Args:
@@ -498,7 +431,7 @@ async def get_anime_details(media_id: int) -> Optional[dict]:
     }
     '''
     try:
-        data = await query_anilist(query, {"id": media_id})
+        data = query_anilist(query, {"id": media_id})
         return data["data"]["Media"] if data and "data" in data else None
     except Exception as e:
         logger.error(f"Erreur récupération détails anime: {e}")
@@ -506,7 +439,7 @@ async def get_anime_details(media_id: int) -> Optional[dict]:
 
 
 @lru_cache(maxsize=100)
-async def get_character_details(char_id: int) -> Optional[dict]:
+def get_character_details(char_id: int) -> Optional[dict]:
     """Récupère les détails d'un personnage (avec cache).
 
     Args:
@@ -534,7 +467,7 @@ async def get_character_details(char_id: int) -> Optional[dict]:
     }
     '''
     try:
-        data = await query_anilist(query, {"id": char_id})
+        data = query_anilist(query, {"id": char_id})
         return data["data"]["Character"] if data and "data" in data else None
     except Exception as e:
         logger.error(f"Erreur récupération personnage: {e}")
@@ -545,7 +478,7 @@ async def get_character_details(char_id: int) -> Optional[dict]:
 # Gestion des titres et du cache
 ###############################################################################
 
-async def update_title_cache() -> None:
+def update_title_cache() -> None:
     """Met à jour le cache des titres depuis AniList."""
     logger.info("Mise à jour du cache des titres...")
     query = '''
@@ -565,7 +498,7 @@ async def update_title_cache() -> None:
         page = 1
 
         while True:
-            data = await query_anilist(query, {"page": page})
+            data = query_anilist(query, {"page": page})
             if not data or "data" not in data:
                 break
 
