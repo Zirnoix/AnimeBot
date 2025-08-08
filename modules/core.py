@@ -51,6 +51,8 @@ WINNER_FILE = os.path.join(DATA_DIR, "winner.json")
 TITLES_FILE = "data/user_titles.json"
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)
+logger = logging.getLogger(__name__)
+CACHE_FILE = "data/anime_titles.json"
 
 class FileConfig:
     """Configuration des chemins de fichiers."""
@@ -309,6 +311,7 @@ def save_tracker(data: dict) -> None:
 # API AniList et requêtes
 ###############################################################################
 
+
 import time  # en haut du fichier
 
 def query_anilist(query: str, variables: dict | None = None) -> dict | None:
@@ -330,7 +333,61 @@ def query_anilist(query: str, variables: dict | None = None) -> dict | None:
         logger.error(f"Erreur requête AniList: {e}")
         return None
 
+def save_anime_cache(anime_list: list[dict]) -> None:
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(anime_list, f, ensure_ascii=False, indent=2)
 
+def load_cached_titles() -> list[dict]:
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+def fetch_balanced_anime_cache() -> list[dict]:
+    """Récupère un mélange équilibré d’animes : top, mid et bad tiers."""
+    from modules.anilist import query_anilist  # ou adapte selon ton projet
+
+    query = '''
+    query ($page: Int, $sort: [MediaSort]) {
+      Page(perPage: 50, page: $page) {
+        media(type: ANIME, isAdult: false, sort: $sort) {
+          id
+          title { romaji english native }
+          description
+          coverImage { large extraLarge }
+          genres
+          meanScore
+          popularity
+          status
+          season
+          seasonYear
+          episodes
+        }
+      }
+    }
+    '''
+
+    tiers = [
+        {"range": range(1, 21), "sort": "POPULARITY_DESC"},  # 🔥 Top tier
+        {"range": range(200, 221), "sort": "SCORE_DESC"},     # 😐 Mid tier
+        {"range": range(400, 421), "sort": "POPULARITY_DESC"} # 💤 Bad tier
+    ]
+
+    anime_list = []
+
+    for tier in tiers:
+        for page in tier["range"]:
+            try:
+                data = query_anilist(query, {"page": page, "sort": [tier["sort"]]})
+                if data and "data" in data:
+                    anime_list.extend(data["data"]["Page"]["media"])
+            except Exception as e:
+                logger.warning(f"Erreur page {page}: {e}")
+                continue
+
+    logger.info(f"✅ {len(anime_list)} animés enregistrés dans le cache.")
+    save_anime_cache(anime_list)
+    return anime_list
 
 def get_upcoming_episodes(username: str) -> list[dict]:
     """Récupère les prochains épisodes pour un utilisateur.
