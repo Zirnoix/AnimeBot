@@ -124,11 +124,10 @@ class AnimeBot(commands.Bot):
             logger.error(f"Erreur dans send_daily_summaries: {str(e)}")
 
     @tasks.loop(minutes=5)
-    async def check_anilist_status(self) -> None:
-        """Vérifie si l'API AniList est en ligne ou non."""
+    @tasks.loop(minutes=5)
+    def check_anilist_status(self) -> None:
         from modules.core import query_anilist
 
-        # Requête simple test
         test_query = """
         query {
           Media(id: 1, type: ANIME) {
@@ -137,24 +136,22 @@ class AnimeBot(commands.Bot):
         }
         """
 
-        response = await query_anilist(test_query)
+        response = query_anilist(test_query)
 
         if response:
             if not self.anilist_online:
-                # L'API était down et revient
                 self.anilist_online = True
                 logger.info("✅ AniList est de nouveau en ligne.")
-                channel = await self._get_notification_channel()
+                channel = self._get_notification_channel_sync()
                 if channel:
-                    await channel.send("✅ AniList est de nouveau en ligne. Le bot fonctionne à nouveau normalement.")
+                    self.loop.create_task(channel.send("✅ AniList est de nouveau en ligne. Le bot fonctionne à nouveau normalement."))
         else:
             if self.anilist_online:
-                # L'API vient de tomber
                 self.anilist_online = False
                 logger.warning("⚠️ AniList est hors ligne.")
-                channel = await self._get_notification_channel()
+                channel = self._get_notification_channel_sync()
                 if channel:
-                    await channel.send("⚠️ AniList est actuellement indisponible. Certaines commandes peuvent ne pas fonctionner.")
+                    self.loop.create_task(channel.send("⚠️ AniList est actuellement indisponible. Certaines commandes peuvent ne pas fonctionner."))
 
     @tasks.loop(minutes=10)
     async def check_new_episodes(self) -> None:
@@ -283,8 +280,7 @@ class AnimeBot(commands.Bot):
         except Exception as e:
             logger.error(f"Erreur lors de l'annonce du gagnant : {str(e)}")
 
-    async def _get_notification_channel(self) -> Optional[discord.TextChannel]:
-        """Récupère le canal de notification configuré."""
+    def _get_notification_channel_sync(self) -> Optional[discord.TextChannel]:
         config = core.get_config()
         channel_id = config.get("channel_id")
         if not channel_id:
