@@ -424,7 +424,7 @@ def get_upcoming_episodes(username: str) -> list[dict]:
     }
     '''
     try:
-        data = query_anilist(query, {"name": username})
+        data = await query_anilist(query, {"name": username})
         if not data or "data" not in data:
             return []
 
@@ -482,7 +482,7 @@ def get_anime_details(media_id: int) -> Optional[dict]:
     }
     '''
     try:
-        data = query_anilist(query, {"id": media_id})
+        data = await query_anilist(query, {"id": media_id})
         return data["data"]["Media"] if data and "data" in data else None
     except Exception as e:
         logger.error(f"Erreur récupération détails anime: {e}")
@@ -518,7 +518,7 @@ def get_character_details(char_id: int) -> Optional[dict]:
     }
     '''
     try:
-        data = query_anilist(query, {"id": char_id})
+        data = await query_anilist(query, {"id": char_id})
         return data["data"]["Character"] if data and "data" in data else None
     except Exception as e:
         logger.error(f"Erreur récupération personnage: {e}")
@@ -549,7 +549,7 @@ async def update_title_cache() -> None:
         page = 1
 
         while True:
-            data = query_anilist(query, {"page": page})
+            data = await query_anilist(query, {"page": page})
             if not data or "data" not in data:
                 break
 
