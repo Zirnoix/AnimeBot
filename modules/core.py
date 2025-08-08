@@ -335,11 +335,6 @@ def query_anilist(query: str, variables: dict = None) -> dict:
         print(f"[AniList] Erreur : {e}")
         return {}
 
-
-def save_anime_cache(anime_list: list[dict]) -> None:
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(anime_list, f, ensure_ascii=False, indent=2)
-
 def load_cached_titles() -> list[dict]:
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r", encoding="utf-8") as f:
@@ -477,62 +472,6 @@ def get_character_details(char_id: int) -> Optional[dict]:
 ###############################################################################
 # Gestion des titres et du cache
 ###############################################################################
-
-def update_title_cache() -> None:
-    """Met à jour le cache des titres depuis AniList."""
-    logger.info("Mise à jour du cache des titres...")
-    query = '''
-    query ($page: Int) {
-      Page(page: $page, perPage: 50) {
-        pageInfo { hasNextPage }
-        media(type: ANIME, sort: POPULARITY_DESC) {
-          title { romaji english native }
-          synonyms
-        }
-      }
-    }
-    '''
-
-    try:
-        all_titles = {}
-        page = 1
-
-        while True:
-            data = query_anilist(query, {"page": page})
-            if not data or "data" not in data:
-                break
-
-            page_data = data["data"]["Page"]
-            for media in page_data["media"]:
-                title_variants = set()
-
-                # Ajouter tous les titres disponibles
-                for key in ["romaji", "english", "native"]:
-                    if title := media["title"].get(key):
-                        title_variants.add(normalize(title))
-
-                # Ajouter les synonymes
-                for synonym in media.get("synonyms", []):
-                    if synonym:
-                        title_variants.add(normalize(synonym))
-
-                # Stocker les variantes
-                for variant in title_variants:
-                    if variant:
-                        all_titles[variant] = True
-
-            if not page_data["pageInfo"]["hasNextPage"]:
-                break
-
-            page += 1
-            await asyncio.sleep(1)
-
-        save_json(FileConfig.TITLE_CACHE, list(all_titles.keys()))
-        logger.info(f"Cache mis à jour avec {len(all_titles)} titres")
-
-    except Exception as e:
-        logger.error(f"Erreur mise à jour cache: {e}")
-
 
 def normalize_title(title: str) -> str:
     """Normalise un titre pour la recherche.
