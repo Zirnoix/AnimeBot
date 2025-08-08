@@ -77,93 +77,98 @@ class Quiz(commands.Cog):
                 return None
             return random.choice(anime_list)
 
-@commands.command(name="animequiz")
-async def animequiz(self, ctx: commands.Context, difficulty: str = "normal") -> None:
-    """Lance un quiz pour deviner un anime à partir du cache local."""
-    try:
-        await ctx.send("🎮 Préparation du quiz...")
-
-        difficulty = difficulty.lower()
-        tier_weights = {
-            "easy": [1.0, 0.0, 0.0],      # 100% Top tier
-            "normal": [0.3, 0.5, 0.2],    # Mix équilibré
-            "hard": [0.1, 0.3, 0.6],      # Majorité Bad tier
-        }.get(difficulty, [0.3, 0.5, 0.2])
-
-        anime = core.get_random_cached_anime(tier_weights)
-        if not anime:
-            await ctx.send("❌ Aucun anime trouvé dans le cache.")
-            return
-
-        correct_titles = self._process_anime_titles(anime)
-
-        embed = discord.Embed(
-            title="❓ Quel est cet anime ?",
-            description=(
-                "Tu as **20 secondes** pour deviner.\n"
-                "💡 Tu peux utiliser le titre en français, anglais ou japonais.\n"
-                "Tape `jsp` si tu veux passer."
-            ),
-            color=discord.Color.orange(),
-        )
-
-        image_url = (anime.get("coverImage", {}).get("extraLarge")
-                     or anime.get("coverImage", {}).get("large"))
-        if image_url:
-            embed.set_image(url=image_url)
-
-        hint = "Genre" + ("s" if len(anime["genres"]) > 1 else "") + " : " + ", ".join(anime["genres"])
-        embed.set_footer(text=hint)
-        await ctx.send(embed=embed)
-
+    @commands.command(name="animequiz")
+    async def animequiz(self, ctx: commands.Context, difficulty: str = "normal") -> None:
+        """Lance un quiz pour deviner un anime à partir de son image."""
         try:
-            msg = await self.bot.wait_for(
-                "message",
-                timeout=20.0,
-                check=lambda m: m.author == ctx.author and m.channel == ctx.channel
-            )
+            await ctx.send("🎮 Préparation du quiz...")
 
-            if msg.content.strip().lower() == "jsp":
-                titles = [
-                    f"🇯🇵 {anime['title']['romaji']}",
-                    f"🇬🇧 {anime['title']['english']}" if anime['title']['english'] else None,
-                    f"📝 {anime['title']['native']}" if anime['title']['native'] else None,
-                ]
-                titles = [t for t in titles if t]
-                await ctx.send(f"⏭️ Question passée. Les titres possibles étaient :\n{chr(10).join(titles)}")
+            difficulty = difficulty.lower()
+            sort_option = {
+                "easy": "POPULARITY_DESC",
+                "normal": "SCORE_DESC",
+                "hard": "TRENDING_DESC",
+            }.get(difficulty, "SCORE_DESC")
+
+            anime = await self._get_random_anime(sort_option)
+            if not anime:
+                await ctx.send("❌ Aucun anime trouvé.")
                 return
 
-            matches = self.title_matcher.find_matches(msg.content, correct_titles)
-            if matches:
-                await ctx.send(f"✅ Bonne réponse, **{ctx.author.display_name}** !")
+            correct_titles = self._process_anime_titles(anime)
 
-                scores = core.load_scores()
-                uid = str(ctx.author.id)
-                scores[uid] = scores.get(uid, 0) + 1
-                core.save_scores(scores)
+            # Création de l'embed
+            embed = discord.Embed(
+                title="❓ Quel est cet anime ?",
+                description=(
+                    "Tu as **20 secondes** pour deviner.\n"
+                    "💡 Tu peux utiliser le titre en français, anglais ou japonais.\n"
+                    "Tape jsp si tu veux passer."
+                ),
+                color=discord.Color.orange(),
+            )
 
-                xp_amount = 5 if difficulty == "easy" else 10 if difficulty == "normal" else 15
-                core.add_xp(ctx.author.id, xp_amount)
-                core.add_mini_score(ctx.author.id, "animequiz", 1)
+            # Utiliser la meilleure image disponible
+            image_url = (anime.get("coverImage", {}).get("extraLarge") or
+                         anime.get("coverImage", {}).get("large"))
+            if image_url:
+                embed.set_image(url=image_url)
 
-                other_titles = [t for t in correct_titles if normalize(t) != normalize(msg.content)]
-                if other_titles:
-                    await ctx.send(f"💡 Autres titres acceptés : {', '.join(other_titles)}")
-            else:
-                titles = [
-                    f"🇯🇵 {anime['title']['romaji']}",
-                    f"🇬🇧 {anime['title']['english']}" if anime['title']['english'] else None,
-                    f"📝 {anime['title']['native']}" if anime['title']['native'] else None,
-                ]
-                titles = [t for t in titles if t]
-                await ctx.send(f"❌ Mauvaise réponse. C'était :\n{chr(10).join(titles)}")
+            hint = "Genre" + ("s" if len(anime["genres"]) > 1 else "") + " : " + ", ".join(anime["genres"])
+            embed.set_footer(text=hint)
 
-        except asyncio.TimeoutError:
-            await ctx.send(f"⏰ Temps écoulé ! La bonne réponse était **{anime['title']['romaji']}**.")
+            await ctx.send(embed=embed)
 
-    except Exception as e:
-        logger.error(f"Erreur dans animequiz: {e}")
-        await ctx.send("❌ Une erreur s'est produite lors du quiz.")
+            try:
+                msg = await self.bot.wait_for(
+                    "message",
+                    timeout=20.0,
+                    check=lambda m: m.author == ctx.author and m.channel == ctx.channel
+                )
+
+                if msg.content.strip().lower() == "jsp":
+                    titles = [
+                        f"🇯🇵 {anime['title']['romaji']}",
+                        f"🇬🇧 {anime['title']['english']}" if anime['title']['english'] else None,
+                        f"📝 {anime['title']['native']}" if anime['title']['native'] else None,
+                    ]
+                    titles = [t for t in titles if t]
+                    await ctx.send(f"⏭️ Question passée. Les titres possibles étaient :\n{chr(10).join(titles)}")
+                    return
+
+                matches = self.title_matcher.find_matches(msg.content, correct_titles)
+                if matches:
+                    await ctx.send(f"✅ Bonne réponse, **{ctx.author.display_name}** !")
+
+                    # Update scores and XP
+                    scores = core.load_scores()
+                    uid = str(ctx.author.id)
+                    scores[uid] = scores.get(uid, 0) + 1
+                    core.save_scores(scores)
+
+                    xp_amount = 5 if difficulty == "easy" else 10 if difficulty == "normal" else 15
+                    core.add_xp(ctx.author.id, xp_amount)
+                    core.add_mini_score(ctx.author.id, "animequiz", 1)
+
+                    # Show other possible titles
+                    other_titles = [t for t in correct_titles if normalize(t) != normalize(msg.content)]
+                    if other_titles:
+                        await ctx.send(f"💡 Autres titres acceptés : {', '.join(other_titles)}")
+                else:
+                    titles = [
+                        f"🇯🇵 {anime['title']['romaji']}",
+                        f"🇬🇧 {anime['title']['english']}" if anime['title']['english'] else None,
+                        f"📝 {anime['title']['native']}" if anime['title']['native'] else None,
+                    ]
+                    titles = [t for t in titles if t]
+                    await ctx.send(f"❌ Mauvaise réponse. C'était :\n{chr(10).join(titles)}")
+
+            except asyncio.TimeoutError:
+                await ctx.send(f"⏰ Temps écoulé ! La bonne réponse était **{anime['title']['romaji']}**.")
+
+        except Exception as e:
+            logger.error(f"Erreur dans animequiz: {e}")
+            await ctx.send("❌ Une erreur s'est produite lors du quiz.")
         
 
     @commands.command(name="animequizmulti")
