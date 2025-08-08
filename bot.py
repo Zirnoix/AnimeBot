@@ -124,7 +124,7 @@ class AnimeBot(commands.Bot):
             logger.error(f"Erreur dans send_daily_summaries: {str(e)}")
 
     @tasks.loop(minutes=5)
-    async def check_anilist_status(self) -> None:
+    def check_anilist_status(self) -> None:
         """Vérifie si l'API AniList est en ligne ou non."""
         from modules.core import query_anilist
 
@@ -137,7 +137,7 @@ class AnimeBot(commands.Bot):
         }
         """
 
-        response = await query_anilist(test_query)
+        response = query_anilist(test_query)
 
         if response:
             if not self.anilist_online:
