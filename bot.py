@@ -89,9 +89,9 @@ class AnimeBot(commands.Bot):
 
     def start_tasks(self) -> None:
         """Démarre toutes les tâches périodiques."""
-        self.update_title_cache.start()
-        self.send_daily_summaries.start()
-        self.check_new_episodes.start()
+        # self.update_title_cache.start()
+        # self.send_daily_summaries.start()
+        # self.check_new_episodes.start()
         self.monthly_reset.start()
         self.check_anilist_status.start()
 
