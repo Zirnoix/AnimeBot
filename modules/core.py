@@ -397,7 +397,7 @@ async def fetch_balanced_anime_cache() -> list[dict]:
     save_anime_cache(anime_list)
     return anime_list
     
-def get_upcoming_episodes(username: str) -> list[dict]:
+async def get_upcoming_episodes(username: str) -> list[dict]:
     """Récupère les prochains épisodes pour un utilisateur.
 
     Args:
@@ -450,7 +450,7 @@ def get_upcoming_episodes(username: str) -> list[dict]:
         return []
 
 
-def get_anime_details(media_id: int) -> Optional[dict]:
+async def get_anime_details(media_id: int) -> Optional[dict]:
     """Récupère les détails d'un anime spécifique.
 
     Args:
@@ -490,7 +490,7 @@ def get_anime_details(media_id: int) -> Optional[dict]:
 
 
 @lru_cache(maxsize=100)
-def get_character_details(char_id: int) -> Optional[dict]:
+async def get_character_details(char_id: int) -> Optional[dict]:
     """Récupère les détails d'un personnage (avec cache).
 
     Args:
