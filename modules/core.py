@@ -529,7 +529,7 @@ def get_character_details(char_id: int) -> Optional[dict]:
 # Gestion des titres et du cache
 ###############################################################################
 
-def update_title_cache() -> None:
+async def update_title_cache() -> None:
     """Met à jour le cache des titres depuis AniList."""
     logger.info("Mise à jour du cache des titres...")
     query = '''
