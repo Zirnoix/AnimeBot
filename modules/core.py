@@ -213,14 +213,15 @@ def add_xp(user_id: int, amount: int = 10) -> tuple[bool, int]:
 
 
 def get_title_for_level(level: int) -> str:
-    """Retourne le titre correspondant au niveau."""
-    current_title = LEVEL_TITLES[0]
-    for req_level, title in sorted(LEVEL_TITLES.items()):
+    """Retourne le titre correspondant au niveau à partir d’une liste."""
+    current_title = LEVEL_TITLES[0][1]  # Titre par défaut (niveau 0)
+    for req_level, title in LEVEL_TITLES:
         if level >= req_level:
             current_title = title
         else:
             break
     return current_title
+
 
 
 def load_mini_scores() -> dict:
