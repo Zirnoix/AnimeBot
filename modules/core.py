@@ -94,22 +94,22 @@ GENRE_EMOJIS = {
 
 # Titres de niveaux
 LEVEL_TITLES = [
-    (150, "🔮 Omniscient Otaku"),
-    (140, "☄️ Divinité Universelle"),
-    (130, "🛐 Dieu Otaku"),
-    (120, "🐉 Mythe"),
-    (110, "🗿 Icône Anime"),
+    (0, "👶 Nouveau"),
+    (10, "🌱 Apprenti"),
+    (20, "📘 Amateur"),
+    (30, "📚 Otaku Confirmé"),
+    (40, "🎯 Expert"),
+    (50, "🔥 Maître Otaku"),
+    (60, "🧠 Sensei"),
+    (70, "🧩 Stratège"),
+    (80, "🏆 Champion"),
+    (90, "🌟 Légende Locale"),
     (100, "💎 Légende Nationale"),
-    (90,  "🌟 Légende Locale"),
-    (80,  "🏆 Champion"),
-    (70,  "🧩 Stratège"),
-    (60,  "🧠 Sensei"),
-    (50,  "🔥 Maître Otaku"),
-    (40,  "🎯 Expert"),
-    (30,  "📚 Otaku Confirmé"),
-    (20,  "📘 Amateur"),
-    (10,  "🌱 Apprenti"),
-    (0,   "👶 Nouveau"),
+    (110, "🗿 Icône Anime"),
+    (120, "🐉 Mythe"),
+    (130, "🛐 Dieu Otaku"),
+    (140, "☄️ Divinité Universelle"),
+    (150, "🔮 Omniscient Otaku")
 ]
 
 
@@ -213,14 +213,14 @@ def add_xp(user_id: int, amount: int = 10) -> tuple[bool, int]:
 
 
 def get_title_for_level(level: int) -> str:
-    """Retourne le titre correspondant au niveau à partir d’une liste."""
-    current_title = LEVEL_TITLES[0][1]  # Titre par défaut (niveau 0)
+    current_title = LEVEL_TITLES[0][1]
     for req_level, title in LEVEL_TITLES:
         if level >= req_level:
             current_title = title
         else:
             break
     return current_title
+
 
 
 
