@@ -40,47 +40,47 @@ class Profile(commands.Cog):
         """
         self.bot = bot
 
-        @commands.command(name="mycard")
-        async def mycard(self, ctx: commands.Context) -> None:
-            """Affiche une carte de membre propre avec les statistiques globales."""
-            levels = core.load_levels()
-            user_data = levels.get(str(ctx.author.id), {"xp": 0, "level": 0})
-            xp = user_data.get("xp", 0)
-            level = user_data.get("level", 0)
-            next_xp = (level + 1) * 100
+    @commands.command(name="mycard")
+    async def mycard(self, ctx: commands.Context) -> None:
+        """Affiche une carte de membre propre avec les statistiques globales."""
+        levels = core.load_levels()
+        user_data = levels.get(str(ctx.author.id), {"xp": 0, "level": 0})
+        xp = user_data.get("xp", 0)
+        level = user_data.get("level", 0)
+        next_xp = (level + 1) * 100
 
-            scores = core.load_scores()
-            quiz_score = scores.get(str(ctx.author.id), 0)
-            mini_scores = core.get_mini_scores(ctx.author.id)
+        scores = core.load_scores()
+        quiz_score = scores.get(str(ctx.author.id), 0)
+        mini_scores = core.get_mini_scores(ctx.author.id)
 
-            embed = discord.Embed(
-                title=f"🎴 Carte de {ctx.author.display_name}",
-                description=(
-                    f"**Niveau :** {level}\n"
-                    f"**XP :** {xp}/{next_xp}\n"
-                    f"**🏆 Score Quiz :** {quiz_score}"
-                ),
-                color=discord.Color.orange(),
-            )
+        embed = discord.Embed(
+            title=f"🎴 Carte de {ctx.author.display_name}",
+            description=(
+                f"**Niveau :** {level}\n"
+                f"**XP :** {xp}/{next_xp}\n"
+                f"**🏆 Score Quiz :** {quiz_score}"
+            ),
+            color=discord.Color.orange(),
+        )
     
-            if mini_scores:
-                mapping = {
-                    "animequiz": "Quiz",
-                    "higherlower": "Higher/Lower",
-                    "highermean": "Higher/Mean",
-                    "guessyear": "Guess Year",
-                    "guessepisodes": "Guess Episodes",
-                    "guessgenre": "Guess Genre",
-                    "duel": "Duel",
-                }
-                value = ""
-                for g, v in mini_scores.items():
-                    name = mapping.get(g, g.replace("_", " ").capitalize())
-                    value += f"• **{name}** : {v}\n"
-                embed.add_field(name="🎮 Mini‑jeux", value=value, inline=False)
+        if mini_scores:
+            mapping = {
+                "animequiz": "Quiz",
+                "higherlower": "Higher/Lower",
+                "highermean": "Higher/Mean",
+                "guessyear": "Guess Year",
+                "guessepisodes": "Guess Episodes",
+                "guessgenre": "Guess Genre",
+                "duel": "Duel",
+            }
+            value = ""
+            for g, v in mini_scores.items():
+                name = mapping.get(g, g.replace("_", " ").capitalize())
+                value += f"• **{name}** : {v}\n"
+            embed.add_field(name="🎮 Mini‑jeux", value=value, inline=False)
 
-            embed.set_thumbnail(url=ctx.author.display_avatar.url)
-            await ctx.send(embed=embed)
+        embed.set_thumbnail(url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot) -> None:
