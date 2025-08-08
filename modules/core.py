@@ -314,24 +314,32 @@ def save_tracker(data: dict) -> None:
 
 import time  # en haut du fichier
 
-def query_anilist(query: str, variables: dict | None = None) -> dict | None:
-    """Exécute une requête GraphQL sur l'API AniList."""
-    try:
-        time.sleep(1)  # ← 🛑 petite pause de 1 sec à chaque requête
-        response = requests.post(
-            "https://graphql.anilist.co",
-            json={"query": query, "variables": variables or {}},
-            headers={"Content-Type": "application/json"},
-            timeout=10
-        )
-        if response.status_code == 429:
-            logger.warning("🚫 Rate limit atteint ! On stoppe cette requête.")
-            return None
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        logger.error(f"Erreur requête AniList: {e}")
-        return None
+
+async def query_anilist(query: str, variables: dict = None) -> dict:
+    url = "https://graphql.anilist.co"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    payload = {"query": query, "variables": variables or {}}
+
+    for _ in range(3):  # Essaye jusqu’à 3 fois
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    elif resp.status == 429:
+                        logger.warning("🚫 Rate limit atteint ! On stoppe cette requête.")
+                        await asyncio.sleep(2)  # petite pause
+                        continue
+                    else:
+                        logger.error(f"Erreur HTTP AniList ({resp.status}) : {await resp.text()}")
+                        break
+        except Exception as e:
+            logger.error(f"Erreur lors de la requête AniList : {e}")
+            await asyncio.sleep(1)
+    return {}
 
 def save_anime_cache(anime_list: list[dict]) -> None:
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
@@ -343,7 +351,7 @@ def load_cached_titles() -> list[dict]:
             return json.load(f)
     return []
 
-def fetch_balanced_anime_cache() -> list[dict]:
+async def fetch_balanced_anime_cache() -> list[dict]:
     """Récupère un mélange équilibré d’animes : top, mid et bad tiers."""
 
     query = '''
@@ -377,9 +385,10 @@ def fetch_balanced_anime_cache() -> list[dict]:
     for tier in tiers:
         for page in tier["range"]:
             try:
-                data = query_anilist(query, {"page": page, "sort": [tier["sort"]]})
+                data = await query_anilist(query, {"page": page, "sort": [tier["sort"]]})
                 if data and "data" in data:
                     anime_list.extend(data["data"]["Page"]["media"])
+                await asyncio.sleep(0.8)  # ⏱️ Respecter le quota
             except Exception as e:
                 logger.warning(f"Erreur page {page}: {e}")
                 continue
@@ -387,7 +396,7 @@ def fetch_balanced_anime_cache() -> list[dict]:
     logger.info(f"✅ {len(anime_list)} animés enregistrés dans le cache.")
     save_anime_cache(anime_list)
     return anime_list
-
+    
 def get_upcoming_episodes(username: str) -> list[dict]:
     """Récupère les prochains épisodes pour un utilisateur.
 
