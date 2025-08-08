@@ -352,7 +352,8 @@ def load_cached_titles() -> list[dict]:
     return []
 
 async def fetch_balanced_anime_cache() -> list[dict]:
-    """Récupère un mélange équilibré d’animes : top, mid et bad tiers."""
+    """Récupère un mélange équilibré de 10 000 animes depuis AniList."""
+    logger.info("🚀 Démarrage de la récupération du cache d’animes AniList...")
 
     query = '''
     query ($page: Int, $sort: [MediaSort]) {
@@ -374,25 +375,39 @@ async def fetch_balanced_anime_cache() -> list[dict]:
     }
     '''
 
+    # Plusieurs tiers pour élargir la variété
     tiers = [
-        {"range": range(1, 21), "sort": "POPULARITY_DESC"},  # 🔥 Top tier
-        {"range": range(200, 221), "sort": "SCORE_DESC"},     # 😐 Mid tier
-        {"range": range(400, 421), "sort": "POPULARITY_DESC"} # 💤 Bad tier
+        {"name": "Top", "range": range(1, 61), "sort": "POPULARITY_DESC"},
+        {"name": "Score", "range": range(1, 41), "sort": "SCORE_DESC"},
+        {"name": "Trending", "range": range(1, 41), "sort": "TRENDING_DESC"},
+        {"name": "OldSchool", "range": range(30, 61), "sort": "POPULARITY_DESC"},
     ]
 
     anime_list = []
-    
+    seen_ids = set()
+
     for tier in tiers:
         for page in tier["range"]:
             try:
-                await asyncio.sleep(2.5)
+                await asyncio.sleep(1.2)  # ⏱️ Respect strict du quota (1 req/sec)
                 data = await query_anilist(query, {"page": page, "sort": [tier["sort"]]})
-                if data and "data" in data:
-                    anime_list.extend(data["data"]["Page"]["media"])
-                await asyncio.sleep(0.8)  # ⏱️ Respecter le quota
+                if data and "data" in data and "Page" in data["data"]:
+                    media_list = data["data"]["Page"]["media"]
+                    for anime in media_list:
+                        if anime["id"] not in seen_ids:
+                            seen_ids.add(anime["id"])
+                            anime_list.append(anime)
+
+                if len(anime_list) >= 10000:
+                    logger.info("✅ Objectif de 10 000 animés atteint, on arrête.")
+                    break
+
             except Exception as e:
-                logger.warning(f"Erreur page {page}: {e}")
+                logger.warning(f"❌ Erreur à la page {page} du tier {tier['name']}: {e}")
                 continue
+
+        if len(anime_list) >= 10000:
+            break
 
     logger.info(f"✅ {len(anime_list)} animés enregistrés dans le cache.")
     save_anime_cache(anime_list)
