@@ -381,11 +381,12 @@ async def fetch_balanced_anime_cache() -> list[dict]:
     ]
 
     anime_list = []
-
+    
     for tier in tiers:
         for page in tier["range"]:
             try:
                 data = await query_anilist(query, {"page": page, "sort": [tier["sort"]]})
+                await asyncio.sleep(1)
                 if data and "data" in data:
                     anime_list.extend(data["data"]["Page"]["media"])
                 await asyncio.sleep(0.8)  # ⏱️ Respecter le quota
