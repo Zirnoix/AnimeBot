@@ -70,54 +70,12 @@ class Quiz(commands.Cog):
         self.bot = bot
         self.title_matcher = TitleMatcher()
 
-    async def _get_random_anime(self, sort_option: str = "SCORE_DESC") -> Optional[Dict]:
-        """Fetch a random anime using the given sort option."""
-        query = '''
-        query ($page: Int, $sort: [MediaSort]) {
-          Page(perPage: 1, page: $page) {
-            media(type: ANIME, isAdult: false, sort: $sort) {
-              id
-              title { romaji english native }
-              description(asHtml: false)
-              coverImage { large extraLarge }
-              genres
-              meanScore
-              popularity
-              status
-              season
-              seasonYear
-              episodes
-            }
-          }
-        }
-        '''
-        for _ in range(10):
-            try:
-                page = random.randint(1, 500)
-                data = core.query_anilist(query, {
-                    "page": page,
-                    "sort": sort_option
-                })
-                if data and "data" in data:
-                    return data["data"]["Page"]["media"][0]
-            except Exception as e:
-                logger.error(f"Erreur lors de la récupération d'un anime: {e}")
-                continue
-        return None
-
-    def _process_anime_titles(self, anime: Dict) -> Set[str]:
-        """Traite les titres d'un anime pour la reconnaissance."""
-        titles = set()
-        title_data = anime["title"]
-
-        # Ajouter tous les titres disponibles
-        for key in ['romaji', 'english', 'native']:
-            if title := title_data.get(key):
-                titles.add(title)
-                # Ajouter des variantes nettoyées
-                titles.add(self.title_matcher.clean_title(title))
-
-        return titles
+        async def _get_random_anime(self) -> Optional[Dict]:
+            """Sélectionne un anime aléatoire depuis le cache local (équilibré)."""
+            anime_list = core.load_cached_titles()
+            if not anime_list:
+                return None
+            return random.choice(anime_list)
 
     @commands.command(name="animequiz")
     async def animequiz(self, ctx: commands.Context, difficulty: str = "normal") -> None:
