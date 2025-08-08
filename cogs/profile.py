@@ -42,27 +42,63 @@ class Profile(commands.Cog):
 
     @commands.command(name="mycard")
     async def mycard(self, ctx: commands.Context) -> None:
-        """Affiche une carte de membre propre avec les statistiques globales."""
+        """Affiche une carte de membre stylée avec les statistiques globales."""
+        user_id = str(ctx.author.id)
+
+        # Chargement données
         levels = core.load_levels()
-        user_data = levels.get(str(ctx.author.id), {"xp": 0, "level": 0})
+        user_data = levels.get(user_id, {"xp": 0, "level": 0})
         xp = user_data.get("xp", 0)
         level = user_data.get("level", 0)
         next_xp = (level + 1) * 100
+        progress = int((xp / next_xp) * 20)
 
+        # Barre de progression colorée
+        if level >= 150:
+            filled = "🌈"
+        elif level >= 100:
+            filled = "🟥"
+        elif level >= 50:
+            filled = "🟨"
+        elif level >= 25:
+            filled = "🟦"
+        elif level >= 10:
+            filled = "🟩"
+        else:
+            filled = "⬜"
+        bar = filled * progress + "⬛" * (20 - progress)
+
+        # Titre actuel
+        title = core.get_title_for_level(level)
+
+        # Vérifie si le titre a changé
+        titles_data = core.load_titles()
+        previous_title = titles_data.get(user_id)
+
+        if previous_title != title:
+            titles_data[user_id] = title
+            core.save_titles(titles_data)
+
+            if previous_title is not None and level > 0:
+                await ctx.send(f"🎉 **{ctx.author.display_name}** vient de passer au rang {title} !")
+
+        # Score quiz et mini-jeux
         scores = core.load_scores()
-        quiz_score = scores.get(str(ctx.author.id), 0)
-        mini_scores = core.get_mini_scores(ctx.author.id)
+        quiz_score = scores.get(user_id, 0)
+        mini_scores = core.get_mini_scores(int(user_id))
 
+        # Embed final
         embed = discord.Embed(
-            title=f"🎴 Carte de {ctx.author.display_name}",
-            description=(
-                f"**Niveau :** {level}\n"
-                f"**XP :** {xp}/{next_xp}\n"
-                f"**🏆 Score Quiz :** {quiz_score}"
-            ),
-            color=discord.Color.orange(),
+            title=f"🎴 Profil de {ctx.author.display_name}",
+            color=discord.Color.from_rgb(255 - min(level * 2, 200), 100 + min(level, 100), 30)
         )
-    
+        embed.set_thumbnail(url=ctx.author.display_avatar.url)
+        embed.add_field(name="🎖️ Titre", value=title, inline=True)
+        embed.add_field(name="🧬 Niveau", value=f"{level}", inline=True)
+        embed.add_field(name="🧪 XP", value=f"{xp} / {next_xp}", inline=True)
+        embed.add_field(name="📈 Progression", value=bar, inline=False)
+        embed.add_field(name="🏆 Score Quiz", value=f"{quiz_score}", inline=False)
+
         if mini_scores:
             mapping = {
                 "animequiz": "Quiz",
@@ -79,7 +115,6 @@ class Profile(commands.Cog):
                 value += f"• **{name}** : {v}\n"
             embed.add_field(name="🎮 Mini‑jeux", value=value, inline=False)
 
-        embed.set_thumbnail(url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
 
 
