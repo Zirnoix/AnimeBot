@@ -9,7 +9,7 @@ class Admin(commands.Cog):
     @commands.is_owner()
     async def update_cache_command(self, ctx):
         await ctx.send("🔄 Mise à jour du cache AniList en cours…")
-        anime_list = core.fetch_balanced_anime_cache()
+        anime_list = await core.fetch_balanced_anime_cache()
         await ctx.send(f"✅ Cache mis à jour avec {len(anime_list)} animés.")
 
 async def setup(bot):
