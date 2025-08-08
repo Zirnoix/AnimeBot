@@ -104,7 +104,7 @@ class AnimeBot(commands.Bot):
         """Met à jour périodiquement le cache des titres."""
         await asyncio.sleep(10)
         try:
-            await asyncio.to_thread(core.update_title_cache)
+            await core.update_title_cache()
             logger.info("Cache des titres mis à jour avec succès")
         except Exception as e:
             logger.error(f"Erreur lors de la mise à jour du cache: {str(e)}")
