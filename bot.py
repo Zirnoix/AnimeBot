@@ -137,7 +137,7 @@ class AnimeBot(commands.Bot):
         }
         """
 
-        response = query_anilist(test_query)
+        response = await query_anilist(test_query)
 
         if response:
             if not self.anilist_online:
