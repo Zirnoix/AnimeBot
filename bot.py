@@ -124,8 +124,7 @@ class AnimeBot(commands.Bot):
             logger.error(f"Erreur dans send_daily_summaries: {str(e)}")
 
     @tasks.loop(minutes=5)
-    @tasks.loop(minutes=5)
-    def check_anilist_status(self) -> None:
+    async def check_anilist_status(self) -> None:
         from modules.core import query_anilist
 
         test_query = """
