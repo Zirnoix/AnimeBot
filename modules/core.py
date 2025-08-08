@@ -576,6 +576,7 @@ async def update_title_cache() -> None:
                 break
 
             page += 1
+            await asyncio.sleep(1)
 
         save_json(FileConfig.TITLE_CACHE, list(all_titles.keys()))
         logger.info(f"Cache mis à jour avec {len(all_titles)} titres")
