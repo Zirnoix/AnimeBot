@@ -93,7 +93,7 @@ GENRE_EMOJIS = {
 }
 
 # Titres de niveaux
-level_titles = [
+LEVEL_TITLES = [
     (150, "🔮 Omniscient Otaku"),
     (140, "☄️ Divinité Universelle"),
     (130, "🛐 Dieu Otaku"),
