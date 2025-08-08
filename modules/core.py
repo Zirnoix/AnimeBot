@@ -345,7 +345,6 @@ def load_cached_titles() -> list[dict]:
 
 def fetch_balanced_anime_cache() -> list[dict]:
     """Récupère un mélange équilibré d’animes : top, mid et bad tiers."""
-    from modules.anilist import query_anilist  # ou adapte selon ton projet
 
     query = '''
     query ($page: Int, $sort: [MediaSort]) {
