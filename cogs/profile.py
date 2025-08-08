@@ -54,19 +54,14 @@ class Profile(commands.Cog):
         progress = int((xp / next_xp) * 20)
 
         # Barre de progression colorée
+        PROGRESS_COLORS = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪"]
+
         if level >= 150:
-            filled = "🌈"
-        elif level >= 100:
-            filled = "🟥"
-        elif level >= 50:
-            filled = "🟨"
-        elif level >= 25:
-            filled = "🟦"
-        elif level >= 10:
-            filled = "🟩"
+            bar = "🌈" * progress + "⬛" * (20 - progress)
         else:
-            filled = "⬜"
-        bar = filled * progress + "⬛" * (20 - progress)
+            bar = "".join(PROGRESS_COLORS[i % len(PROGRESS_COLORS)] for i in range(progress))
+            bar += "⬛" * (20 - progress)
+
 
         # Titre actuel
         title = core.get_title_for_level(level)
