@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'assets')
 WINNER_FILE = os.path.join(DATA_DIR, "winner.json")
+TITLES_FILE = "data/user_titles.json"
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)
 
@@ -92,23 +93,40 @@ GENRE_EMOJIS = {
 }
 
 # Titres de niveaux
-LEVEL_TITLES = {
-    0: "Débutant",
-    5: "Otaku en herbe",
-    10: "Fan d'anime",
-    15: "Connaisseur",
-    20: "Expert",
-    25: "Maître Otaku",
-    30: "Sensei",
-    40: "Grand Maître",
-    50: "Légende",
-}
+level_titles = [
+    (150, "🔮 Omniscient Otaku"),
+    (140, "☄️ Divinité Universelle"),
+    (130, "🛐 Dieu Otaku"),
+    (120, "🐉 Mythe"),
+    (110, "🗿 Icône Anime"),
+    (100, "💎 Légende Nationale"),
+    (90,  "🌟 Légende Locale"),
+    (80,  "🏆 Champion"),
+    (70,  "🧩 Stratège"),
+    (60,  "🧠 Sensei"),
+    (50,  "🔥 Maître Otaku"),
+    (40,  "🎯 Expert"),
+    (30,  "📚 Otaku Confirmé"),
+    (20,  "📘 Amateur"),
+    (10,  "🌱 Apprenti"),
+    (0,   "👶 Nouveau"),
+]
 
 
 ###############################################################################
 # Fonctions de gestion JSON et données de base
 ###############################################################################
 
+def load_titles():
+    if os.path.exists(TITLES_FILE):
+        with open(TITLES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_titles(titles):
+    with open(TITLES_FILE, "w", encoding="utf-8") as f:
+        json.dump(titles, f, ensure_ascii=False, indent=2)
+        
 def load_json(path: str, default: Any) -> Any:
     """Charge des données depuis un fichier JSON.
 
