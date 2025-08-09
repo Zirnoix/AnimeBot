@@ -1,7 +1,7 @@
 # modules/image.py
 from typing import Dict, Any, Optional
 from io import BytesIO
-from PIL import Image, ImageFilter, ImageDraw, ImageFont
+from PIL import Image, ImageFilter, ImageDraw, ImageFont, ImageOps
 import requests
 
 def _fetch_image(url: Optional[str]) -> Image.Image:
