@@ -96,9 +96,7 @@ class Episodes(commands.Cog):
     @commands.command(name="next")
     async def next_cmd(self, ctx):
         try:
-            item = core.get_user_next_airing_one(ctx.author.id)
-            if not item:
-                item = core.get_next_airing_one()
+            item = core.get_my_next_airing_one()  # <-- TON AniList via variable env
         except Exception as e:
             await ctx.send(f"⚠️ Impossible de récupérer le prochain épisode.\n`{type(e).__name__}: {e}`")
             return
@@ -117,7 +115,6 @@ class Episodes(commands.Cog):
 
         file = discord.File(img_path, filename="next_card.png")
         await ctx.send(embed=embed, file=file)
-
         
     @commands.command(name="monnext")
     async def monnext_cmd(self, ctx):
