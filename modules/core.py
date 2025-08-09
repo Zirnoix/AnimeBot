@@ -1015,6 +1015,68 @@ def get_linked_anilist(discord_id: int):
     links = load_links()
     return links.get(str(discord_id))
 
+def get_anilist_stats(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Récupère les stats AniList d'un utilisateur.
+    Retourne: {count, minutesWatched, meanScore, favoriteGenre}
+    """
+    query = """
+    query ($name: String) {
+      User(name: $name) {
+        statistics {
+          anime {
+            count
+            minutesWatched
+            meanScore
+            genres { genre count }
+          }
+        }
+      }
+    }
+    """
+    data = query_anilist(query, {"name": username}) or {}
+    user = (data.get("data") or {}).get("User") or None
+    if not user:
+        return None
+    anim = (user.get("statistics") or {}).get("anime") or {}
+    genres = anim.get("genres") or []
+    fav_genre = None
+    if genres:
+        # genre le plus fréquent
+        fav_genre = max(genres, key=lambda g: g.get("count", 0)).get("genre")
+
+    return {
+        "count": anim.get("count", 0),
+        "minutesWatched": anim.get("minutesWatched", 0),
+        "meanScore": anim.get("meanScore", 0),
+        "favoriteGenre": fav_genre or "—",
+    }
+
+def get_anilist_stats_for_discord(discord_id: int, fallback_env: bool = True) -> Optional[Dict[str, Any]]:
+    """
+    Stats pour un utilisateur Discord:
+    - si lié: son AniList
+    - sinon (optionnel): fallback sur ANILIST_USERNAME si défini
+    """
+    username = get_linked_anilist(discord_id)
+    if not username and fallback_env:
+        username = os.getenv("ANILIST_USERNAME")
+    if not username:
+        return None
+    return get_anilist_stats(username)
+
+def humanize_minutes(total_minutes: int) -> str:
+    """Convertit des minutes en 'Xd Yh Zm' propre."""
+    m = int(total_minutes or 0)
+    days = m // (60*24)
+    hours = (m % (60*24)) // 60
+    minutes = m % 60
+    parts = []
+    if days: parts.append(f"{days}j")
+    if hours: parts.append(f"{hours}h")
+    if minutes or not parts: parts.append(f"{minutes}m")
+    return " ".join(parts)
+    
 def get_user_next_airing_one(username: str):
     """
     Retourne le prochain épisode à venir pour un utilisateur AniList.
