@@ -1007,55 +1007,70 @@ def get_my_next_airing_one() -> Optional[Dict[str, Any]]:
 
     return best
 
-def get_user_next_airing_one(discord_id: int) -> Optional[Dict[str, Any]]:
-    """
-    Renvoie le prochain épisode à sortir parmi les animés suivis par l'utilisateur (status=CURRENT).
-    Nécessite que l'utilisateur soit lié à AniList.
-    Retour: dict {airingAt, episode, title_*, cover, genres}
-    """
-    username = _get_linked_anilist_username(discord_id)
-    if not username:
-        return None
+from modules import database
 
+def get_linked_anilist(discord_id: int) -> str:
+    """Retourne le pseudo AniList lié à cet utilisateur Discord."""
+    conn = database.get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT anilist_username FROM linked_users WHERE discord_id = ?", (discord_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def get_user_next_airing_one(username: str):
+    """
+    Retourne le prochain épisode à venir depuis la liste AniList d'un utilisateur.
+    """
     query = """
-    query ($userName:String){
-      Page(perPage: 50){
-        mediaList(userName:$userName, status:CURRENT, type:ANIME){
-          media{
-            id
-            title{ romaji english native }
-            coverImage{ extraLarge large }
-            genres
-            nextAiringEpisode{ airingAt episode }
+    query ($userName: String) {
+      MediaListCollection(userName: $userName, type: ANIME, status_in: [CURRENT]) {
+        lists {
+          entries {
+            media {
+              id
+              title {
+                romaji
+                english
+                native
+              }
+              coverImage {
+                large
+              }
+              genres
+              nextAiringEpisode {
+                episode
+                airingAt
+              }
+            }
           }
         }
       }
     }
     """
-    data = query_anilist(query, variables={"userName": username})
-    entries = (data or {}).get("data", {}).get("Page", {}).get("mediaList", []) or []
-    items: List[Dict[str, Any]] = []
-    for e in entries:
-        m = e.get("media") or {}
-        nae = m.get("nextAiringEpisode")
-        if not nae:
-            continue
-        t = m.get("title") or {}
-        items.append({
-            "airingAt": nae.get("airingAt"),
-            "episode": nae.get("episode"),
-            "title_romaji": t.get("romaji"),
-            "title_english": t.get("english"),
-            "title_native": t.get("native"),
-            "cover": ((m.get("coverImage") or {}).get("extraLarge")
-                      or (m.get("coverImage") or {}).get("large")),
-            "genres": m.get("genres") or [],
-        })
+    data = query_anilist(query, {"userName": username})
+    entries = []
+    for l in data.get("MediaListCollection", {}).get("lists", []):
+        for e in l.get("entries", []):
+            media = e.get("media")
+            if media.get("nextAiringEpisode"):
+                entries.append(media)
 
-    if not items:
+    if not entries:
         return None
-    items.sort(key=lambda x: x.get("airingAt") or 0)
-    return items[0]
+
+    # trier par date
+    entries.sort(key=lambda m: m["nextAiringEpisode"]["airingAt"])
+    m = entries[0]
+    return {
+        "title_romaji": m["title"].get("romaji"),
+        "title_english": m["title"].get("english"),
+        "title_native": m["title"].get("native"),
+        "cover": m["coverImage"]["large"],
+        "episode": m["nextAiringEpisode"]["episode"],
+        "airingAt": m["nextAiringEpisode"]["airingAt"],
+        "genres": m.get("genres", [])
+    }
 
 ###############################################################################
 # Mini-jeux et quiz
