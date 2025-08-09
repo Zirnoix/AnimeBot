@@ -103,8 +103,8 @@ def generate_next_card(
         ImageDraw.Draw(panel).text((x,y), txt, font=f, fill=fill)
 
     base_title = _load_font(int(50 * scale))  # titre
-    base_sub   = _load_font(int(34 * scale))  # épisode
-    base_meta  = _load_font(int(28 * scale))  # genres + date
+    base_sub   = _load_font(int(40 * scale))  # épisode
+    base_meta  = _load_font(int(36 * scale))  # genres + date
 
     tx = tx_img + tw + int(20 * scale)
     ty = y0 + int(22 * scale)
