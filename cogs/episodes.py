@@ -105,24 +105,19 @@ class Episodes(commands.Cog):
             await ctx.send("⚠️ Aucun épisode à venir trouvé.")
             return
 
-        # formater l'heure française
-        when_txt = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
-        item["when"] = when_txt
+        # format FR
+        item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
 
-        # générer la carte
+        # génère l'image (fond flouté + infos)
         img_path = generate_next_card(item, out_path="/tmp/next_card.png")
 
-        # embed simple qui affiche l'image
-        e = discord.Embed(
-            title=f"⏭️ Prochain épisode",
-            description="",
-            color=THEME["accent"] if 'THEME' in globals() else 0x00B0F4
-        )
-        e.set_image(url="attachment://next_card.png")
-        e.set_footer(text=f"Demandé par {ctx.author.display_name}")
+        # embed simple qui affiche l'image générée
+        embed = discord.Embed(title="⏭️ Prochain épisode", color=0x00B0F4)
+        embed.set_image(url="attachment://next_card.png")
+        embed.set_footer(text=f"Demandé par {ctx.author.display_name}")
 
         file = discord.File(img_path, filename="next_card.png")
-        await ctx.send(embed=e, file=file)
+        await ctx.send(embed=embed, file=file)
         
     @commands.command(name="monnext")
     async def monnext_cmd(self, ctx):
