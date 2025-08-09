@@ -38,7 +38,7 @@ def generate_next_card(anime: Dict[str, Any], out_path: str = "/tmp/next_card.pn
     H = int(base_H * scale)
 
     cover = _fetch_image(anime.get("cover"))
-    bg = _fit_cover(cover, (W, H)).filter(ImageFilter.GaussianBlur(int(15 * scale))).convert("RGBA")
+    bg = _fit_cover(cover, (W, H)).filter(ImageFilter.GaussianBlur(int(11 * scale))).convert("RGBA")
 
     # --- VIGNETTE & GRADIENT ---
     vignette = Image.new("L", (W, H), 0)
@@ -175,10 +175,17 @@ def generate_next_card(anime: Dict[str, Any], out_path: str = "/tmp/next_card.pn
     bg.alpha_composite(panel)
     out = bg.convert("RGB")
 
-    # Downscale final propre en 1920x1080 (lisible + poids raisonnable)
+    # Downscale final FORCÉ à 900px (pour Discord)
     final_w = 900
     final_h = int(final_w * 9 / 16)
     out = out.resize((final_w, final_h), Image.LANCZOS)
+
+    # petit log pour vérifier côté Render
+    try:
+        import logging
+        logging.getLogger(__name__).info("NEXT_CARD size=%sx%s", final_w, final_h)
+    except Exception:
+        pass
 
     out.save(out_path, format="PNG", quality=95)
     return out_path
