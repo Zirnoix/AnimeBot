@@ -19,6 +19,16 @@ from discord.ext import commands
 
 from modules import core
 
+# --- EMOJI & couleurs locales (fallback) ---
+EMOJI = {"stats": "📊", "ok": "✅", "warn": "⚠️", "tv": "📺"}
+COLOR_PRIMARY = 0x5865F2
+
+def text_bar(current: int, total: int, width: int = 16) -> str:
+    total = max(1, int(total or 1))
+    current = max(0, int(current or 0))
+    filled = int(round(width * current / total))
+    return f"[{'█' * filled}{'—' * (width - filled)}] {current}/{total}"
+
 
 class Stats(commands.Cog):
     """Cog pour gérer l'affichage des statistiques et graphiques de profil.
@@ -42,41 +52,34 @@ class Stats(commands.Cog):
 
     @commands.command(name="mystats")
     async def mystats_cmd(self, ctx):
-        s = core.get_user_stats(ctx.author.id)  # adapte: dict attendu
-        if not s:
-            await ctx.send(f"{EMOJI['warn']} Aucune statistique trouvée.")
+        try:
+            s = core.get_anilist_stats_for_discord(ctx.author.id, fallback_env=True)
+        except Exception as e:
+            await ctx.send(f"{EMOJI['warn']} Impossible de récupérer tes stats AniList.\n`{type(e).__name__}: {e}`")
             return
 
-        # Exemples de stats attendues :
-        # s = {
-        #   "level": 12, "xp": 340, "xp_needed": 500,
-        #   "quiz_score": 87, "quiz_rank": 5,
-        #   "episodes_watched": 1234, "anime_completed": 56,
-        # }
+        if not s:
+            await ctx.send(f"{EMOJI['warn']} Aucun compte AniList lié. Utilise `!linkanilist <pseudo>`.")
+            return
 
-        title = f"{EMOJI['stats']} Tes stats"
-        e = make_embed(title=title, color=THEME["primary"], footer=f"{ctx.author.display_name}")
+        count = s.get("count", 0)
+        minutes = s.get("minutesWatched", 0)
+        mean = s.get("meanScore", 0)
+        genre = s.get("favoriteGenre", "—")
+
+        e = discord.Embed(
+            title=f"{EMOJI['stats']} Tes stats AniList",
+            color=COLOR_PRIMARY,
+            description=(
+                f"**Animés vus :** {count}\n"
+                f"**Temps total :** {core.humanize_minutes(minutes)}\n"
+                f"**Score moyen :** {mean:.1f}\n"
+                f"**Genre favori :** {genre}"
+            )
+        )
         if ctx.author.display_avatar:
             e.set_thumbnail(url=ctx.author.display_avatar.url)
-
-        # Barre XP
-        xp_bar = text_bar(s.get("xp", 0), s.get("xp_needed", 1), width=16)
-        level_block = f"**Niveau {s.get('level', 0)}**\n{xp_bar}"
-
-        # Bloc Quiz
-        quiz_block = f"Score: **{s.get('quiz_score', 0)}**\nRang: **#{s.get('quiz_rank', '—')}**"
-
-        # Bloc “visionnage”
-        watch_block = (
-            f"{EMOJI['episode']} Épisodes vus: **{s.get('episodes_watched', 0)}**\n"
-            f"✅ Animés terminés: **{s.get('anime_completed', 0)}**"
-        )
-
-        add_fields(e, [
-            ("Progression", level_block),
-            ("Quiz", quiz_block),
-            ("Visionnage", watch_block),
-        ], inline=True)
+        e.set_footer(text=f"Demandé par {ctx.author.display_name}")
 
         await ctx.send(embed=e)
 
