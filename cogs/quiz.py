@@ -70,13 +70,38 @@ class Quiz(commands.Cog):
         self.bot = bot
         self.title_matcher = TitleMatcher()
 
-        async def _get_random_anime(self) -> Optional[Dict]:
-            """Sélectionne un anime aléatoire depuis le cache local (équilibré)."""
-            anime_list = core.load_cached_titles()
-            if not anime_list:
-                return None
-            return random.choice(anime_list)
+    async def _get_random_anime(self, sort_option: str = "SCORE_DESC") -> Optional[Dict[str, Any]]:
+        """
+        Sélectionne un anime aléatoire depuis le cache local.
+        TODO: si tu veux exploiter sort_option (SCORE_DESC / POPULARITY_DESC / etc.),
+        filtre/pondère ici le choix dans anime_list.
+        """
+        anime_list = core.load_cached_titles()  # doit renvoyer une liste de dicts
+        if not anime_list:
+            return None
+        return random.choice(anime_list)
 
+    def _process_anime_titles(self, anime: Dict[str, Any]) -> Set[str]:
+        """
+        Retourne l'ensemble des titres acceptés pour un anime.
+        Inclut romaji/english/native + éventuels synonyms si dispo.
+        """
+        titles: Set[str] = set()
+
+        t = anime.get("title") or {}
+        r = t.get("romaji")
+        e = t.get("english")
+        n = t.get("native")
+        if r: titles.add(r)
+        if e: titles.add(e)
+        if n: titles.add(n)
+
+        syns = anime.get("synonyms") or []
+        for syn in syns:
+            if syn:
+                titles.add(syn)
+
+        return titles
     @commands.command(name="animequiz")
     async def animequiz(self, ctx: commands.Context, difficulty: str = "normal") -> None:
         """Lance un quiz pour deviner un anime à partir de son image."""
