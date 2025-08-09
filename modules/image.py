@@ -176,7 +176,7 @@ def generate_next_card(anime: Dict[str, Any], out_path: str = "/tmp/next_card.pn
     out = bg.convert("RGB")
 
     # Downscale final propre en 1920x1080 (lisible + poids raisonnable)
-    final_w = 1280
+    final_w = 900
     final_h = int(final_w * 9 / 16)
     out = out.resize((final_w, final_h), Image.LANCZOS)
 
