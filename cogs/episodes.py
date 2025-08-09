@@ -119,36 +119,22 @@ class Episodes(commands.Cog):
         
     @commands.command(name="monnext")
     async def monnext_cmd(self, ctx):
-        """Affiche le prochain épisode pour l'utilisateur qui lance la commande (via son AniList)."""
-        try:
-            username = core.get_linked_anilist(ctx.author.id)  # récupère le pseudo AniList lié
-        except Exception as e:
-            await ctx.send(f"⚠️ Erreur en récupérant ton AniList.\n`{type(e).__name__}: {e}`")
-            return
-
+        username = core.get_linked_anilist(ctx.author.id)
         if not username:
-            await ctx.send("⚠️ Tu n'as pas lié ton AniList. Utilise `!linkanilist <pseudo>` pour le lier.")
+            await ctx.send("⚠️ Tu n'as pas lié ton AniList. Utilise `!linkanilist <pseudo>`.")
             return
 
-        try:
-            item = core.get_user_next_airing_one(username)  # fonction à créer dans core.py
-        except Exception as e:
-            await ctx.send(f"⚠️ Impossible de récupérer ton prochain épisode.\n`{type(e).__name__}: {e}`")
-            return
-
+        item = core.get_user_next_airing_one(username)
         if not item:
             await ctx.send("⚠️ Aucun épisode à venir trouvé pour ton AniList.")
             return
 
-        # format FR
         item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
 
-        # génère la carte compacte
         img_path = generate_next_card(
             item,
             out_path="/tmp/monnext_card.png",
             scale=1.2,
-            blur=10,
             padding=40
         )
 
