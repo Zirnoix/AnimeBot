@@ -105,15 +105,20 @@ class Episodes(commands.Cog):
             await ctx.send("⚠️ Aucun épisode à venir trouvé (ou ANILIST_USERNAME manquant).")
             return
 
+        # Formater date/heure en FR
         item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
 
+        # Générer image recadrée
         img_path = generate_next_card(
             item,
             out_path="/tmp/next_card.png",
-            scale=
+            scale=1.2,      # taille générale du panneau et texte
+            blur_radius=10, # flou moins fort
+            padding=40      # marge autour avant crop
         )
-        await ctx.send(file=discord.File(img_path, filename=f"next_{int(time())}.png"))
 
+        # Envoyer juste l’image
+        await ctx.send(file=discord.File(img_path, filename=f"next_{int(time())}.png"))
 
         
     @commands.command(name="monnext")
