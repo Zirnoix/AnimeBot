@@ -96,7 +96,9 @@ class Episodes(commands.Cog):
     @commands.command(name="next")
     async def next_cmd(self, ctx):
         try:
-            item = core.get_next_airing_one()
+            item = core.get_user_next_airing_one(ctx.author.id)
+            if not item:
+                item = core.get_next_airing_one()
         except Exception as e:
             await ctx.send(f"⚠️ Impossible de récupérer le prochain épisode.\n`{type(e).__name__}: {e}`")
             return
@@ -105,19 +107,17 @@ class Episodes(commands.Cog):
             await ctx.send("⚠️ Aucun épisode à venir trouvé.")
             return
 
-        # format FR
         item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
 
-        # génère l'image (fond flouté + infos)
         img_path = generate_next_card(item, out_path="/tmp/next_card.png")
 
-        # embed simple qui affiche l'image générée
         embed = discord.Embed(title="⏭️ Prochain épisode", color=0x00B0F4)
         embed.set_image(url="attachment://next_card.png")
         embed.set_footer(text=f"Demandé par {ctx.author.display_name}")
 
         file = discord.File(img_path, filename="next_card.png")
         await ctx.send(embed=embed, file=file)
+
         
     @commands.command(name="monnext")
     async def monnext_cmd(self, ctx):
