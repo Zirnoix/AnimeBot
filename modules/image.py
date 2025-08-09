@@ -27,73 +27,165 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
     except Exception:
         return ImageFont.load_default()
 
-def generate_next_card(data, out_path="next_card.png", scale=1.2, blur_radius=12, padding=40):
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
-    import requests
-    from io import BytesIO
+# Assure-toi d'avoir en haut du fichier:
+# from PIL import Image, ImageFilter, ImageDraw, ImageFont, ImageOps
+# import requests
+# from io import BytesIO
+# (et _fetch_image, _fit_cover, _load_font déjà définies)
 
-    # Charger image de fond
-    bg_url = data.get("coverImage", {}).get("extraLarge") or data.get("coverImage", {}).get("large")
-    response = requests.get(bg_url)
-    bg_img = Image.open(BytesIO(response.content)).convert("RGBA")
+def generate_next_card(
+    anime: dict,
+    out_path: str = "/tmp/next_card.png",
+    scale: float = 1.6,
+    panel_scale: float = 0.7,
+    blur_base: int = 12,
+    crop: bool = True,
+    crop_pad: int = 40,
+    final_w: int | None = None,   # ex: 900 si tu veux forcer une taille
+) -> str:
+    # ---------- CANVAS DE TRAVAIL ----------
+    base_W, base_H = 1200, 675
+    W = int(base_W * scale)
+    H = int(base_H * scale)
 
-    # Fond flouté
-    bg_blur = bg_img.filter(ImageFilter.GaussianBlur(blur_radius))
+    cover = _fetch_image(anime.get("cover"))
+    bg = _fit_cover(cover, (W, H)).filter(ImageFilter.GaussianBlur(int(blur_base * scale))).convert("RGBA")
 
-    # Cover
-    cover_url = data.get("coverImage", {}).get("large")
-    cover_img = Image.open(BytesIO(requests.get(cover_url).content)).convert("RGBA")
+    # Vignette radiale + gradient bas
+    vignette = Image.new("L", (W, H), 0)
+    vg_draw = ImageDraw.Draw(vignette)
+    vg_draw.ellipse((-W*0.2, -H*0.2, W*1.2, H*1.2), fill=255)
+    vignette = vignette.filter(ImageFilter.GaussianBlur(int(120*scale)))
+    vg = Image.new("RGBA", (W, H), (0, 0, 0, 170))
+    vg.putalpha(ImageOps.invert(vignette))
+    bg.alpha_composite(vg)
 
-    # Taille de la carte (grand format pour éviter perte qualité avant crop)
-    card_width = 1280
-    card_height = 720
-    card = Image.new("RGBA", (card_width, card_height))
-    card.paste(bg_blur.resize((card_width, card_height)), (0, 0))
+    grad_h = int(320*scale)
+    grad = Image.new("L", (1, grad_h))
+    for y in range(grad_h):
+        grad.putpixel((0, y), int(255*(y/grad_h)))
+    grad = grad.resize((W, grad_h))
+    g_rgba = Image.new("RGBA", (W, grad_h), (0, 0, 0, 190))
+    g_rgba.putalpha(grad)
+    bg.alpha_composite(g_rgba, (0, H - grad_h))
 
-    # Zone du panneau
-    panel_height = int(cover_img.height * scale * 0.9)
-    panel_y = (card_height - panel_height) // 2
-    panel_x = int(card_width * 0.05)
+    # ---------- PANNEAU ----------
+    panel = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(panel)
 
-    # Panneau noir semi-transparent
-    panel_width = int(card_width * 0.8)
-    panel = Image.new("RGBA", (panel_width, panel_height), (0, 0, 0, 160))
-    card.paste(panel, (panel_x, panel_y), panel)
+    pad    = int(44  * scale * panel_scale)
+    panel_h= int(320 * scale * panel_scale)
+    radius = int(32  * scale * panel_scale)
+    border = int(2   * scale * panel_scale)
 
-    # Cover à gauche
-    cover_size = int(panel_height * 0.9)
-    cover_x = panel_x + int(panel_height * 0.05)
-    cover_y = panel_y + (panel_height - cover_size) // 2
-    cover_resized = cover_img.resize((cover_size, cover_size))
-    card.paste(cover_resized, (cover_x, cover_y), cover_resized)
+    y0 = H - panel_h - pad
+    x0 = pad
+    x1 = W - pad
+    y1 = H - pad
 
-    # Police
-    font_title = ImageFont.truetype("arial.ttf", int(40 * scale))
-    font_info = ImageFont.truetype("arial.ttf", int(26 * scale))
+    draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=(0,0,0,120), outline=(255,255,255,50), width=border)
 
-    # Texte
-    draw = ImageDraw.Draw(card)
-    text_x = cover_x + cover_size + 20
-    text_y = cover_y
-    draw.text((text_x, text_y), data.get("title", {}).get("romaji", "Inconnu"), font=font_title, fill="white")
+    # Mini-cover
+    thumb_w = int(300 * scale * panel_scale)
+    ratio = cover.width / cover.height if cover.height else 1
+    thumb = cover.copy()
+    th = int(thumb_w / ratio) if ratio else thumb_w
+    if th > panel_h:
+        tw = int(panel_h * ratio)
+        th = panel_h
+        thumb = thumb.resize((tw, th), Image.LANCZOS)
+    else:
+        tw = thumb_w
+        thumb = thumb.resize((tw, th), Image.LANCZOS)
 
-    text_y += int(50 * scale)
-    draw.text((text_x, text_y), f"Épisode {data.get('episode')}", font=font_info, fill="white")
+    ty = y0 + (panel_h - th) // 2
+    tx_img = x0 + int(22 * scale * panel_scale)
+    panel.alpha_composite(thumb.convert("RGBA"), (tx_img, ty))
 
-    text_y += int(35 * scale)
-    draw.text((text_x, text_y), " • ".join(data.get("genres", [])), font=font_info, fill="white")
+    # ---------- TEXTES ----------
+    title = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "Titre inconnu"
+    episode = anime.get("episode") or "?"
+    when = anime.get("when") or "date inconnue"
+    genres = anime.get("genres") or []
+    genres_txt = " • ".join(genres[:4]) if genres else "—"
 
-    text_y += int(35 * scale)
-    draw.text((text_x, text_y), data.get("when", ""), font=font_info, fill="white")
+    # helpers
+    def fit_font(text, max_w, start, min_=18):
+        size = start
+        meas = ImageDraw.Draw(panel).textlength
+        while size >= min_:
+            f = _load_font(size)
+            if meas(text, font=f) <= max_w: return f
+            size -= 2
+        return _load_font(min_)
 
-    # === CROP autour du panneau ===
-    crop_left = panel_x - padding
-    crop_top = panel_y - padding
-    crop_right = panel_x + panel_width + padding
-    crop_bottom = panel_y + panel_height + padding
+    def wrap2(text, font, max_w):
+        words = text.split()
+        lines, cur = [], ""
+        meas = ImageDraw.Draw(panel).textlength
+        for w in words:
+            t = (cur + " " + w).strip()
+            if meas(t, font=font) <= max_w:
+                cur = t
+            else:
+                if cur: lines.append(cur)
+                cur = w
+                if len(lines) == 2: break
+        if len(lines) < 2 and cur: lines.append(cur)
+        if len(lines) == 2:
+            while lines[1] and meas(lines[1] + "…", font=font) > max_w and font.size > 18:
+                lines[1] = lines[1].rsplit(" ", 1)[0] if " " in lines[1] else lines[1][:-1]
+            if lines[1]: lines[1] += "…"
+        return lines[:2]
 
-    cropped_card = card.crop((crop_left, crop_top, crop_right, crop_bottom))
+    base_title = int(84 * scale * panel_scale)
+    base_sub   = int(44 * scale * panel_scale)
+    base_meta  = int(36 * scale * panel_scale)
 
-    # Sauvegarder
-    cropped_card.save(out_path)
+    tx = tx_img + tw + int(28 * scale * panel_scale)
+    ty = y0 + int(32 * scale * panel_scale)
+    max_w = x1 - tx - int(28 * scale * panel_scale)
+
+    f_title = fit_font(title, max_w, base_title, max(int(32 * scale * panel_scale), 18))
+    lines = wrap2(title, f_title, max_w)
+
+    def shadow(txt, xy, font, fill=(255,255,255,245)):
+        x, y = xy
+        draw.text((x+int(3*scale*panel_scale), y+int(3*scale*panel_scale)), txt, font=font, fill=(0,0,0,180))
+        draw.text((x, y), txt, font=font, fill=fill)
+
+    gap_big   = int(8 * scale * panel_scale)
+    gap_mid   = int(6 * scale * panel_scale)
+    gap_small = int(4 * scale * panel_scale)
+
+    for line in lines:
+        shadow(line, (tx, ty), f_title); ty += f_title.size + gap_big
+
+    f_sub  = fit_font(f"Épisode {episode}", max_w, base_sub,  max(int(24 * scale * panel_scale), 16))
+    f_meta = fit_font(genres_txt,          max_w, base_meta, max(int(20 * scale * panel_scale), 14))
+    f_meta2= fit_font(when,               max_w, base_meta, max(int(20 * scale * panel_scale), 14))
+
+    ty += gap_small
+    shadow(f"Épisode {episode}", (tx, ty), f_sub);  ty += f_sub.size + gap_mid
+    shadow(genres_txt, (tx, ty), f_meta, (235,235,235,240)); ty += f_meta.size + gap_small
+    shadow(when, (tx, ty), f_meta2, (235,235,235,240))
+
+    # ---------- COMPOSE ----------
+    bg.alpha_composite(panel)
+    out = bg.convert("RGB")
+
+    # ---------- CROP AUTOUR DU PANNEAU ----------
+    if crop:
+        left   = max(0, x0 - crop_pad)
+        top    = max(0, y0 - crop_pad)
+        right  = min(W, x1 + crop_pad)
+        bottom = min(H, y1 + crop_pad)
+        out = out.crop((left, top, right, bottom))
+
+    # ---------- RESIZE FINAL ----------
+    if final_w:
+        final_h = int(final_w * out.height / out.width)
+        out = out.resize((final_w, final_h), Image.LANCZOS)
+
+    out.save(out_path, format="PNG", quality=95)
     return out_path
