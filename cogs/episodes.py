@@ -17,7 +17,7 @@ from discord.ext import commands
 from datetime import datetime
 from modules import core
 from modules.image import generate_next_card
-
+from time import time
 
 class Episodes(commands.Cog):
     """Cog gérant les plannings et les notifications d'épisodes.
@@ -107,11 +107,16 @@ class Episodes(commands.Cog):
 
         item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
 
-        # Génération image
-        img_path = generate_next_card(item, out_path="/tmp/next_card.png", scale=1.8)
+        img_path = generate_next_card(
+            item,
+            out_path="/tmp/next_card.png",
+            scale=1.6,          # qualité
+            panel_scale=0.7,    # plus petit visuellement (essaie 0.65 si tu veux encore + compact)
+            final_w=1280,       # le fichier; tu peux mettre 900 si tu veux plus léger
+            blur_base=12        # flou doux
+        )
+        await ctx.send(file=discord.File(img_path, filename=f"next_{int(time())}.png"))
 
-        # Envoi direct du fichier sans embed
-        await ctx.send(file=discord.File(img_path, filename="next_card.png"))
 
         
     @commands.command(name="monnext")
