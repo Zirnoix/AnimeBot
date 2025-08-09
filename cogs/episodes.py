@@ -110,10 +110,7 @@ class Episodes(commands.Cog):
         img_path = generate_next_card(
             item,
             out_path="/tmp/next_card.png",
-            scale=1.6,          # qualité
-            panel_scale=0.7,    # plus petit visuellement (essaie 0.65 si tu veux encore + compact)
-            final_w=1280,       # le fichier; tu peux mettre 900 si tu veux plus léger
-            blur_base=12        # flou doux
+            scale=
         )
         await ctx.send(file=discord.File(img_path, filename=f"next_{int(time())}.png"))
 
