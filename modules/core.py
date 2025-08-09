@@ -20,8 +20,8 @@ import unicodedata
 import random
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from typing import Any, Optional, Dict, List, Set, Union, Tuple
-
+from typing import Any, Optional, Dict, List, Set, Union, Tuple, Iterable
+import discord
 import requests
 import pytz
 import aiohttp
@@ -45,6 +45,61 @@ logger = logging.getLogger(__name__)
 # Configuration et chemins
 ###############################################################################
 
+THEME = {
+    "primary": 0x5865F2,   # violet Discord
+    "success": 0x43B581,   # vert
+    "warning": 0xFAA61A,   # orange
+    "danger":  0xF04747,   # rouge
+    "muted":   0x2F3136,   # gris
+    "accent":  0x00B0F4,   # bleu clair
+    "bg":      0x111318,   # fond
+}
+
+EMOJI = {
+    "next": "⏭️",
+    "date": "📅",
+    "clock": "⏰",
+    "episode": "🎬",
+    "tv": "📺",
+    "user": "🧑",
+    "stats": "📊",
+    "ok": "✅",
+    "warn": "⚠️",
+    "dot": "•",
+}
+
+def make_embed(
+    title: str,
+    description: Optional[str] = None,
+    color: int = THEME["primary"],
+    icon_url: Optional[str] = None,
+    footer: Optional[str] = None,
+) -> discord.Embed:
+    e = discord.Embed(title=title, description=description or discord.Embed.Empty, color=color)
+    e.timestamp = datetime.utcnow()
+    if footer:
+        e.set_footer(text=footer)
+    if icon_url:
+        e.set_author(name=title, icon_url=icon_url)
+        e.title = discord.Embed.Empty
+    return e
+
+def add_fields(embed: discord.Embed, pairs: Iterable[Tuple[str, str]], inline: bool = False) -> None:
+    for name, value in pairs:
+        embed.add_field(name=name, value=value, inline=inline)
+
+def text_bar(current: int, total: int, width: int = 14) -> str:
+    total = max(total, 1)
+    filled = int(round(width * current / total))
+    empty = width - filled
+    return f"[{'█'*filled}{'—'*empty}] {current}/{total}"
+
+def fmt_anime_line(title: str, ep: int, when_txt: str) -> str:
+    return f"{EMOJI['episode']} **EP {ep}** — {title}\n{EMOJI['clock']} {when_txt}"
+
+def safe(text: Optional[str]) -> str:
+    return text or "—"
+    
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'assets')
 WINNER_FILE = os.path.join(DATA_DIR, "winner.json")
