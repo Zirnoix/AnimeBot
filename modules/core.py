@@ -228,12 +228,12 @@ def format_airing_datetime_fr(ts: int, tz_name: str = "Europe/Paris") -> str:
     if not ts:
         return "date inconnue"
     dt_local = datetime.fromtimestamp(ts, tz=ZoneInfo(tz_name))
-    # ex: "sam. 9 août 14:30"
     months = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
     weekdays = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
     wd = weekdays[dt_local.weekday()]
     mo = months[dt_local.month - 1]
     return f"{wd} {dt_local.day} {mo} {dt_local:%H:%M}"
+
 
 def get_next_airing_one() -> Optional[Dict[str, Any]]:
     """
@@ -945,16 +945,17 @@ def should_notify(ep: dict) -> bool:
 
 def get_my_next_airing_one() -> Optional[Dict[str, Any]]:
     """
-    Renvoie le prochain épisode à sortir pour l'utilisateur AniList défini
-    dans la variable d'environnement ANILIST_USERNAME.
+    Prochain épisode à sortir pour l'utilisateur défini par ANILIST_USERNAME.
+    Parcourt toute la liste CURRENT (pagination) et prend le plus proche dans le futur.
     """
     username = os.getenv("ANILIST_USERNAME")
     if not username:
         return None
 
     query = """
-    query ($userName:String){
-      Page(perPage: 50){
+    query ($userName:String, $page:Int, $perPage:Int){
+      Page(page:$page, perPage:$perPage){
+        pageInfo{ hasNextPage }
         mediaList(userName:$userName, status:CURRENT, type:ANIME){
           media{
             id
@@ -967,30 +968,44 @@ def get_my_next_airing_one() -> Optional[Dict[str, Any]]:
       }
     }
     """
-    data = query_anilist(query, variables={"userName": username})
-    entries = (data or {}).get("data", {}).get("Page", {}).get("mediaList", []) or []
-    items = []
-    for e in entries:
-        m = e.get("media") or {}
-        nae = m.get("nextAiringEpisode")
-        if not nae:
-            continue
-        t = m.get("title") or {}
-        items.append({
-            "airingAt": nae.get("airingAt"),
-            "episode": nae.get("episode"),
-            "title_romaji": t.get("romaji"),
-            "title_english": t.get("english"),
-            "title_native": t.get("native"),
-            "cover": ((m.get("coverImage") or {}).get("extraLarge")
-                      or (m.get("coverImage") or {}).get("large")),
-            "genres": m.get("genres") or [],
-        })
 
-    if not items:
-        return None
-    items.sort(key=lambda x: x.get("airingAt") or 0)
-    return items[0]
+    page = 1
+    per_page = 50
+    now = int(datetime.now(timezone.utc).timestamp())
+    best: Optional[Dict[str, Any]] = None
+
+    while True:
+        data = query_anilist(query, variables={"userName": username, "page": page, "perPage": per_page})
+        page_data = (data or {}).get("data", {}).get("Page", {}) or {}
+        entries = page_data.get("mediaList", []) or []
+
+        for e in entries:
+            m = e.get("media") or {}
+            nae = m.get("nextAiringEpisode") or {}
+            airing = nae.get("airingAt")
+            if not airing or airing < now:
+                continue
+
+            t = m.get("title") or {}
+            item = {
+                "airingAt": airing,
+                "episode": nae.get("episode"),
+                "title_romaji": t.get("romaji"),
+                "title_english": t.get("english"),
+                "title_native": t.get("native"),
+                "cover": ((m.get("coverImage") or {}).get("extraLarge")
+                          or (m.get("coverImage") or {}).get("large")),
+                "genres": m.get("genres") or [],
+            }
+
+            if best is None or airing < best["airingAt"]:
+                best = item
+
+        if not page_data.get("pageInfo", {}).get("hasNextPage"):
+            break
+        page += 1
+
+    return best
 
 def get_user_next_airing_one(discord_id: int) -> Optional[Dict[str, Any]]:
     """
