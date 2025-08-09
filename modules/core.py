@@ -1007,8 +1007,6 @@ def get_my_next_airing_one() -> Optional[Dict[str, Any]]:
 
     return best
 
-from modules import database
-
 def get_linked_anilist(discord_id: int):
     """Retourne le pseudo AniList lié à un utilisateur Discord."""
     links = load_links()
