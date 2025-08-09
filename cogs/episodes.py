@@ -16,6 +16,7 @@ import discord
 from discord.ext import commands
 from datetime import datetime
 from modules import core
+from modules.image import generate_next_card
 
 
 class Episodes(commands.Cog):
@@ -94,29 +95,35 @@ class Episodes(commands.Cog):
 
     @commands.command(name="next")
     async def next_cmd(self, ctx):
-        # Récupère la liste des prochains épisodes globaux (ta fonction actuelle)
-        items = core.get_next_airing(limit=8)  # adapter au nom/retour de ta fonction
-        if not items:
-            await ctx.send(f"{EMOJI['warn']} Aucun épisode à venir trouvé.")
+        try:
+            item = core.get_next_airing_one()
+        except Exception as e:
+            await ctx.send(f"⚠️ Impossible de récupérer le prochain épisode.\n`{type(e).__name__}: {e}`")
             return
 
-        title = f"{EMOJI['next']} Sorties à venir"
-        e = make_embed(title=title, color=THEME["accent"], footer=f"Demandé par {ctx.author.display_name}")
-        # Optionnel: une bannière/thumbnail générique
-        # e.set_thumbnail(url="https://…")
+        if not item:
+            await ctx.send("⚠️ Aucun épisode à venir trouvé.")
+            return
 
-        lines = []
-        for it in items:
-            t = safe(it.get("title_romaji") or it.get("title_english") or it.get("title_native"))
-            ep = it.get("episode") or 1
-            when_txt = core.humanize_airing_time(it)  # tu as sûrement déjà un util pour ça
-            lines.append(fmt_anime_line(t, ep, when_txt))
+        # formater l'heure française
+        when_txt = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
+        item["when"] = when_txt
 
-        # Regroupe joliment
-        chunk = "\n\n".join(lines)
-        add_fields(e, [(f"{EMOJI['tv']} Prochains épisodes", chunk)], inline=False)
-        await ctx.send(embed=e)
+        # générer la carte
+        img_path = generate_next_card(item, out_path="/tmp/next_card.png")
 
+        # embed simple qui affiche l'image
+        e = discord.Embed(
+            title=f"⏭️ Prochain épisode",
+            description="",
+            color=THEME["accent"] if 'THEME' in globals() else 0x00B0F4
+        )
+        e.set_image(url="attachment://next_card.png")
+        e.set_footer(text=f"Demandé par {ctx.author.display_name}")
+
+        file = discord.File(img_path, filename="next_card.png")
+        await ctx.send(embed=e, file=file)
+        
     @commands.command(name="monnext")
     async def monnext_cmd(self, ctx):
         # Récupère les séries suivies par l’utilisateur + prochain épisode
