@@ -325,6 +325,9 @@ def get_user_anilist(user_id: int) -> Optional[str]:
     links = load_links()
     return links.get(str(user_id))
 
+def get_user_stats(user_id: int):
+    """Alias pour compatibilité avec l’ancienne commande mystats."""
+    return get_game_stats(user_id)
 
 def load_preferences() -> dict:
     """Charge les préférences utilisateurs."""
