@@ -29,76 +29,99 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
 
 def generate_next_card(anime: Dict[str, Any], out_path: str = "/tmp/next_card.png") -> str:
     """
-    Crée une image 1200x675 avec fond flouté + overlay infos.
-    anime = { title_*, episode, airingAt (déjà formaté si tu veux), cover, genres }
+    Carte 1200x675 : fond flouté + vignette + panneau verre + mini cover nette.
+    Affiche: Titre, Épisode, Genres, Date/heure.
     """
     W, H = 1200, 675
     cover = _fetch_image(anime.get("cover"))
-    bg = _fit_cover(cover, (W, H)).filter(ImageFilter.GaussianBlur(20))
+    bg = _fit_cover(cover, (W, H)).filter(ImageFilter.GaussianBlur(30)).convert("RGBA")
 
-    # assombrir le fond
-    dark = Image.new("RGBA", (W, H), (0, 0, 0, 110))
-    bg = bg.convert("RGBA")
-    bg.alpha_composite(dark)
+    # Vignette radiale douce (assombrit les bords)
+    vignette = Image.new("L", (W, H), 0)
+    vg_draw = ImageDraw.Draw(vignette)
+    vg_draw.ellipse((-W*0.2, -H*0.2, W*1.2, H*1.2), fill=255)  # grand cercle blanc
+    vignette = vignette.filter(ImageFilter.GaussianBlur(120))
+    # normaliser et inverser (bords sombres)
+    vg = Image.new("RGBA", (W, H), (0, 0, 0, 180))
+    vg.putalpha(ImageOps.invert(vignette))
+    bg.alpha_composite(vg)
 
-    # zone info (panneau semi-transparent)
+    # Bande gradient bas (lisibilité)
+    grad = Image.new("L", (1, 300))
+    for y in range(300):
+        grad.putpixel((0, y), int(255 * (y / 300)))
+    grad = grad.resize((W, 300))
+    g_rgba = Image.new("RGBA", (W, 300), (0, 0, 0, 190))
+    g_rgba.putalpha(grad)
+    bg.alpha_composite(g_rgba, (0, H - 300))
+
     panel = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(panel)
-    # rectangle en bas
-    pad = 40
-    panel_h = 280
-    draw.rounded_rectangle(
-        (pad, H - panel_h - pad, W - pad, H - pad),
-        radius=24,
-        fill=(0, 0, 0, 130),
-        outline=(255, 255, 255, 40),
-        width=2
-    )
 
-    # textes
+    pad = 40
+    panel_h = 260
+    y0 = H - panel_h - pad
+    x0 = pad
+    x1 = W - pad
+    y1 = H - pad
+
+    # Panneau verre
+    draw.rounded_rectangle((x0, y0, x1, y1), radius=28, fill=(0, 0, 0, 110), outline=(255, 255, 255, 45), width=2)
+
+    # Mini cover nette à gauche
+    thumb_w = 200
+    ratio = cover.width / cover.height if cover.height else 1
+    thumb = cover.copy()
+    th = int(thumb_w / ratio) if ratio != 0 else thumb_w
+    thumb = thumb.resize((thumb_w, th if th <= panel_h else panel_h), Image.LANCZOS)
+    # centrer verticalement dans le panneau
+    ty = y0 + (panel_h - thumb.height) // 2
+    panel.alpha_composite(thumb.convert("RGBA"), (x0 + 18, ty))
+
+    # Textes
     title = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "Titre inconnu"
     episode = anime.get("episode") or "?"
     when = anime.get("when") or "date inconnue"
     genres = anime.get("genres") or []
     genres_txt = " • ".join(genres[:4]) if genres else "—"
 
-    f_title = _load_font(54)
-    f_sub   = _load_font(30)
-    f_meta  = _load_font(26)
+    f_title = _load_font(56)
+    f_sub   = _load_font(32)
+    f_meta  = _load_font(28)
 
-    # positions
-    x = pad + 40
-    y = H - panel_h - pad + 40
+    # zone texte à droite de la mini cover
+    tx = x0 + 18 + thumb_w + 24
+    ty = y0 + 28
+    max_w = x1 - tx - 24
 
-    # Titre (retour à la ligne si besoin)
-    max_w = W - (pad + 40) - pad
-    def draw_multiline(text, font, x, y, line_spacing=10):
-        lines = []
-        words = text.split()
-        cur = ""
-        for w in words:
-            test = (cur + " " + w).strip()
-            if ImageDraw.Draw(panel).textlength(test, font=font) <= max_w:
-                cur = test
-            else:
-                lines.append(cur)
-                cur = w
-        if cur:
+    def draw_shadowed(txt, xy, font, fill=(255,255,255,240)):
+        x, y = xy
+        # ombre
+        draw.text((x+2, y+2), txt, font=font, fill=(0, 0, 0, 180))
+        draw.text((x, y), txt, font=font, fill=fill)
+
+    # Titre multi-lignes
+    words = title.split()
+    lines, cur = [], ""
+    measure = ImageDraw.Draw(panel).textlength
+    for w in words:
+        test = (cur + " " + w).strip()
+        if measure(test, font=f_title) <= max_w:
+            cur = test
+        else:
             lines.append(cur)
-        for i, line in enumerate(lines):
-            draw.text((x, y), line, fill=(255, 255, 255, 240), font=font)
-            y += font.size + line_spacing
-        return y
+            cur = w
+    if cur:
+        lines.append(cur)
 
-    y = draw_multiline(title, f_title, x, y, line_spacing=6)
-    y += 6
-    draw.text((x, y), f"Épisode {episode}", fill=(255, 255, 255, 220), font=f_sub)
-    y += f_sub.size + 6
-    draw.text((x, y), genres_txt, fill=(220, 220, 220, 220), font=f_meta)
-    y += f_meta.size + 6
-    draw.text((x, y), when, fill=(220, 220, 220, 220), font=f_meta)
+    for i, line in enumerate(lines[:2]):  # 2 lignes max pour garder de l'air
+        draw_shadowed(line, (tx, ty), f_title); ty += f_title.size + 6
 
-    # composite panel over bg
+    ty += 6
+    draw_shadowed(f"Épisode {episode}", (tx, ty), f_sub, (255,255,255,230)); ty += f_sub.size + 4
+    draw_shadowed(genres_txt, (tx, ty), f_meta, (230,230,230,230)); ty += f_meta.size + 4
+    draw_shadowed(when, (tx, ty), f_meta, (230,230,230,230))
+
     bg.alpha_composite(panel)
 
     out = bg.convert("RGB")
