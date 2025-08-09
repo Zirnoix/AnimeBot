@@ -943,6 +943,55 @@ def should_notify(ep: dict) -> bool:
 
     return abs(ep["airingAt"] - now) <= delay
 
+def get_my_next_airing_one() -> Optional[Dict[str, Any]]:
+    """
+    Renvoie le prochain épisode à sortir pour l'utilisateur AniList défini
+    dans la variable d'environnement ANILIST_USERNAME.
+    """
+    username = os.getenv("ANILIST_USERNAME")
+    if not username:
+        return None
+
+    query = """
+    query ($userName:String){
+      Page(perPage: 50){
+        mediaList(userName:$userName, status:CURRENT, type:ANIME){
+          media{
+            id
+            title{ romaji english native }
+            coverImage{ extraLarge large }
+            genres
+            nextAiringEpisode{ airingAt episode }
+          }
+        }
+      }
+    }
+    """
+    data = query_anilist(query, variables={"userName": username})
+    entries = (data or {}).get("data", {}).get("Page", {}).get("mediaList", []) or []
+    items = []
+    for e in entries:
+        m = e.get("media") or {}
+        nae = m.get("nextAiringEpisode")
+        if not nae:
+            continue
+        t = m.get("title") or {}
+        items.append({
+            "airingAt": nae.get("airingAt"),
+            "episode": nae.get("episode"),
+            "title_romaji": t.get("romaji"),
+            "title_english": t.get("english"),
+            "title_native": t.get("native"),
+            "cover": ((m.get("coverImage") or {}).get("extraLarge")
+                      or (m.get("coverImage") or {}).get("large")),
+            "genres": m.get("genres") or [],
+        })
+
+    if not items:
+        return None
+    items.sort(key=lambda x: x.get("airingAt") or 0)
+    return items[0]
+
 def get_user_next_airing_one(discord_id: int) -> Optional[Dict[str, Any]]:
     """
     Renvoie le prochain épisode à sortir parmi les animés suivis par l'utilisateur (status=CURRENT).
