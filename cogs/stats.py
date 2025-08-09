@@ -41,80 +41,44 @@ class Stats(commands.Cog):
         self.bot = bot
 
     @commands.command(name="mystats")
-    async def mystats(self, ctx: commands.Context) -> None:
-        """Affiche les statistiques AniList de l'utilisateur avec une carte personnalisée.
-
-        Cette commande génère une carte de statistiques avec :
-        - L'avatar Discord de l'utilisateur
-        - Le nombre total d'animés vus
-        - Le temps total de visionnage en jours
-        - Le score moyen donné
-        - Le genre le plus regardé
-
-        En cas d'échec de génération de la carte, un embed simple est envoyé.
-
-        Args:
-            ctx: Le contexte de la commande
-        """
-        username = core.get_user_anilist(ctx.author.id)
-        if not username:
-            await ctx.send("❌ Tu dois lier ton compte avec `!linkanilist <pseudo>` avant d'utiliser cette commande.")
+    async def mystats_cmd(self, ctx):
+        s = core.get_user_stats(ctx.author.id)  # adapte: dict attendu
+        if not s:
+            await ctx.send(f"{EMOJI['warn']} Aucune statistique trouvée.")
             return
-        # Fetch stats from AniList
-        query = '''
-        query ($name: String) {
-          User(name: $name) {
-            statistics {
-              anime {
-                count
-                minutesWatched
-                meanScore
-                genres { genre count }
-              }
-            }
-          }
-        }
-        '''
-        data = core.query_anilist(query, {"name": username})
-        if not data or not data.get("data", {}).get("User"):
-            await ctx.send(f"❌ Impossible de récupérer les données AniList pour **{username}**.")
-            return
-        stats = data["data"]["User"]["statistics"]["anime"]
-        genres = stats.get("genres", [])
-        fav_genre = sorted(genres, key=lambda g: g["count"], reverse=True)[0]["genre"] if genres else "N/A"
-        days = stats.get("minutesWatched", 0) / 1440
-        count = stats.get("count", 0)
-        mean = stats.get("meanScore", 0)
-        # Generate image card
-        avatar_url = None
-        try:
-            avatar_url = ctx.author.avatar.url
-        except Exception:
-            avatar_url = None
-        try:
-            buf = core.generate_stats_card(
-                user_name=ctx.author.display_name,
-                avatar_url=avatar_url,
-                anime_count=count,
-                days_watched=days,
-                mean_score=mean,
-                fav_genre=fav_genre,
-            )
-            file = discord.File(buf, filename="mystats.jpg")
-            embed = discord.Embed(color=discord.Color.dark_teal())
-            embed.set_image(url="attachment://mystats.jpg")
-            await ctx.send(embed=embed, file=file)
-        except Exception:
-            # Fallback to simple embed
-            embed = discord.Embed(
-                title=f"📊 Statistiques AniList – {ctx.author.display_name}",
-                color=discord.Color.blue(),
-            )
-            embed.add_field(name="🎬 Animés vus", value=str(count), inline=False)
-            embed.add_field(name="🕒 Temps total", value=f"{days:.1f} jours", inline=False)
-            embed.add_field(name="⭐ Score moyen", value=str(round(mean, 1)), inline=False)
-            embed.add_field(name="🎭 Genre préféré", value=fav_genre, inline=False)
-            await ctx.send(embed=embed)
+
+        # Exemples de stats attendues :
+        # s = {
+        #   "level": 12, "xp": 340, "xp_needed": 500,
+        #   "quiz_score": 87, "quiz_rank": 5,
+        #   "episodes_watched": 1234, "anime_completed": 56,
+        # }
+
+        title = f"{EMOJI['stats']} Tes stats"
+        e = make_embed(title=title, color=THEME["primary"], footer=f"{ctx.author.display_name}")
+        if ctx.author.display_avatar:
+            e.set_thumbnail(url=ctx.author.display_avatar.url)
+
+        # Barre XP
+        xp_bar = text_bar(s.get("xp", 0), s.get("xp_needed", 1), width=16)
+        level_block = f"**Niveau {s.get('level', 0)}**\n{xp_bar}"
+
+        # Bloc Quiz
+        quiz_block = f"Score: **{s.get('quiz_score', 0)}**\nRang: **#{s.get('quiz_rank', '—')}**"
+
+        # Bloc “visionnage”
+        watch_block = (
+            f"{EMOJI['episode']} Épisodes vus: **{s.get('episodes_watched', 0)}**\n"
+            f"✅ Animés terminés: **{s.get('anime_completed', 0)}**"
+        )
+
+        add_fields(e, [
+            ("Progression", level_block),
+            ("Quiz", quiz_block),
+            ("Visionnage", watch_block),
+        ], inline=True)
+
+        await ctx.send(embed=e)
 
     @commands.command(name="stats")
     async def stats(self, ctx: commands.Context, username: str) -> None:
