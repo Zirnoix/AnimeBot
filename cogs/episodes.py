@@ -93,87 +93,52 @@ class Episodes(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="next")
-    async def next_episode(self, ctx: commands.Context) -> None:
-        """Affiche le prochain épisode à venir dans la liste globale.
-
-        Génère une carte visuelle avec :
-        - Le titre de l'anime
-        - Le numéro d'épisode
-        - La date et heure de sortie
-        - Une image de l'anime
-
-        En cas d'erreur, retombe sur un embed textuel simple.
-
-        Args:
-            ctx: Le contexte de la commande
-        """
-        episodes = core.get_upcoming_episodes(core.ANILIST_USERNAME)
-        if not episodes:
-            await ctx.send("📭 Aucun épisode à venir trouvé dans la liste configurée.")
+    async def next_cmd(self, ctx):
+        # Récupère la liste des prochains épisodes globaux (ta fonction actuelle)
+        items = core.get_next_airing(limit=8)  # adapter au nom/retour de ta fonction
+        if not items:
+            await ctx.send(f"{EMOJI['warn']} Aucun épisode à venir trouvé.")
             return
-        next_ep = min(episodes, key=lambda e: e["airingAt"])
-        dt = datetime.fromtimestamp(next_ep["airingAt"], tz=core.TIMEZONE)
-        # Generate image card
-        try:
-            buf = core.generate_next_image(next_ep, dt, tagline="Prochain épisode")
-            file = discord.File(buf, filename="next.jpg")
-            embed = discord.Embed(title="🎬 Prochain épisode", color=discord.Color.blurple())
-            embed.set_image(url="attachment://next.jpg")
-            await ctx.send(embed=embed, file=file)
-        except Exception:
-            # Fallback to text embed if image generation fails
-            embed = discord.Embed(
-                title="🎬 Prochain épisode",
-                description=f"{next_ep['title']} — Épisode {next_ep['episode']}",
-                color=discord.Color.blurple(),
-            )
-            embed.add_field(name="Date", value=dt.strftime("%d/%m/%Y à %H:%M"), inline=False)
-            await ctx.send(embed=embed)
+
+        title = f"{EMOJI['next']} Sorties à venir"
+        e = make_embed(title=title, color=THEME["accent"], footer=f"Demandé par {ctx.author.display_name}")
+        # Optionnel: une bannière/thumbnail générique
+        # e.set_thumbnail(url="https://…")
+
+        lines = []
+        for it in items:
+            t = safe(it.get("title_romaji") or it.get("title_english") or it.get("title_native"))
+            ep = it.get("episode") or 1
+            when_txt = core.humanize_airing_time(it)  # tu as sûrement déjà un util pour ça
+            lines.append(fmt_anime_line(t, ep, when_txt))
+
+        # Regroupe joliment
+        chunk = "\n\n".join(lines)
+        add_fields(e, [(f"{EMOJI['tv']} Prochains épisodes", chunk)], inline=False)
+        await ctx.send(embed=e)
 
     @commands.command(name="monnext")
-    async def my_next(self, ctx: commands.Context) -> None:
-        """Affiche le prochain épisode pour l'utilisateur depuis sa liste AniList.
-
-        Nécessite d'avoir lié son compte AniList au préalable.
-        Génère une carte visuelle personnalisée avec les infos de l'épisode.
-
-        Args:
-            ctx: Le contexte de la commande
-        """
-        # Vérifier si l'utilisateur a lié son compte
-        links = core.load_links()
-        user_id = str(ctx.author.id)
-
-        if user_id not in links:
-            await ctx.send("❌ Tu dois d'abord lier ton compte AniList avec `!linkanilist <pseudo>`")
+    async def monnext_cmd(self, ctx):
+        # Récupère les séries suivies par l’utilisateur + prochain épisode
+        items = core.get_user_next_airing(ctx.author.id, limit=8)  # adapte au nom réel
+        if not items:
+            await ctx.send(f"{EMOJI['warn']} Rien à venir pour toi pour l’instant.")
             return
 
-        # Récupérer les épisodes depuis la liste de l'utilisateur
-        episodes = core.get_upcoming_episodes(links[user_id])
+        title = f"{EMOJI['next']} Tes prochains épisodes"
+        e = make_embed(title=title, color=THEME["success"], footer=f"{ctx.author.display_name}")
+        if ctx.author.display_avatar:
+            e.set_thumbnail(url=ctx.author.display_avatar.url)
 
-        if not episodes:
-            await ctx.send("📭 Aucun épisode à venir trouvé dans ta liste.")
-            return
+        lines = []
+        for it in items:
+            t = safe(it.get("title_romaji") or it.get("title_english") or it.get("title_native"))
+            ep = it.get("episode") or 1
+            when_txt = core.humanize_airing_time(it)
+            lines.append(fmt_anime_line(t, ep, when_txt))
 
-        next_ep = min(episodes, key=lambda e: e["airingAt"])
-        dt = datetime.fromtimestamp(next_ep["airingAt"], tz=core.TIMEZONE)
-
-        # Générer l'image personnalisée
-        try:
-            buf = core.generate_next_image(next_ep, dt, tagline="Ton prochain épisode")
-            file = discord.File(buf, filename="next.jpg")
-            embed = discord.Embed(title="🎬 Ton prochain épisode", color=discord.Color.blurple())
-            embed.set_image(url="attachment://next.jpg")
-            await ctx.send(embed=embed, file=file)
-        except Exception:
-            # Fallback en cas d'erreur de génération d'image
-            embed = discord.Embed(
-                title="🎬 Ton prochain épisode",
-                description=f"{next_ep['title']} — Épisode {next_ep['episode']}",
-                color=discord.Color.blurple(),
-            )
-            embed.add_field(name="Date", value=dt.strftime("%d/%m/%Y à %H:%M"), inline=False)
-            await ctx.send(embed=embed)
+        add_fields(e, [(f"{EMOJI['tv']} À venir pour toi", "\n\n".join(lines))], inline=False)
+        await ctx.send(embed=e)
 
     @commands.command(name="planning")
     async def planning(self, ctx: commands.Context) -> None:
