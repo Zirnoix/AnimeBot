@@ -24,7 +24,7 @@ from typing import Any, Optional, Dict, List, Set, Union, Tuple, Iterable
 import discord
 import requests
 import pytz
-from zineinfo import ZoneInfo
+from zoneinfo import ZoneInfo
 import aiohttp
 import aiofiles
 from babel.dates import format_datetime
