@@ -107,15 +107,12 @@ class Episodes(commands.Cog):
 
         item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
 
-        # *** plus grand et super lisible ***
-        img_path = generate_next_card(item, out_path="/tmp/next_card.png", scale=1.8)  # 1.8 = XXL
+        # Génération image
+        img_path = generate_next_card(item, out_path="/tmp/next_card.png", scale=1.8)
 
-        embed = discord.Embed(title="⏭️ Prochain épisode", color=0x00B0F4)
-        embed.set_image(url="attachment://next_card.png")
-        embed.set_footer(text=f"Demandé par {ctx.author.display_name}")
+        # Envoi direct du fichier sans embed
+        await ctx.send(file=discord.File(img_path, filename="next_card.png"))
 
-        file = discord.File(img_path, filename="next_card.png")
-        await ctx.send(embed=embed, file=file)
         
     @commands.command(name="monnext")
     async def monnext_cmd(self, ctx):
