@@ -1009,18 +1009,14 @@ def get_my_next_airing_one() -> Optional[Dict[str, Any]]:
 
 from modules import database
 
-def get_linked_anilist(discord_id: int) -> str:
-    """Retourne le pseudo AniList lié à cet utilisateur Discord."""
-    conn = database.get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT anilist_username FROM linked_users WHERE discord_id = ?", (discord_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row[0] if row else None
+def get_linked_anilist(discord_id: int):
+    """Retourne le pseudo AniList lié à un utilisateur Discord."""
+    links = load_links()
+    return links.get(str(discord_id))
 
 def get_user_next_airing_one(username: str):
     """
-    Retourne le prochain épisode à venir depuis la liste AniList d'un utilisateur.
+    Retourne le prochain épisode à venir pour un utilisateur AniList.
     """
     query = """
     query ($userName: String) {
@@ -1028,7 +1024,6 @@ def get_user_next_airing_one(username: str):
         lists {
           entries {
             media {
-              id
               title {
                 romaji
                 english
@@ -1049,17 +1044,17 @@ def get_user_next_airing_one(username: str):
     }
     """
     data = query_anilist(query, {"userName": username})
+
     entries = []
-    for l in data.get("MediaListCollection", {}).get("lists", []):
-        for e in l.get("entries", []):
-            media = e.get("media")
+    for lst in data.get("MediaListCollection", {}).get("lists", []):
+        for entry in lst.get("entries", []):
+            media = entry.get("media")
             if media.get("nextAiringEpisode"):
                 entries.append(media)
 
     if not entries:
         return None
 
-    # trier par date
     entries.sort(key=lambda m: m["nextAiringEpisode"]["airingAt"])
     m = entries[0]
     return {
