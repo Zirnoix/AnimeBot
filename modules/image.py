@@ -38,7 +38,7 @@ def generate_next_card(anime: Dict[str, Any], out_path: str = "/tmp/next_card.pn
     H = int(base_H * scale)
 
     cover = _fetch_image(anime.get("cover"))
-    bg = _fit_cover(cover, (W, H)).filter(ImageFilter.GaussianBlur(int(30 * scale))).convert("RGBA")
+    bg = _fit_cover(cover, (W, H)).filter(ImageFilter.GaussianBlur(int(15 * scale))).convert("RGBA")
 
     # --- VIGNETTE & GRADIENT ---
     vignette = Image.new("L", (W, H), 0)
@@ -176,7 +176,7 @@ def generate_next_card(anime: Dict[str, Any], out_path: str = "/tmp/next_card.pn
     out = bg.convert("RGB")
 
     # Downscale final propre en 1920x1080 (lisible + poids raisonnable)
-    final_w = 1920
+    final_w = 1280
     final_h = int(final_w * 9 / 16)
     out = out.resize((final_w, final_h), Image.LANCZOS)
 
