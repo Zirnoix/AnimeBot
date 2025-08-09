@@ -24,6 +24,7 @@ from typing import Any, Optional, Dict, List, Set, Union, Tuple, Iterable
 import discord
 import requests
 import pytz
+from zineinfo import ZoneInfo
 import aiohttp
 import aiofiles
 from babel.dates import format_datetime
@@ -44,61 +45,6 @@ logger = logging.getLogger(__name__)
 ###############################################################################
 # Configuration et chemins
 ###############################################################################
-
-THEME = {
-    "primary": 0x5865F2,   # violet Discord
-    "success": 0x43B581,   # vert
-    "warning": 0xFAA61A,   # orange
-    "danger":  0xF04747,   # rouge
-    "muted":   0x2F3136,   # gris
-    "accent":  0x00B0F4,   # bleu clair
-    "bg":      0x111318,   # fond
-}
-
-EMOJI = {
-    "next": "⏭️",
-    "date": "📅",
-    "clock": "⏰",
-    "episode": "🎬",
-    "tv": "📺",
-    "user": "🧑",
-    "stats": "📊",
-    "ok": "✅",
-    "warn": "⚠️",
-    "dot": "•",
-}
-
-def make_embed(
-    title: str,
-    description: Optional[str] = None,
-    color: int = THEME["primary"],
-    icon_url: Optional[str] = None,
-    footer: Optional[str] = None,
-) -> discord.Embed:
-    e = discord.Embed(title=title, description=description or discord.Embed.Empty, color=color)
-    e.timestamp = datetime.utcnow()
-    if footer:
-        e.set_footer(text=footer)
-    if icon_url:
-        e.set_author(name=title, icon_url=icon_url)
-        e.title = discord.Embed.Empty
-    return e
-
-def add_fields(embed: discord.Embed, pairs: Iterable[Tuple[str, str]], inline: bool = False) -> None:
-    for name, value in pairs:
-        embed.add_field(name=name, value=value, inline=inline)
-
-def text_bar(current: int, total: int, width: int = 14) -> str:
-    total = max(total, 1)
-    filled = int(round(width * current / total))
-    empty = width - filled
-    return f"[{'█'*filled}{'—'*empty}] {current}/{total}"
-
-def fmt_anime_line(title: str, ep: int, when_txt: str) -> str:
-    return f"{EMOJI['episode']} **EP {ep}** — {title}\n{EMOJI['clock']} {when_txt}"
-
-def safe(text: Optional[str]) -> str:
-    return text or "—"
     
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'assets')
@@ -278,7 +224,55 @@ def get_title_for_level(level: int) -> str:
             break
     return current_title
 
+def format_airing_datetime_fr(ts: int, tz_name: str = "Europe/Paris") -> str:
+    if not ts:
+        return "date inconnue"
+    dt_local = datetime.fromtimestamp(ts, tz=ZoneInfo(tz_name))
+    # ex: "sam. 9 août 14:30"
+    months = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+    weekdays = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
+    wd = weekdays[dt_local.weekday()]
+    mo = months[dt_local.month - 1]
+    return f"{wd} {dt_local.day} {mo} {dt_local:%H:%M}"
 
+def get_next_airing_one() -> Optional[Dict[str, Any]]:
+    """
+    Récupère le tout prochain épisode à sortir (global).
+    Champs : title_*, episode, airingAt, cover, genres
+    """
+    query = """
+    query {
+      Page(perPage: 1){
+        airingSchedules(notYetAired:true, sort: TIME){
+          airingAt
+          episode
+          media{
+            id
+            title{ romaji english native }
+            coverImage{ extraLarge large }
+            genres
+          }
+        }
+      }
+    }
+    """
+    data = query_anilist(query, variables=None)
+    schedules = (data or {}).get("data", {}).get("Page", {}).get("airingSchedules", []) or []
+    if not schedules:
+        return None
+    s = schedules[0]
+    m = s.get("media") or {}
+    t = m.get("title") or {}
+    return {
+        "airingAt": s.get("airingAt"),
+        "episode": s.get("episode"),
+        "title_romaji": t.get("romaji"),
+        "title_english": t.get("english"),
+        "title_native": t.get("native"),
+        "cover": ((m.get("coverImage") or {}).get("extraLarge")
+                  or (m.get("coverImage") or {}).get("large")),
+        "genres": m.get("genres") or [],
+    }
 
 
 def load_mini_scores() -> dict:
