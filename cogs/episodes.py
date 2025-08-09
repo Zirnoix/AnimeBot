@@ -119,26 +119,41 @@ class Episodes(commands.Cog):
         
     @commands.command(name="monnext")
     async def monnext_cmd(self, ctx):
-        # Récupère les séries suivies par l’utilisateur + prochain épisode
-        items = core.get_user_next_airing(ctx.author.id, limit=8)  # adapte au nom réel
-        if not items:
-            await ctx.send(f"{EMOJI['warn']} Rien à venir pour toi pour l’instant.")
+        """Affiche le prochain épisode pour l'utilisateur qui lance la commande (via son AniList)."""
+        try:
+            username = core.get_linked_anilist(ctx.author.id)  # récupère le pseudo AniList lié
+        except Exception as e:
+            await ctx.send(f"⚠️ Erreur en récupérant ton AniList.\n`{type(e).__name__}: {e}`")
             return
 
-        title = f"{EMOJI['next']} Tes prochains épisodes"
-        e = make_embed(title=title, color=THEME["success"], footer=f"{ctx.author.display_name}")
-        if ctx.author.display_avatar:
-            e.set_thumbnail(url=ctx.author.display_avatar.url)
+        if not username:
+            await ctx.send("⚠️ Tu n'as pas lié ton AniList. Utilise `!linkanilist <pseudo>` pour le lier.")
+            return
 
-        lines = []
-        for it in items:
-            t = safe(it.get("title_romaji") or it.get("title_english") or it.get("title_native"))
-            ep = it.get("episode") or 1
-            when_txt = core.humanize_airing_time(it)
-            lines.append(fmt_anime_line(t, ep, when_txt))
+        try:
+            item = core.get_user_next_airing_one(username)  # fonction à créer dans core.py
+        except Exception as e:
+            await ctx.send(f"⚠️ Impossible de récupérer ton prochain épisode.\n`{type(e).__name__}: {e}`")
+            return
 
-        add_fields(e, [(f"{EMOJI['tv']} À venir pour toi", "\n\n".join(lines))], inline=False)
-        await ctx.send(embed=e)
+        if not item:
+            await ctx.send("⚠️ Aucun épisode à venir trouvé pour ton AniList.")
+            return
+
+        # format FR
+        item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
+
+        # génère la carte compacte
+        img_path = generate_next_card(
+            item,
+            out_path="/tmp/monnext_card.png",
+            scale=1.2,
+            blur=10,
+            padding=40
+        )
+
+        await ctx.send(file=discord.File(img_path, filename=f"monnext_{int(time())}.png"))
+
 
     @commands.command(name="planning")
     async def planning(self, ctx: commands.Context) -> None:
