@@ -96,18 +96,19 @@ class Episodes(commands.Cog):
     @commands.command(name="next")
     async def next_cmd(self, ctx):
         try:
-            item = core.get_my_next_airing_one()  # <-- TON AniList via variable env
+            item = core.get_my_next_airing_one()
         except Exception as e:
             await ctx.send(f"⚠️ Impossible de récupérer le prochain épisode.\n`{type(e).__name__}: {e}`")
             return
 
         if not item:
-            await ctx.send("⚠️ Aucun épisode à venir trouvé.")
+            await ctx.send("⚠️ Aucun épisode à venir trouvé (ou ANILIST_USERNAME manquant).")
             return
 
         item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
 
-        img_path = generate_next_card(item, out_path="/tmp/next_card.png")
+        # *** plus grand et super lisible ***
+        img_path = generate_next_card(item, out_path="/tmp/next_card.png", scale=1.8)  # 1.8 = XXL
 
         embed = discord.Embed(title="⏭️ Prochain épisode", color=0x00B0F4)
         embed.set_image(url="attachment://next_card.png")
