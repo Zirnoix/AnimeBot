@@ -176,7 +176,7 @@ def generate_next_card(anime: Dict[str, Any], out_path: str = "/tmp/next_card.pn
     out = bg.convert("RGB")
 
     # Downscale final FORCÉ à 900px (pour Discord)
-    final_w = 900
+    final_w = 780
     final_h = int(final_w * 9 / 16)
     out = out.resize((final_w, final_h), Image.LANCZOS)
 
