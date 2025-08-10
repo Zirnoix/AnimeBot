@@ -489,7 +489,7 @@ class Quiz(commands.Cog):
 
             xp = user_data["xp"]
             level = user_data["level"]
-            next_xp = (level + 1) * 100
+            next_xp = xp_for_next_level(level)
 
             # Création de l'embed
             embed = discord.Embed(
