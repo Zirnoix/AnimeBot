@@ -59,7 +59,7 @@ class HigherLowerView(View):
             await interaction.response.send_message(
                 f"✅ Bravo ! **{self.choice1['title']['romaji']}** ({pop1}) vs **{self.choice2['title']['romaji']}** ({pop2})\nTu gagnes **5 XP** !"
             )
-            core.add_xp(self.ctx.author.id, 5)
+            await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
             core.add_mini_score(self.ctx.author.id, "higherlower", 1)
         else:
             await interaction.response.send_message(
@@ -198,7 +198,7 @@ class MiniGames(commands.Cog):
                 guessed_year = int(msg.content.strip())
                 if abs(guessed_year - year) <= 1:
                     await ctx.send(f"✅ Bravo ! L'année était bien **{year}** (tu as répondu {guessed_year}). Tu gagnes 8 XP !")
-                    core.add_xp(ctx.author.id, 8)
+                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
                     core.add_mini_score(ctx.author.id, "guessyear", 1)
                 else:
                     await ctx.send(f"❌ Raté. L'année était **{year}** (tu as répondu {guessed_year}).")
@@ -264,7 +264,7 @@ class MiniGames(commands.Cog):
                 tolerance = max(int(episodes * 0.1), 5)
                 if abs(guessed - episodes) <= tolerance:
                     await ctx.send(f"✅ Bravo ! **{title}** compte {episodes} épisodes (tu as répondu {guessed}). Tu gagnes 8 XP !")
-                    core.add_xp(ctx.author.id, 8)
+                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
                     core.add_mini_score(ctx.author.id, "guessepisodes", 1)
                 else:
                     await ctx.send(f"❌ Raté. **{title}** compte {episodes} épisodes (tu as répondu {guessed}).")
@@ -327,7 +327,7 @@ class MiniGames(commands.Cog):
             guess = msg.content.strip().lower()
             if guess in [g.lower() for g in genres]:
                 await ctx.send(f"✅ Exact ! Les genres de **{title}** incluent {', '.join(anime['genres'])}. Tu gagnes 5 XP !")
-                core.add_xp(ctx.author.id, 5)
+                await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
                 core.add_mini_score(ctx.author.id, "guessgenre", 1)
             else:
                 await ctx.send(f"❌ Mauvaise réponse. Les genres de **{title}** étaient : {', '.join(anime['genres'])}.")
@@ -386,7 +386,7 @@ class MiniGames(commands.Cog):
 
             if index == correct_index:
                 await interaction.response.edit_message(content="✅ Bien joué ! Tu gagnes 5 XP !", view=None)
-                core.add_xp(ctx.author.id, 5)
+                await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
                 core.add_mini_score(ctx.author.id, "guesscharacter", 1)
             else:
                 await interaction.response.edit_message(content=f"❌ Mauvaise réponse ! C'était : **{correct_name}**", view=None)
@@ -471,7 +471,7 @@ class MiniGames(commands.Cog):
 
                 if choice == correct_index:
                     await ctx.send("✅ Bonne réponse ! Tu gagnes 5 XP !")
-                    core.add_xp(ctx.author.id, 5)
+                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
                     core.add_mini_score(ctx.author.id, "guessop", 1)
                 else:
                     await ctx.send(f"❌ Mauvaise réponse ! C'était : **{correct_anime}**")
