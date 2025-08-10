@@ -168,6 +168,11 @@ def save_json(path: str, data: Any) -> None:
 # Gestion des scores, niveaux et mini-jeux
 ###############################################################################
 
+def xp_for_next_level(level: int) -> int:
+    base_xp = 50
+    growth = 1.08
+    return int(base_xp * (growth ** level))
+
 def load_scores() -> dict:
     """Charge les scores du quiz."""
     return load_json(FileConfig.QUIZ_SCORES, {})
