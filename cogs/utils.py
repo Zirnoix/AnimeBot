@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
-
+import time
 import discord
 from discord.ext import commands
 
@@ -21,37 +21,45 @@ class Utils(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self.start_time = time.time()
+
+    @commands.command(name="ping")
+    async def ping(self, ctx):
+        """Affiche la latence du bot."""
+        latency = round(self.bot.latency * 1000)  # en ms
+        await ctx.send(f"🏓 Pong ! Latence : **{latency} ms**")
 
     @commands.command(name="uptime")
-    async def uptime(self, ctx: commands.Context) -> None:
-        """Indique depuis combien de temps le bot est actif."""
-        start: datetime = getattr(self.bot, "uptime_start", None)
-        if not start:
-            await ctx.send("⏱️ Uptime non disponible.")
-            return
+    async def uptime(self, ctx):
+        """Affiche depuis combien de temps le bot est en ligne."""
+        delta = time.time() - self.start_time
+        days = int(delta // 86400)
+        hours = int((delta % 86400) // 3600)
+        minutes = int((delta % 3600) // 60)
+        seconds = int(delta % 60)
+        await ctx.send(f"⏳ Uptime : **{days}j {hours}h {minutes}m {seconds}s**")
 
-        now = datetime.utcnow()
-        delta = now - start
-        days, remainder = divmod(int(delta.total_seconds()), 86400)
-        hours, remainder = divmod(remainder, 3600)
-        minutes, seconds = divmod(remainder, 60)
-
-        # Construction du message avec les unités appropriées
-        parts = []
-        if days > 0:
-            parts.append(f"{days} jour{'s' if days > 1 else ''}")
-        if hours > 0:
-            parts.append(f"{hours} heure{'s' if hours > 1 else ''}")
-        if minutes > 0:
-            parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
-
-        desc = f"🕒 **AnimeBot actif depuis :** {', '.join(parts)}"
+    @commands.command(name="botinfo")
+    async def botinfo(self, ctx):
+        """Affiche des infos sur le bot."""
         embed = discord.Embed(
-            title="Uptime du bot",
-            description=desc,
-            color=discord.Color.green()
+            title="🤖 Infos sur le bot",
+            description="Un bot Discord dédié à l’univers des animés, avec AniList, quiz et plus encore !",
+            color=discord.Color.blue()
         )
+        embed.add_field(name="Créateur", value="**Julien**", inline=True)
+        embed.add_field(name="Langage", value="Python", inline=True)
+        embed.add_field(name="Librairie", value=f"discord.py {discord.__version__}", inline=True)
+        embed.add_field(name="Système", value=platform.system(), inline=True)
+        embed.add_field(name="Version Python", value=platform.python_version(), inline=True)
+        embed.set_footer(text=f"Demandé par {ctx.author}", icon_url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed)
+
+    @commands.command(name="source")
+    async def source(self, ctx):
+        """Affiche le lien vers le code source du bot."""
+        await ctx.send("📦 Code source du bot : [GitHub](https://github.com/Zirnoix/AnimeBot)")
+
 
     @commands.command(name="setalert")
     async def setalert(self, ctx: commands.Context, time_str: str) -> None:
@@ -132,5 +140,5 @@ class Utils(commands.Cog):
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot):
     await bot.add_cog(Utils(bot))
