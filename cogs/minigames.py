@@ -164,7 +164,7 @@ class MiniGames(commands.Cog):
             media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
               title { romaji }
               startDate { year }
-              coverImage { medium }
+              coverImage { extraLarge }
             }
           }
         }
@@ -186,9 +186,9 @@ class MiniGames(commands.Cog):
                 ),
                 color=discord.Color.purple(),
             )
-            img_url = anime.get("coverImage", {}).get("medium")
+            img_url = anime.get("coverImage", {}).get("extraLarge")
             if img_url:
-                embed.set_thumbnail(url=img_url)
+                embed.set_image(url=img_url)
             await ctx.send(embed=embed)
 
             def check(m: discord.Message) -> bool:
@@ -208,58 +208,6 @@ class MiniGames(commands.Cog):
         except (Exception, asyncio.TimeoutError):
             await ctx.send("❌ Une erreur s'est produite ou temps écoulé.")
 
-    @commands.command(name="highermean")
-    async def higher_mean(self, ctx: commands.Context) -> None:
-        """Compare les notes moyennes de deux animes."""
-        await ctx.send("📊 Préparation du mini‑jeu…")
-        page = random.randint(1, 10)
-        query = '''
-        query ($page: Int) {
-          Page(perPage: 50, page: $page) {
-            media(type: ANIME, isAdult: false, sort: SCORE_DESC) {
-              title { romaji }
-              meanScore
-              coverImage { medium }
-            }
-          }
-        }
-        '''
-        data = core.query_anilist(query, {"page": page})
-        try:
-            anime_list = data["data"]["Page"]["media"]
-            if len(anime_list) < 2:
-                await ctx.send("❌ Pas assez d'animes pour jouer.")
-                return
-
-            a1, a2 = random.sample(anime_list, 2)
-            t1, s1 = a1["title"]["romaji"], a1.get("meanScore", 0)
-            t2, s2 = a2["title"]["romaji"], a2.get("meanScore", 0)
-
-            embed = discord.Embed(
-                title="🎖️ Mini‑jeu : Quelle note est la plus haute ?",
-                description=(
-                    "Réponds `1` ou `2` selon toi.\n"
-                    f"1️⃣ {t1}\n"
-                    f"2️⃣ {t2}"
-                ),
-                color=discord.Color.green(),
-            )
-            await ctx.send(embed=embed)
-
-            def check(m: discord.Message) -> bool:
-                return m.author == ctx.author and m.channel == ctx.channel and m.content.strip() in {"1", "2"}
-
-            msg = await self.bot.wait_for("message", timeout=15.0, check=check)
-            answer = msg.content.strip()
-            correct = "1" if s1 >= s2 else "2"
-            if answer == correct:
-                await ctx.send(f"✅ Bien joué ! **{t1}** : {s1}/100 – **{t2}** : {s2}/100. Tu gagnes 5 XP !")
-                core.add_xp(ctx.author.id, 5)
-                core.add_mini_score(ctx.author.id, "highermean", 1)
-            else:
-                await ctx.send(f"❌ Mauvais choix. **{t1}** : {s1}/100, **{t2}** : {s2}/100.")
-        except (Exception, asyncio.TimeoutError):
-            await ctx.send("❌ Une erreur s'est produite ou temps écoulé.")
 
     @commands.command(name="guessepisodes")
     async def guess_episodes(self, ctx: commands.Context) -> None:
@@ -274,7 +222,7 @@ class MiniGames(commands.Cog):
                 media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
                   title { romaji }
                   episodes
-                  coverImage { medium }
+                  coverImage { extraLarge }
                 }
               }
             }
@@ -302,9 +250,9 @@ class MiniGames(commands.Cog):
             ),
             color=discord.Color.blue(),
         )
-        img_url = anime.get("coverImage", {}).get("medium")
+        img_url = anime.get("coverImage", {}).get("extraLarge")
         if img_url:
-            embed.set_thumbnail(url=img_url)
+            embed.set_image(url=img_url)
         await ctx.send(embed=embed)
 
         def check(m: discord.Message) -> bool:
@@ -339,7 +287,7 @@ class MiniGames(commands.Cog):
                 media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
                   title { romaji }
                   genres
-                  coverImage { medium }
+                  coverImage { extraLarge }
                 }
               }
             }
@@ -367,9 +315,9 @@ class MiniGames(commands.Cog):
             ),
             color=discord.Color.magenta(),
         )
-        img_url = anime.get("coverImage", {}).get("medium")
+        img_url = anime.get("coverImage", {}).get("extraLarge")
         if img_url:
-            embed.set_thumbnail(url=img_url)
+            embed.set_image(url=img_url)
         await ctx.send(embed=embed)
 
         def check(m: discord.Message) -> bool:
