@@ -22,7 +22,8 @@ class Help(commands.Cog):
                 "`!animequiz` - Trouve l'anime à partir du résumé\n"
                 "`!animequizmulti` - Version multi-joueurs\n"
                 "`!quiztop` - Classement des meilleurs joueurs\n"
-                "`!higherlower`, `!guessyear`, `!guessop`...\n"
+                "`!higherlower`, `!guessyear`, `!guessop`\n"
+                "`!guessepisodes`, `!guessgenre`\n"
             ),
             inline=False
         )
@@ -42,7 +43,7 @@ class Help(commands.Cog):
             value=(
                 "`!myrank` - Voir ton rang actuel\n"
                 "`!stats` - Statistiques AniList\n"
-                "`!profile` - Carte de profil animée"
+                "`!mycard` - Carte de profil AnimeBot"
             ),
             inline=False
         )
