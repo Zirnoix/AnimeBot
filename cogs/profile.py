@@ -1,4 +1,4 @@
-
+        
 """
 Module de commandes pour l'affichage des cartes de profil et de membre.
 
@@ -51,17 +51,40 @@ class Profile(commands.Cog):
         xp = user_data.get("xp", 0)
         level = user_data.get("level", 0)
         next_xp = (level + 1) * 100
-        progress = int((xp / next_xp) * 20)
 
-        # Barre de progression colorée
-        PROGRESS_COLORS = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪"]
+        # Progression (max 20 segments)
+        total_segments = 20
+        progress = max(0, min(total_segments, int((xp / next_xp) * total_segments)))
 
-        if level >= 150:
-            bar = "🌈" * progress + "⬛" * (20 - progress)
+        # Couleurs par palier
+        level_colors = [
+            (150, "🌈"),  # arc-en-ciel
+            (140, "⬜"),
+            (130, "🟫"),
+            (120, "🟪"),
+            (110, "🟦"),
+            (100, "🟩"),
+            (90, "🟥"),
+            (80, "🟧"),
+            (70, "🟨"),
+            (60, "⬜"),
+            (50, "🟫"),
+            (40, "🟪"),
+            (30, "🟦"),
+            (20, "🟥"),
+            (10, "🟦"),
+            (0, "🟩"),
+        ]
+
+        color_emoji = next(c for lvl, c in level_colors if level >= lvl)
+
+        # Construction de la barre
+        if color_emoji == "🌈":
+            filled = "🌈" * progress
         else:
-            bar = "".join(PROGRESS_COLORS[i % len(PROGRESS_COLORS)] for i in range(progress))
-            bar += "⬛" * (20 - progress)
-
+            filled = color_emoji * progress
+        empty = "⬛" * (total_segments - progress)
+        bar = filled + empty
 
         # Titre actuel
         title = core.get_title_for_level(level)
@@ -108,9 +131,10 @@ class Profile(commands.Cog):
             for g, v in mini_scores.items():
                 name = mapping.get(g, g.replace("_", " ").capitalize())
                 value += f"• **{name}** : {v}\n"
-            embed.add_field(name="🎮 Mini‑jeux", value=value, inline=False)
+            embed.add_field(name="🎮 Mini-jeux", value=value, inline=False)
 
         await ctx.send(embed=embed)
+
 
 
 async def setup(bot: commands.Bot) -> None:
