@@ -22,7 +22,6 @@ from typing import Optional
 from discord.ui import View, Button
 import discord
 from discord.ext import commands
-
 from modules import core
 
 class HigherLowerView(View):
@@ -337,7 +336,7 @@ class MiniGames(commands.Cog):
 
     @commands.command(name="guesscharacter")
     async def guess_character(self, ctx: commands.Context) -> None:
-        """Devine le personnage d'anime affiché."""
+        """Devine le personnage d'anime affiché (avec boutons)."""
         page = random.randint(1, 100)
         query = '''
         query ($page: Int) {
@@ -359,48 +358,46 @@ class MiniGames(commands.Cog):
             await ctx.send("❌ Impossible de récupérer les personnages.")
             return
 
-        try:
-            characters = data["data"]["Page"]["characters"]
-            if len(characters) < 4:
-                await ctx.send("❌ Pas assez de personnages trouvés.")
+        characters = data["data"]["Page"]["characters"]
+        if len(characters) < 4:
+            await ctx.send("❌ Pas assez de personnages trouvés.")
+            return
+
+        correct = random.choice(characters)
+        correct_name = correct["name"]["full"]
+        correct_image = correct["image"]["large"]
+        options = [c["name"]["full"] for c in characters]
+        correct_index = options.index(correct_name)
+
+        embed = discord.Embed(
+            title="👤 Devine le personnage !",
+            description="Clique sur le bouton correspondant au bon nom.",
+            color=discord.Color.blurple()
+        )
+        embed.set_image(url=correct_image)
+
+        # Vue avec boutons
+        view = View(timeout=20)
+    
+        async def make_button_callback(interaction, index):
+            if interaction.user != ctx.author:
+                await interaction.response.send_message("❌ Ce n'est pas ton quiz !", ephemeral=True)
                 return
 
-            correct = random.choice(characters)
-            correct_name = correct["name"]["full"]
-            correct_image = correct["image"]["large"]
-            options = [c["name"]["full"] for c in characters]
-            correct_index = options.index(correct_name)
-
-            embed = discord.Embed(
-                title="👤 Devine le personnage !",
-                description="Quel est le nom de ce personnage ?",
-                color=discord.Color.blurple()
-            )
-            embed.set_image(url=correct_image)
-            for i, opt in enumerate(options, 1):
-                embed.add_field(name=f"{i}️⃣", value=opt, inline=False)
-            await ctx.send(embed=embed)
-
-            def check(m: discord.Message) -> bool:
-                return (m.author == ctx.author and
-                        m.channel == ctx.channel and
-                        m.content.isdigit() and
-                        1 <= int(m.content) <= 4)
-
-            msg = await self.bot.wait_for("message", timeout=20.0, check=check)
-            choice = int(msg.content) - 1
-
-            if choice == correct_index:
-                await ctx.send("✅ Bien joué ! Tu gagnes 5 XP !")
+            if index == correct_index:
+                await interaction.response.edit_message(content="✅ Bien joué ! Tu gagnes 5 XP !", view=None)
                 core.add_xp(ctx.author.id, 5)
                 core.add_mini_score(ctx.author.id, "guesscharacter", 1)
             else:
-                await ctx.send(f"❌ Mauvaise réponse ! C'était : **{correct_name}**")
+                await interaction.response.edit_message(content=f"❌ Mauvaise réponse ! C'était : **{correct_name}**", view=None)
 
-        except asyncio.TimeoutError:
-            await ctx.send(f"⏰ Temps écoulé ! C'était : **{correct_name}**")
-        except Exception as e:
-            await ctx.send("❌ Une erreur s'est produite.")
+        # Création des boutons
+        for i, opt in enumerate(options):
+            btn = Button(label=opt, style=discord.ButtonStyle.primary)
+            btn.callback = lambda interaction, idx=i: make_button_callback(interaction, idx)
+            view.add_item(btn)
+
+        await ctx.send(embed=embed, view=view)
 
     @commands.command(name="guessop")
     async def guess_op(self, ctx: commands.Context) -> None:
