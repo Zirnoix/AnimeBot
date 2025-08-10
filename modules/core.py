@@ -193,31 +193,27 @@ def save_levels(data: dict) -> None:
     save_json(FileConfig.LEVELS, data)
 
 
-def add_xp(user_id: int, amount: int = 10) -> tuple[bool, int]:
-    """Ajoute de l'XP à un utilisateur et gère le level up.
+async def add_xp(bot, channel, user_id: int, amount: int):
+    levels = load_levels()
+    user_data = levels.get(str(user_id), {"xp": 0, "level": 0})
+    old_level = user_data["level"]
 
-    Args:
-        user_id: ID Discord de l'utilisateur
-        amount: Quantité d'XP à ajouter
+    # Ajout XP
+    user_data["xp"] += amount
 
-    Returns:
-        Tuple (level_up, new_level)
-    """
-    uid = str(user_id)
-    data = load_levels()
-    if uid not in data:
-        data[uid] = {'xp': 0, 'level': 0}
+    # Vérifie plusieurs level-up d'un coup si gros gain
+    while user_data["xp"] >= (user_data["level"] + 1) * 100:
+        user_data["xp"] -= (user_data["level"] + 1) * 100
+        user_data["level"] += 1
 
-    data[uid]['xp'] += amount
-    leveled_up = False
+    levels[str(user_id)] = user_data
+    save_levels(levels)
 
-    while data[uid]['xp'] >= (data[uid]['level'] + 1) * 100:
-        data[uid]['xp'] -= (data[uid]['level'] + 1) * 100
-        data[uid]['level'] += 1
-        leveled_up = True
+    # Annonce automatique si level augmenté
+    if user_data["level"] > old_level:
+        title = get_title_for_level(user_data["level"])
+        await channel.send(f"🎉 **<@{user_id}>** vient de passer au niveau **{user_data['level']}** ({title}) !")
 
-    save_levels(data)
-    return leveled_up, data[uid]['level']
 
 
 def get_title_for_level(level: int) -> str:
