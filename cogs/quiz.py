@@ -172,7 +172,7 @@ class Quiz(commands.Cog):
                     core.save_scores(scores)
 
                     xp_amount = 5 if difficulty == "easy" else 10 if difficulty == "normal" else 15
-                    core.add_xp(ctx.author.id, xp_amount)
+                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 12)
                     core.add_mini_score(ctx.author.id, "animequiz", 1)
 
                     # Show other possible titles
@@ -279,7 +279,7 @@ class Quiz(commands.Cog):
                 scores[uid] = scores.get(uid, 0) + score
 
             core.save_scores(scores)
-            core.add_xp(ctx.author.id, total_xp)
+            await core.add_xp(self.bot, ctx.channel, ctx.author.id, total_xp, do_level=False)
 
             # Embed de résultat final
             embed = discord.Embed(
@@ -399,7 +399,7 @@ class Quiz(commands.Cog):
                     f"**{ctx.author.display_name}** {s1} - {s2} **{opponent.display_name}**\n"
                     f"🎖️ +20 XP pour le vainqueur !"
                 )
-                core.add_xp(winner.id, 20)
+                await core.add_xp(self.bot, ctx.channel, ctx.author.id, 20)
                 core.add_mini_score(winner.id, "duel", 1)
 
             await ctx.send(embed=embed)
