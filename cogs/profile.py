@@ -50,7 +50,7 @@ class Profile(commands.Cog):
         user_data = levels.get(user_id, {"xp": 0, "level": 0})
         xp = user_data.get("xp", 0)
         level = user_data.get("level", 0)
-        next_xp = (level + 1) * 100
+        next_xp = xp_for_next_level(level)
 
         # Progression (max 20 segments)
         total_segments = 20
