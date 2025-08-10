@@ -42,7 +42,7 @@ class Help(commands.Cog):
             name="🧑 Profil & Statistiques",
             value=(
                 "`!myrank` - Voir ton rang actuel\n"
-                "`!stats` - Statistiques AniList\n"
+                "`!mystats` - Statistiques AniList\n"
                 "`!mycard` - Carte de profil AnimeBot"
             ),
             inline=False
