@@ -95,24 +95,29 @@ GENRE_EMOJIS = {
     "Psychological": "🧠", "Thriller": "🔪"
 }
 
-# Titres de niveaux
+# Titres de niveaux (paliers de 5 niveaux)
 LEVEL_TITLES = [
     (0, "👶 Nouveau"),
-    (10, "🌱 Apprenti"),
-    (20, "📘 Amateur"),
-    (30, "📚 Otaku Confirmé"),
-    (40, "🎯 Expert"),
-    (50, "🔥 Maître Otaku"),
-    (60, "🧠 Sensei"),
-    (70, "🧩 Stratège"),
-    (80, "🏆 Champion"),
-    (90, "🌟 Légende Locale"),
-    (100, "💎 Légende Nationale"),
-    (110, "🗿 Icône Anime"),
-    (120, "🐉 Mythe"),
-    (130, "🛐 Dieu Otaku"),
-    (140, "☄️ Divinité Universelle"),
-    (150, "🔮 Omniscient Otaku")
+    (5, "🌱 Apprenti"),
+    (10, "📘 Amateur"),
+    (15, "📚 Otaku Confirmé"),
+    (20, "🎯 Expert"),
+    (25, "🔥 Maître Otaku"),
+    (30, "🧠 Sensei"),
+    (35, "🧩 Stratège"),
+    (40, "🏆 Champion"),
+    (45, "🌟 Légende Locale"),
+    (50, "💎 Légende Nationale"),
+    (55, "🗿 Icône Anime"),
+    (60, "🐉 Mythe"),
+    (65, "🛐 Dieu Otaku"),
+    (70, "☄️ Divinité Universelle"),
+    (75, "🔮 Omniscient Otaku"),
+    (80, "⚡ Maître des Éclairs"),
+    (85, "🌌 Voyageur Galactique"),
+    (90, "🏮 Gardien des Animes"),
+    (95, "🎭 Maître des Illusions"),
+    (100, "👑 Roi des Otakus")
 ]
 
 
