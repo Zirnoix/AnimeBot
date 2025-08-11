@@ -38,17 +38,28 @@ def _key(anime: Dict[str, Any], tag: str) -> str:
     e = str(anime.get("episode") or "?")
     return f"{t}|{e}|{tag}"
 
-def _should_alert(anime: Dict[str, Any], minutes_before: int) -> bool:
+def _should_alert(anime: Dict[str, Any], minutes_before: int, slack: int = 120) -> bool:
+    """
+    Déclenche si on est dans [target - slack, target + slack] autour de l’instant visé.
+    slack par défaut = 120s pour tolérer la loop 60s + jitter.
+    """
     airing = anime.get("airingAt")
     if not airing:
         return False
-    diff = airing - _now_ts()
-    target = minutes_before * 60
-    # fenêtre 60s autour du point visé
-    return 0 <= (target - diff) <= 60
+    diff = airing - _now_ts()          # secondes avant l’airing
+    target = minutes_before * 60       # 0 pour “à l’heure”, 1800 pour -30 min
+    return abs(diff - target) <= slack
 
 def _fmt_when(anime: Dict[str, Any]) -> str:
     return core.format_airing_datetime_fr(anime.get("airingAt"), "Europe/Paris")
+
+# si on n’a pas envoyé à l’heure, mais qu’on est encore dans les 10 minutes après
+def _late_airing_should_fire(anime: Dict[str, Any], grace: int = 600) -> bool:
+    airing = anime.get("airingAt")
+    if not airing:
+        return False
+    diff = _now_ts() - airing  # depuis combien de secondes ça a commencé
+    return 0 <= diff <= grace
 
 
 class Alerts(commands.Cog):
@@ -146,7 +157,7 @@ class Alerts(commands.Cog):
             _save_sent(self.sent)
 
     # ----------- boucle: -30 min + live (0 min), tous en image -----------
-    @tasks.loop(seconds=120)
+    @tasks.loop(seconds=60)
     async def check_airing(self):
         ch = await self._get_alert_channel()
         if not ch:
@@ -162,18 +173,23 @@ class Alerts(commands.Cog):
         # 1) Planning du bot (global)
         mine = await self._my_next()
         if mine:
-            if _should_alert(mine, 30):
+            if _should_alert(mine, 30, slack=120):
                 await self._send_card_alert(ch, mine, "30img", "⏰ **Alerte 30 min**")
-            if _should_alert(mine, 0):
+            if _should_alert(mine, 0, slack=120):
                 await self._send_card_alert(ch, mine, "0img", "✅ **C’est l’heure !**")
+            elif _late_airing_should_fire(mine, grace=600):
+                await self._send_card_alert(ch, mine, "0img", "✅ **C’est l’heure !** (retard)")
 
         # 2) (Optionnel) Utilisateurs liés
         users = await self._users_next()
         for item in users:
-            if _should_alert(item, 30):
+            if _should_alert(item, 30, slack=120):
                 await self._send_card_alert(ch, item, "30img", "⏰ **Alerte 30 min**")
-            if _should_alert(item, 0):
+            if _should_alert(item, 0, slack=120):
                 await self._send_card_alert(ch, item, "0img", "✅ **C’est l’heure !**")
+            elif _late_airing_should_fire(item, grace=600):
+                await self._send_card_alert(ch, item, "0img", "✅ **C’est l’heure !** (retard)")
+
 
     @check_airing.before_loop
     async def before(self):
