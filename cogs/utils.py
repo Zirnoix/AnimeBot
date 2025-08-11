@@ -14,7 +14,7 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
-
+from modules.image import generate_next_card
 from modules import core
 
 
