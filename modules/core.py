@@ -96,7 +96,7 @@ GENRE_EMOJIS = {
 }
 
 # Titres de niveaux (paliers de 5 niveaux)
-LEVEL_TITLES = [
+LEVEL_TITLES_QUIZ = [
     (0, "👶 Nouveau"),
     (5, "🌱 Apprenti"),
     (10, "📘 Amateur"),
@@ -120,6 +120,36 @@ LEVEL_TITLES = [
     (100, "👑 Roi des Otakus")
 ]
 
+# --- Titres pour le niveau GLOBAL (XP) ---
+# paliers : +3 jusqu'à 15, +5 jusqu'à 30, puis +7 jusqu'à 150
+LEVEL_TITLES_GLOBAL = [
+    (0,   "👶 Novice"),
+    (3,   "🌱 Initié"),
+    (6,   "📗 Débutant"),
+    (9,   "🔧 Pratiquant"),
+    (12,  "🧭 Explorateur"),
+    (15,  "🎯 Approuvé"),
+    (20,  "⚔️ Aspirant"),
+    (25,  "🏹 Disciple"),
+    (30,  "🛡️ Chevalier"),
+    (37,  "🧠 Stratège"),
+    (44,  "🔥 Maître"),
+    (51,  "🌪️ Virtuose"),
+    (58,  "💎 Élite"),
+    (65,  "🌟 Héroïque"),
+    (72,  "🐉 Archon"),
+    (79,  "⚡ Dominant"),
+    (86,  "🌌 Mythique"),
+    (93,  "🏆 Parangon"),
+    (100, "👑 Souverain"),
+    (107, "🗼 Éminence"),
+    (114, "🜲 Arcaniste"),
+    (121, "🪽 Séraphin"),
+    (128, "☄️ Sidéral"),
+    (135, "🜚 Transcendant"),
+    (142, "🛐 Divin"),
+    (150, "♾️ Apothéose"),
+]
 
 ###############################################################################
 # Fonctions de gestion JSON et données de base
