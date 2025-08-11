@@ -45,8 +45,6 @@ class Help(commands.Cog):
                 "`!track add <titre>` – Ajoute un anime à ta liste\n"
                 "`!track remove <titre>` – Retire un anime de ta liste\n"
                 "`!track clear` – Vide ta liste\n\n"
-                "🔔 Tu recevras un **MP** 15 min avant la sortie du prochain épisode "
-                "des animes suivis. Les confirmations (add/remove/list) partent aussi en MP."
             ),
             inline=False
         )
