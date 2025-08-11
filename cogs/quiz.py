@@ -430,7 +430,7 @@ class Quiz(commands.Cog):
             for i, (uid, score) in enumerate(leaderboard, 1):
                 try:
                     user = await self.bot.fetch_user(int(uid))
-                    title = core.get_title_for_level(score)
+                    title = core.get_title_for_quiz_score(score)
                     medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "👑"
                     lines.append(f"{medal} **{user.display_name}** — {score} pts\n➥ *{title}*")
                 except Exception as e:
