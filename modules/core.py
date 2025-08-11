@@ -228,37 +228,37 @@ def save_levels(data: dict) -> None:
     save_json(FileConfig.LEVELS, data)
 
 
-async def add_xp(bot, channel, user_id: int, amount: int):
+async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True):
     levels = load_levels()
-    user_data = levels.get(str(user_id), {"xp": 0, "level": 0})
-    old_level = user_data["level"]
+    key = str(user_id)
+    data = levels.get(key, {"xp": 0, "level": 0})
 
-    # Ajout XP
-    user_data["xp"] += amount
+    old_level = data["level"]
+    data["xp"] = int(data.get("xp", 0)) + int(amount)
 
-    # Vérifie plusieurs level-up d'un coup si gros gain
-    while user_data["xp"] >= (user_data["level"] + 1) * 100:
-        user_data["xp"] -= (user_data["level"] + 1) * 100
-        user_data["level"] += 1
+    # IMPORTANT: utilise la même formule que mycard
+    leveled = False
+    while True:
+        need = xp_for_next_level(data["level"])
+        if data["xp"] < need:
+            break
+        data["xp"] -= need
+        data["level"] += 1
+        leveled = True
 
-    levels[str(user_id)] = user_data
+    levels[key] = data
     save_levels(levels)
 
-    # Annonce automatique si level augmenté
-    if user_data["level"] > old_level:
-        title = get_title_for_global_level(user_data["level"])
-        await channel.send(f"🎉 **<@{user_id}>** vient de passer au niveau **{user_data['level']}** ({title}) !")
+    if announce and leveled:
+        title = get_title_for_global_level(data["level"])
+        try:
+            await channel.send(
+                f"🎉 **<@{user_id}>** passe **niv. {data['level']}** ({title}) !"
+            )
+        except Exception:
+            pass
 
-
-
-def get_title_for_global_level(level: int) -> str:
-    current_title = LEVEL_TITLES_GLOBAL[0][1]
-    for req_level, title in LEVEL_TITLES_GLOBAL:
-        if level >= req_level:
-            current_title = title
-        else:
-            break
-    return current_title
+    return leveled
 
 
 def get_title_for_quiz_score(score: int) -> str:
