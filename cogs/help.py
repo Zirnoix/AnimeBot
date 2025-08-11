@@ -66,7 +66,7 @@ class Help(commands.Cog):
             inline=False
         )
 
-        embed.set_footer(text="AnimeBot • Utilise !commande pour plus d'infos.")
+        embed.set_footer(text="AnimeBot • Codé par Zirnoixd'coco.")
         await ctx.send(embed=embed)
 
 
