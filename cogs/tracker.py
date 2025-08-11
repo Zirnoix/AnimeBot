@@ -20,8 +20,8 @@ from modules.image import generate_next_card
 
 LOG = logging.getLogger(__name__)
 
-# Stockage anti-spam des alertes envoyées
-_sent_alerts: Dict[str, int] = {}  # key: user_id|title|episode, value: timestamp
+# Anti-spam (mémoire vive). Si tu veux la persistance, on pourra le passer en JSON.
+_sent_alerts: Dict[str, int] = {}  # key: user_id|title|episode|min, value: ts
 
 def _now_ts() -> int:
     return int(datetime.now(timezone.utc).timestamp())
@@ -32,6 +32,7 @@ def _should_alert(anime: Dict[str, any], minutes_before: int) -> bool:
         return False
     diff = airing - _now_ts()
     target = minutes_before * 60
+    # Fenêtre ±60s autour de l’instant "minutes_before"
     return 0 <= (target - diff) <= 60
 
 
@@ -44,6 +45,20 @@ class Tracker(commands.Cog):
 
     def cog_unload(self):
         self.alert_loop.cancel()
+
+    # ---------- Helper DM (confirmation en MP avec fallback salon) ----------
+
+    async def _dm(self, ctx: commands.Context, *, content: str | None = None, embed: discord.Embed | None = None) -> bool:
+        try:
+            await ctx.author.send(content=content, embed=embed)
+            return True
+        except discord.Forbidden:
+            # MP fermés : on prévient proprement dans le salon
+            await ctx.send("⚠️ Impossible de t'envoyer un MP. Active-les pour ce serveur (Confidentialité & sécurité).")
+        except Exception as e:
+            LOG.warning("DM failed: %s", e)
+            await ctx.send("⚠️ Impossible d'envoyer le MP (erreur inconnue).")
+        return False
 
     # ----------------- Commande principale -----------------
 
@@ -63,12 +78,13 @@ class Tracker(commands.Cog):
         tracker = core.load_tracker()
         current_list = tracker.get(str(ctx.author.id), [])
         if not current_list:
-            await ctx.send("📭 Tu ne suis aucun anime actuellement.")
+            await self._dm(ctx, content="📭 Tu ne suis aucun anime actuellement.\nUtilise `!track add <titre>` pour commencer.")
             return
 
         items_per_page = 10
-        pages = [current_list[i:i+items_per_page] for i in range(0, len(current_list), items_per_page)]
+        pages = [current_list[i:i + items_per_page] for i in range(0, len(current_list), items_per_page)]
 
+        # On envoie chaque page en MP
         for i, page in enumerate(pages, 1):
             embed = discord.Embed(
                 title=f"📌 Animes suivis par {ctx.author.display_name}",
@@ -78,7 +94,9 @@ class Tracker(commands.Cog):
             )
             if len(pages) > 1:
                 embed.set_footer(text=f"Page {i}/{len(pages)}")
-            await ctx.send(embed=embed)
+            ok = await self._dm(ctx, embed=embed)
+            if not ok:
+                break
 
     # ----------------- Ajout -----------------
 
@@ -86,13 +104,14 @@ class Tracker(commands.Cog):
     async def track_add(self, ctx: commands.Context, *, anime: str) -> None:
         matches = await self.find_anime_matches(anime)
         if not matches:
-            await ctx.send(f"❌ Aucun anime trouvé pour **{anime}**.")
+            await self._dm(ctx, content=f"❌ Aucun anime trouvé pour **{anime}**.")
             return
 
+        # Choix multiples (demande en salon pour capter la réponse facilement)
         if len(matches) > 1:
             embed = discord.Embed(
                 title="🔍 Plusieurs résultats trouvés",
-                description="Réponds avec le numéro correspondant :",
+                description="Réponds avec le **numéro** correspondant (30s) :",
                 color=discord.Color.blue()
             )
             for i, match in enumerate(matches, 1):
@@ -114,6 +133,7 @@ class Tracker(commands.Cog):
                     inline=False
                 )
             await ctx.send(embed=embed)
+
             try:
                 msg = await self.bot.wait_for(
                     "message",
@@ -134,17 +154,29 @@ class Tracker(commands.Cog):
         current_list = tracker.setdefault(uid, [])
 
         if core.normalize(title) in [core.normalize(t) for t in current_list]:
-            await ctx.send(f"⚠️ Tu suis déjà **{title}**.")
+            await self._dm(ctx, content=f"⚠️ Tu suis déjà **{title}**.")
             return
 
         current_list.append(title)
         tracker[uid] = current_list
         core.save_tracker(tracker)
-        await ctx.send(embed=discord.Embed(
+
+        info = []
+        if selected.get("nextAiringEpisode"):
+            info.append(f"• Prochain : Épisode {selected['nextAiringEpisode']['episode']}")
+        if selected.get("episodes"):
+            info.append(f"• Épisodes : {selected['episodes']}")
+        if selected.get("status"):
+            info.append(f"• Statut : {selected['status']}")
+
+        embed = discord.Embed(
             title="✅ Anime ajouté",
-            description=f"**{title}** a été ajouté à ta liste.",
+            description=f"**{title}** a été ajouté à ta liste de suivi.",
             color=discord.Color.green()
-        ))
+        )
+        if info:
+            embed.add_field(name="Informations", value="\n".join(info), inline=False)
+        await self._dm(ctx, embed=embed)
 
     # ----------------- Suppression -----------------
 
@@ -154,23 +186,25 @@ class Tracker(commands.Cog):
         uid = str(ctx.author.id)
         current_list = tracker.get(uid, [])
         if not current_list:
-            await ctx.send("❌ Ta liste est vide.")
+            await self._dm(ctx, content="❌ Ta liste est vide.")
             return
 
         matches = [t for t in current_list if core.normalize(anime) in core.normalize(t)]
         if not matches:
-            await ctx.send(f"❌ Aucun anime trouvé pour **{anime}**.")
+            await self._dm(ctx, content=f"❌ Aucun anime trouvé pour **{anime}** dans ta liste.")
             return
 
+        # Plusieurs correspondances → demande en salon, en restant court
         if len(matches) > 1:
             embed = discord.Embed(
                 title="🔍 Plusieurs correspondances trouvées",
-                description="Réponds avec le numéro à retirer :",
+                description="Réponds avec le **numéro** à retirer (30s) :",
                 color=discord.Color.blue()
             )
             for i, title in enumerate(matches, 1):
                 embed.add_field(name=f"{i}. {title}", value="‎", inline=False)
             await ctx.send(embed=embed)
+
             try:
                 msg = await self.bot.wait_for(
                     "message",
@@ -188,11 +222,8 @@ class Tracker(commands.Cog):
         current_list.remove(to_remove)
         tracker[uid] = current_list
         core.save_tracker(tracker)
-        await ctx.send(embed=discord.Embed(
-            title="✅ Anime retiré",
-            description=f"**{to_remove}** a été retiré.",
-            color=discord.Color.red()
-        ))
+
+        await self._dm(ctx, content=f"✅ **{to_remove}** a été retiré de ta liste.")
 
     # ----------------- Clear -----------------
 
@@ -201,25 +232,26 @@ class Tracker(commands.Cog):
         tracker = core.load_tracker()
         uid = str(ctx.author.id)
         if uid not in tracker or not tracker[uid]:
-            await ctx.send("📭 Ta liste est déjà vide.")
+            await self._dm(ctx, content="📭 Ta liste est déjà vide.")
             return
 
-        await ctx.send("⚠️ Es-tu sûr ? (oui/non)")
+        await ctx.send("⚠️ Confirme la suppression complète ? (`oui`/`non`, 20s)")
         try:
             msg = await self.bot.wait_for(
                 "message",
-                timeout=30.0,
-                check=lambda m: m.author == ctx.author and m.channel == ctx.channel
-                                and m.content.lower() in ["oui", "non"]
+                timeout=20.0,
+                check=lambda m: m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ("oui", "non")
             )
-            if msg.content.lower() == "oui":
-                tracker[uid] = []
-                core.save_tracker(tracker)
-                await ctx.send("✅ Liste vidée.")
-            else:
-                await ctx.send("❌ Opération annulée.")
         except asyncio.TimeoutError:
-            await ctx.send("⏰ Temps écoulé.")
+            await ctx.send("⏰ Temps écoulé, opération annulée.")
+            return
+
+        if msg.content.lower() == "oui":
+            tracker[uid] = []
+            core.save_tracker(tracker)
+            await self._dm(ctx, content="✅ Ta liste a été vidée.")
+        else:
+            await ctx.send("❌ Opération annulée.")
 
     # ----------------- Recherche AniList -----------------
 
@@ -253,36 +285,58 @@ class Tracker(commands.Cog):
     async def alert_loop(self):
         tracker = core.load_tracker()
         for uid, animes in tracker.items():
-            user = self.bot.get_user(int(uid))
+            # user peut ne pas être en cache → fetch_user en fallback
+            user = self.bot.get_user(int(uid)) or await self.bot.fetch_user(int(uid))
             if not user:
                 continue
+
             for title in animes:
                 anime = core.get_next_airing_for_title(title)
                 if not anime:
                     continue
+
                 for m in (30, 15):
-                    if _should_alert(anime, m):
-                        key = f"{uid}|{title}|{anime['episode']}|{m}"
-                        if _sent_alerts.get(key):
-                            continue
+                    if not _should_alert(anime, m):
+                        continue
+
+                    key = f"{uid}|{title}|{anime.get('episode')}|{m}"
+                    if _sent_alerts.get(key):
+                        continue
+
+                    # Génération de la carte (même style que !next)
+                    try:
                         img_path = generate_next_card(
                             anime,
                             out_path=f"/tmp/track_alert_{uid}.png",
                             scale=1.2,
                             padding=40
                         )
-                        try:
+                    except Exception as e:
+                        LOG.warning("generate_next_card failed: %s", e)
+                        img_path = None
+
+                    try:
+                        if img_path:
                             await user.send(
-                                f"⏰ **Alerte {m} min** pour ton anime suivi :",
+                                f"⏰ **Alerte {m} min** pour **{anime.get('title_romaji') or anime.get('title_english') or 'Anime'}** — Épisode {anime.get('episode')}",
                                 file=discord.File(img_path, filename=f"alert_{int(_now_ts())}.png")
                             )
-                            _sent_alerts[key] = _now_ts()
-                        except discord.Forbidden:
-                            LOG.warning(f"Impossible d'envoyer MP à {uid}")
+                        else:
+                            when = core.format_airing_datetime_fr(anime.get("airingAt"), "Europe/Paris")
+                            await user.send(
+                                f"⏰ **Alerte {m} min** — **{anime.get('title_romaji') or anime.get('title_english') or 'Anime'}** "
+                                f"(Épisode {anime.get('episode')}) • {when}"
+                            )
+                        _sent_alerts[key] = _now_ts()
+                    except discord.Forbidden:
+                        LOG.warning("MP refusés par l'utilisateur %s", uid)
+                    except Exception as e:
+                        LOG.warning("Envoi MP échoué (%s): %s", uid, e)
 
     @alert_loop.before_loop
     async def before_alert_loop(self):
         await self.bot.wait_until_ready()
+        LOG.info("Tracker: boucle de vérification démarrée.")
 
 
 async def setup(bot: commands.Bot) -> None:
