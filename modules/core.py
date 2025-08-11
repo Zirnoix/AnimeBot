@@ -260,6 +260,15 @@ async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True)
 
     return leveled
 
+def get_title_for_global_level(level: int) -> str:
+    current_title = LEVEL_TITLES_GLOBAL[0][1]
+    for req_level, title in LEVEL_TITLES_GLOBAL:
+        if level >= req_level:
+            current_title = title
+        else:
+            break
+    return current_title
+
 
 def get_title_for_quiz_score(score: int) -> str:
     current_title = LEVEL_TITLES_QUIZ[0][1]
