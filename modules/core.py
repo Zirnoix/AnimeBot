@@ -275,6 +275,42 @@ def get_next_airing_one() -> Optional[Dict[str, Any]]:
         "genres": m.get("genres") or [],
     }
 
+def get_next_airing_for_title(title: str):
+    """Retourne les infos du prochain épisode pour un titre donné."""
+    query = '''
+    query ($search: String) {
+      Media(type: ANIME, search: $search) {
+        title { romaji english native }
+        nextAiringEpisode { episode airingAt }
+        coverImage { large extraLarge }
+        format
+        season
+        seasonYear
+      }
+    }
+    '''
+    try:
+        result = query_anilist(query, {"search": title})
+        if not result or "data" not in result or not result["data"]["Media"]:
+            return None
+        media = result["data"]["Media"]
+        if not media.get("nextAiringEpisode"):
+            return None
+        return {
+            "title_romaji": media["title"]["romaji"],
+            "title_english": media["title"]["english"],
+            "title_native": media["title"]["native"],
+            "episode": media["nextAiringEpisode"]["episode"],
+            "airingAt": media["nextAiringEpisode"]["airingAt"],
+            "cover": media["coverImage"]["extraLarge"] or media["coverImage"]["large"],
+            "format": media["format"],
+            "season": media["season"],
+            "seasonYear": media["seasonYear"]
+        }
+    except Exception as e:
+        LOG.error(f"Erreur get_next_airing_for_title({title}): {e}")
+        return None
+
 
 def load_mini_scores() -> dict:
     """Charge les scores des mini-jeux."""
