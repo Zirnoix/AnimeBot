@@ -63,24 +63,37 @@ class Utils(commands.Cog):
         await ctx.send("📦 Code source du bot : https://github.com/Zirnoix/AnimeBot")
 
     @commands.command(name="setalert")
-    async def setalert(self, ctx: commands.Context, time_str: str) -> None:
-        """Définit l'heure de l'alerte quotidienne (HH:MM). Ex: !setalert 08:30"""
+    async def setalert(self, ctx: commands.Context, time_str: Optional[str] = None) -> None:
+        """Définit l'heure de l'alerte quotidienne (HH:MM). Ex: !setalert 08:30
+           Sans argument, affiche l'heure configurée actuelle."""
         try:
-            hour, minute = map(int, time_str.split(":"))
-            if not (0 <= hour < 24 and 0 <= minute < 60):
-                raise ValueError("Heure invalide")
-
             prefs = core.load_preferences()
             uid = str(ctx.author.id)
             prefs.setdefault(uid, {})
+
+            if not time_str:
+                current = prefs[uid].get("alert_time")
+                if current:
+                    return await ctx.send(f"⏰ Ton alerte quotidienne est réglée sur **{current}**.")
+                return await ctx.send("ℹ️ Aucune alerte définie. Utilise `!setalert HH:MM` (ex: `!setalert 08:30`).")
+
+            # Validation stricte HH:MM
+            parts = time_str.split(":")
+            if len(parts) != 2 or not all(p.isdigit() for p in parts):
+                raise ValueError("format")
+            hour, minute = map(int, parts)
+            if not (0 <= hour < 24 and 0 <= minute < 60):
+                raise ValueError("plage")
+
             prefs[uid]["alert_time"] = f"{hour:02d}:{minute:02d}"
             core.save_preferences(prefs)
-
             await ctx.send(f"✅ Alerte quotidienne définie à **{hour:02d}:{minute:02d}**.")
+
         except ValueError:
             await ctx.send("❌ Format invalide. Utilise `!setalert HH:MM` (ex: `!setalert 08:30`).")
         except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
+
 
     @commands.command(name="testalert")
     @commands.is_owner()
@@ -135,29 +148,33 @@ class Utils(commands.Cog):
 
     @commands.command(name="reminder")
     async def reminder(self, ctx: commands.Context, mode: Optional[str] = None) -> None:
-        """Active ou désactive les rappels d'épisodes. Ex: !reminder on / off"""
+        """Active ou désactive les rappels d'épisodes. Ex: !reminder on / off
+           Sans argument, affiche l'état actuel."""
         uid = str(ctx.author.id)
         settings = core.load_user_settings()
         settings.setdefault(uid, {})
 
         try:
             if mode:
-                mode = mode.lower()
-                if mode in {"off", "disable", "désactiver"}:
+                mode = mode.lower().strip()
+                if mode in {"off", "disable", "désactiver", "false", "0", "non", "no"}:
                     settings[uid]["reminder"] = False
-                    await ctx.send("🔕 Rappels désactivés pour toi.")
-                elif mode in {"on", "enable", "activer"}:
+                    core.save_user_settings(settings)
+                    return await ctx.send("🔕 Rappels **désactivés** pour toi.")
+                if mode in {"on", "enable", "activer", "true", "1", "oui", "yes"}:
                     settings[uid]["reminder"] = True
-                    await ctx.send("🔔 Rappels activés pour toi.")
-                else:
-                    await ctx.send("❌ Option invalide. Utilise `on` ou `off`.")
-                core.save_user_settings(settings)
-            else:
-                current = settings.get(uid, {}).get("reminder", True)
-                emoji = "🔔" if current else "🔕"
-                await ctx.send(f"{emoji} Les rappels sont actuellement **{'activés' if current else 'désactivés'}** pour toi.")
+                    core.save_user_settings(settings)
+                    return await ctx.send("🔔 Rappels **activés** pour toi.")
+                return await ctx.send("❌ Option invalide. Utilise `on` ou `off`.")
+
+            # Pas d’argument -> afficher l’état
+            current = settings.get(uid, {}).get("reminder", True)
+            emoji = "🔔" if current else "🔕"
+            await ctx.send(f"{emoji} Les rappels sont actuellement **{'activés' if current else 'désactivés'}** pour toi.")
+
         except Exception:
             await ctx.send("❌ Une erreur s'est produite.")
+
 
     @commands.command(name="setchannel")
     @commands.is_owner()
