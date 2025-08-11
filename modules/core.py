@@ -216,19 +216,30 @@ async def add_xp(bot, channel, user_id: int, amount: int):
 
     # Annonce automatique si level augmenté
     if user_data["level"] > old_level:
-        title = get_title_for_level(user_data["level"])
+        title = get_title_for_global_level(user_data["level"])
         await channel.send(f"🎉 **<@{user_id}>** vient de passer au niveau **{user_data['level']}** ({title}) !")
 
 
 
-def get_title_for_level(level: int) -> str:
-    current_title = LEVEL_TITLES[0][1]
-    for req_level, title in LEVEL_TITLES:
+def get_title_for_global_level(level: int) -> str:
+    current_title = LEVEL_TITLES_GLOBAL[0][1]
+    for req_level, title in LEVEL_TITLES_GLOBAL:
         if level >= req_level:
             current_title = title
         else:
             break
     return current_title
+
+
+def get_title_for_quiz_score(score: int) -> str:
+    current_title = LEVEL_TITLES_QUIZ[0][1]
+    for req_score, title in LEVEL_TITLES_QUIZ:
+        if score >= req_score:
+            current_title = title
+        else:
+            break
+    return current_title
+
 
 def format_airing_datetime_fr(ts: int, tz_name: str = "Europe/Paris") -> str:
     if not ts:
@@ -1198,7 +1209,8 @@ def get_game_stats(user_id: int) -> dict:
         "next_xp": (user_data["level"] + 1) * 100,
         "quiz_score": quiz_score,
         "mini_scores": mini_scores,
-        "title": get_title_for_level(user_data["level"]),
+        "title": get_title_for_global_level(user_data["level"]),
+        "quiz_title": get_title_for_quiz_score(quiz_score),
     }
 
 
