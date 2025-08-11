@@ -10,11 +10,13 @@ import discord
 from discord.ext import commands, tasks
 
 from modules import core
+from modules.image import generate_next_card
 
 LOG = logging.getLogger(__name__)
-DATA_PATH = "data/sent_alerts.json"   # persistance anti-doublon
 
-# ---------- utils persistance ----------
+DATA_PATH = "data/sent_alerts.json"  # persistance anti-doublon
+
+# ----------------- utilitaires -----------------
 def _now_ts() -> int:
     return int(datetime.now(timezone.utc).timestamp())
 
@@ -30,14 +32,8 @@ def _save_sent(data: Dict[str, Dict[str, Any]]) -> None:
     with open(DATA_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ---------- clés / formats ----------
-def _fmt(anime: Dict[str, Any]) -> str:
-    t = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "Titre inconnu"
-    ep = anime.get("episode") or "?"
-    when = core.format_airing_datetime_fr(anime.get("airingAt"), "Europe/Paris")
-    return f"**{t}** — Épisode **{ep}** • {when}"
-
 def _key(anime: Dict[str, Any], tag: str) -> str:
+    # clé unique par (titre/épisode/label)
     t = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "?"
     e = str(anime.get("episode") or "?")
     return f"{t}|{e}|{tag}"
@@ -48,11 +44,15 @@ def _should_alert(anime: Dict[str, Any], minutes_before: int) -> bool:
         return False
     diff = airing - _now_ts()
     target = minutes_before * 60
-    # fenêtre ~1 min autour du point visé
+    # fenêtre 60s autour du point visé
     return 0 <= (target - diff) <= 60
 
+def _fmt_when(anime: Dict[str, Any]) -> str:
+    return core.format_airing_datetime_fr(anime.get("airingAt"), "Europe/Paris")
+
+
 class Alerts(commands.Cog):
-    """Alertes épisodes AniList — 30 min avant, dans le salon configuré via !setchannel."""
+    """Alertes épisodes AniList — image à -30 min et image à l’heure, dans le salon configuré via !setchannel."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -67,7 +67,7 @@ class Alerts(commands.Cog):
     async def _get_alert_channel(self) -> Optional[discord.TextChannel]:
         try:
             cfg = core.get_config() or {}
-            cid = int(cfg.get("channel_id", 0))
+            cid = int(cfg.get("channel_id", 0)) if cfg.get("channel_id") else 0
             if not cid:
                 LOG.warning("Aucun channel configuré (utilise !setchannel).")
                 return None
@@ -75,23 +75,21 @@ class Alerts(commands.Cog):
             if ch is None:
                 await self.bot.wait_until_ready()
                 ch = self.bot.get_channel(cid)
-            if isinstance(ch, discord.TextChannel):
-                return ch
-            LOG.warning("channel_id=%s n'est pas un salon textuel valide.", cid)
+            return ch if isinstance(ch, discord.TextChannel) else None
         except Exception as e:
             LOG.exception("Lecture channel_id échouée: %s", e)
-        return None
+            return None
 
     # ----------- sources d’épisodes -----------
     async def _my_next(self) -> Optional[Dict[str, Any]]:
         try:
-            return core.get_my_next_airing_one()  # basé sur ANILIST_USERNAME (global du bot)
+            return core.get_my_next_airing_one()  # basé sur ANILIST_USERNAME
         except Exception as e:
             LOG.exception("get_my_next_airing_one failed: %s", e)
             return None
 
     async def _users_next(self) -> List[Dict[str, Any]]:
-        """Si tu veux aussi alerter pour chaque utilisateur lié, on le garde (sinon, vide cette méthode)."""
+        """Optionnel : alerter aussi les comptes AniList liés."""
         out: List[Dict[str, Any]] = []
         try:
             links = core.load_links()  # {discord_id_str: username}
@@ -106,48 +104,82 @@ class Alerts(commands.Cog):
                 LOG.warning("get_user_next_airing_one(%s) err: %s", username, e)
         return out
 
-    async def _maybe_send(self, ch: discord.TextChannel, anime: Dict[str, Any], tag: str) -> None:
-        """Envoie une seule alerte si pas déjà faite."""
-        k = _key(anime, tag)
+    # ----------- envoi image -----------
+    async def _send_card_alert(self, ch: discord.TextChannel, anime: Dict[str, Any], label: str, header: str) -> None:
+        """
+        label = identifiant anti-doublon ("30img" ou "0img")
+        header = texte au-dessus de l’image ("⏰ Alerte 30 min" / "✅ C’est l’heure !")
+        """
+        k = _key(anime, label)
         if self.sent.get(k):
             return
+
+        # on enrichit le dict pour la carte si besoin
         try:
-            await ch.send(f"⏰ **Alerte {tag} min**\n{_fmt(anime)}")
+            anime = dict(anime)  # copie défensive
+            anime["when"] = _fmt_when(anime)
+        except Exception:
+            pass
+
+        try:
+            out_path = f"/tmp/alert_{label}_{anime.get('id','x')}_{anime.get('episode','x')}.png"
+            img_path = generate_next_card(
+                anime,
+                out_path=out_path,
+                scale=1.2,
+                padding=40
+            )
+            await ch.send(
+                content=header,
+                file=discord.File(img_path, filename=os.path.basename(img_path))
+            )
             self.sent[k] = {"at": _now_ts()}
             _save_sent(self.sent)
-            LOG.info("Alerte envoyée: %s", k)
         except Exception as e:
-            LOG.exception("Envoi alerte échoué: %s", e)
+            LOG.exception("Image alert failed, fallback texte: %s", e)
+            # fallback texte si la génération échoue
+            title = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "Anime"
+            ep = anime.get("episode") or "?"
+            when = _fmt_when(anime)
+            await ch.send(f"{header}\n**{title}** — Épisode **{ep}** • {when}")
+            self.sent[k] = {"at": _now_ts()}
+            _save_sent(self.sent)
 
-    # ----------- boucle: uniquement 30 minutes -----------
+    # ----------- boucle: -30 min + live (0 min), tous en image -----------
     @tasks.loop(seconds=120)
     async def check_airing(self):
         ch = await self._get_alert_channel()
         if not ch:
             return
 
-        # Purge légère (clé vieilles > 14 jours)
+        # purge des entrées > 14 jours
         now = _now_ts()
         for k, v in list(self.sent.items()):
             ts = int(v.get("at", 0))
             if now - ts > 14 * 24 * 3600:
                 self.sent.pop(k, None)
 
-        # 1) Planning du bot
+        # 1) Planning du bot (global)
         mine = await self._my_next()
-        if mine and _should_alert(mine, 30):
-            await self._maybe_send(ch, mine, "30")
+        if mine:
+            if _should_alert(mine, 30):
+                await self._send_card_alert(ch, mine, "30img", "⏰ **Alerte 30 min**")
+            if _should_alert(mine, 0):
+                await self._send_card_alert(ch, mine, "0img", "✅ **C’est l’heure !**")
 
-        # 2) (Optionnel) pour les utilisateurs liés
+        # 2) (Optionnel) Utilisateurs liés
         users = await self._users_next()
         for item in users:
             if _should_alert(item, 30):
-                await self._maybe_send(ch, item, "30")
+                await self._send_card_alert(ch, item, "30img", "⏰ **Alerte 30 min**")
+            if _should_alert(item, 0):
+                await self._send_card_alert(ch, item, "0img", "✅ **C’est l’heure !**")
 
     @check_airing.before_loop
     async def before(self):
         await self.bot.wait_until_ready()
-        LOG.info("Alerte épisodes: boucle démarrée (30 min only).")
+        LOG.info("Alerte épisodes: boucle démarrée (30 min + live).")
 
-async def setup(bot):
+
+async def setup(bot: commands.Bot):
     await bot.add_cog(Alerts(bot))
