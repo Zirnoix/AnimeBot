@@ -87,7 +87,7 @@ class Profile(commands.Cog):
         bar = filled + empty
 
         # Titre actuel
-        title = core.get_title_for_level(level)
+        title = core.get_title_for_global_level(level)
 
         # Vérifie si le titre a changé
         titles_data = core.load_titles()
