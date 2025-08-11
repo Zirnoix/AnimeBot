@@ -82,6 +82,21 @@ class Utils(commands.Cog):
         except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
 
+    @commands.command(name="testalert")
+    @commands.is_owner()
+    async def testalert(self, ctx):
+        ch = ctx.channel
+        try:
+            item = core.get_my_next_airing_one()
+            if not item:
+                return await ctx.send("Aucun prochain épisode (ANILIST_USERNAME ?)")
+            item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
+            img_path = generate_next_card(item, out_path="/tmp/test_alert.png", scale=1.2, padding=40)
+            await ch.send("🧪 Test alerte (carte) :", file=discord.File(img_path, filename="test_alert.png"))
+        except Exception as e:
+            await ctx.send(f"Erreur test: `{type(e).__name__}: {e}`")
+
+    
     @commands.command(name="showchannel")
     @commands.is_owner()
     async def showchannel(self, ctx: commands.Context) -> None:
