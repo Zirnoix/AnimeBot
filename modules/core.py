@@ -228,37 +228,46 @@ def save_levels(data: dict) -> None:
     save_json(FileConfig.LEVELS, data)
 
 
+# core.py
 async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True):
     levels = load_levels()
     key = str(user_id)
     data = levels.get(key, {"xp": 0, "level": 0})
 
-    old_level = data["level"]
+    old_level = int(data.get("level", 0))
+    old_title = get_title_for_global_level(old_level)  # <-- rang AVANT
+
+    # Ajout d’XP
     data["xp"] = int(data.get("xp", 0)) + int(amount)
 
-    # IMPORTANT: utilise la même formule que mycard
+    # Level-up avec la même courbe que partout (xp_for_next_level)
     leveled = False
     while True:
-        need = xp_for_next_level(data["level"])
+        need = xp_for_next_level(int(data["level"]))
         if data["xp"] < need:
             break
         data["xp"] -= need
-        data["level"] += 1
+        data["level"] = int(data["level"]) + 1
         leveled = True
 
     levels[key] = data
     save_levels(levels)
 
-    if announce and leveled:
-        title = get_title_for_global_level(data["level"])
+    # Nouveau rang APRES
+    new_level = int(data["level"])
+    new_title = get_title_for_global_level(new_level)
+
+    # 👉 Annoncer UNIQUEMENT si rang (titre) a changé
+    if announce and (new_title != old_title):
         try:
             await channel.send(
-                f"🎉 **<@{user_id}>** passe **niv. {data['level']}** ({title}) !"
+                f"🎉 **<@{user_id}>** atteint le rang **{new_title}** (niv. {new_level}) !"
             )
         except Exception:
             pass
 
-    return leveled
+    return {"leveled": leveled, "old_level": old_level, "new_level": new_level,
+            "old_title": old_title, "new_title": new_title}
 
 def get_title_for_global_level(level: int) -> str:
     current_title = LEVEL_TITLES_GLOBAL[0][1]
