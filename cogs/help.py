@@ -39,6 +39,20 @@ class Help(commands.Cog):
         )
 
         embed.add_field(
+            name="🧷 Track (suivi en MP)",
+            value=(
+                "`!track list` – Affiche ta liste d'animes suivis\n"
+                "`!track add <titre>` – Ajoute un anime à ta liste\n"
+                "`!track remove <titre>` – Retire un anime de ta liste\n"
+                "`!track clear` – Vide ta liste\n\n"
+                "🔔 Tu recevras un **MP** 15 min avant la sortie du prochain épisode "
+                "des animes suivis. Les confirmations (add/remove/list) partent aussi en MP."
+            ),
+            inline=False
+        )
+
+
+        embed.add_field(
             name="🧑 Profil & Statistiques",
             value=(
                 "`!myrank` - Voir ton rang actuel\n"
