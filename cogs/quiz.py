@@ -279,7 +279,9 @@ class Quiz(commands.Cog):
                 scores[uid] = scores.get(uid, 0) + score
 
             core.save_scores(scores)
-            await core.add_xp(self.bot, ctx.channel, ctx.author.id, total_xp, do_level=False)
+            if total_xp > 0:
+                 await core.add_xp(self.bot, ctx.channel, ctx.author.id, total_xp)
+
 
             # Embed de résultat final
             embed = discord.Embed(
