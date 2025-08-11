@@ -143,40 +143,38 @@ class Episodes(commands.Cog):
 
     @commands.command(name="planning")
     async def planning(self, ctx: commands.Context) -> None:
-        """Affiche le planning hebdomadaire global des épisodes.
-
-        Organise les épisodes par jour de la semaine dans des embeds distincts.
-        Utilise la liste globale configurée.
-
-        Args:
-            ctx: Le contexte de la commande
-        """
+        """Affiche le planning hebdomadaire global des épisodes (jours triés)."""
         episodes = core.get_upcoming_episodes(core.ANILIST_USERNAME)
-
         if not episodes:
             await ctx.send("📭 Aucun épisode prévu cette semaine.")
             return
 
-        # Organiser les épisodes par jour
+        # 1) Regroupe par jour (en FR)
         planning: dict[str, list] = {}
         for ep in episodes:
             dt = datetime.fromtimestamp(ep["airingAt"], tz=core.TIMEZONE)
-            jour = core.JOURS_FR[dt.strftime("%A")]
-            if jour not in planning:
-                planning[jour] = []
-            planning[jour].append((ep, dt))
+            jour_fr = core.JOURS_FR[dt.strftime("%A")]  # ex: "Lundi"
+            planning.setdefault(jour_fr, []).append((ep, dt))
 
-        # Créer un embed par jour
-        for jour, episodes_jour in planning.items():
-            # Trier par heure et limiter à 10 épisodes
+        # 2) Ordre fixe des jours (lundi → dimanche)
+        ordre_jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+
+        # 3) Envoie un embed par jour dans le bon ordre
+        for jour in ordre_jours:
+            if jour not in planning:
+                continue
+            episodes_jour = planning[jour]
+
+            # trie par heure
             episodes_jour.sort(key=lambda x: x[1])
+            # limite bouchon
             episodes_jour = episodes_jour[:10]
 
             embed = discord.Embed(
                 title=f"📅 Planning {jour}",
                 color=discord.Color.blurple(),
             )
-
+    
             for ep, dt in episodes_jour:
                 heure = dt.strftime("%H:%M")
                 emoji = core.genre_emoji(ep.get("genres", []))
@@ -187,6 +185,7 @@ class Episodes(commands.Cog):
                 )
 
             await ctx.send(embed=embed)
+
 
     @commands.command(name="monplanning")
     async def mon_planning(self, ctx: commands.Context) -> None:
