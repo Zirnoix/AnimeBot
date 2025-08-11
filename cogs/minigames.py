@@ -59,7 +59,7 @@ class HigherLowerView(View):
             await interaction.response.send_message(
                 f"✅ Bravo ! **{self.choice1['title']['romaji']}** ({pop1}) vs **{self.choice2['title']['romaji']}** ({pop2})\nTu gagnes **5 XP** !"
             )
-            await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
+            await core.add_xp(interaction.client, interaction.channel, interaction.user.id, 5)
             core.add_mini_score(self.ctx.author.id, "higherlower", 1)
         else:
             await interaction.response.send_message(
