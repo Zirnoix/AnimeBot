@@ -82,6 +82,42 @@ class Utils(commands.Cog):
         except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
 
+    @commands.command(name="showchannel")
+    @commands.is_owner()
+    async def showchannel(self, ctx: commands.Context) -> None:
+        """Affiche le salon configuré pour les alertes (!setchannel)."""
+        try:
+            cfg = core.get_config() or {}
+            cid = int(cfg.get("channel_id", 0)) if cfg.get("channel_id") else 0
+            if not cid:
+                await ctx.send("ℹ️ Aucun salon n'est configuré. Utilise `!setchannel` ici pour l'enregistrer.")
+                return
+
+            ch = self.bot.get_channel(cid)
+            # Fallback si pas en cache
+            if ch is None:
+                try:
+                    ch = await self.bot.fetch_channel(cid)
+                except Exception:
+                    ch = None
+
+            if isinstance(ch, discord.TextChannel):
+                # petit check permission d'envoi
+                perms = ch.permissions_for(ch.guild.me) if ch.guild and ch.guild.me else None
+                can_send = perms.send_messages if perms else False
+                await ctx.send(
+                    f"✅ Salon configuré : {ch.mention} (`{cid}`)\n"
+                    f"Permissions d'envoi ici : **{'OK' if can_send else 'NON'}**"
+                )
+            else:
+                await ctx.send(
+                    f"⚠️ Un ID de salon est configuré (`{cid}`) mais introuvable/invalide.\n"
+                    "Fais `!setchannel` dans le bon salon pour le réenregistrer."
+                )
+        except Exception:
+            await ctx.send("❌ Impossible de lire la config. Réessaie ou refais `!setchannel`.")
+
+
     @commands.command(name="reminder")
     async def reminder(self, ctx: commands.Context, mode: Optional[str] = None) -> None:
         """Active ou désactive les rappels d'épisodes. Ex: !reminder on / off"""
