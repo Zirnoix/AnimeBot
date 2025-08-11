@@ -499,7 +499,7 @@ class Quiz(commands.Cog):
 
             # Barre de progression
             progress = core.get_xp_bar(xp, next_xp)
-            title = core.get_title_for_level(level)
+            title = core.get_title_for_global_level(level)
 
             embed.add_field(
                 name="📊 Progression",
@@ -513,11 +513,18 @@ class Quiz(commands.Cog):
 
             # Position dans le classement
             if quiz_score > 0:
+                quiz_title = core.get_title_for_quiz_score(quiz_score)  # On récupère le rang quiz
+    
                 sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
                 position = next(i for i, (uid, _) in enumerate(sorted_scores, 1) if uid == str(ctx.author.id))
+    
                 embed.add_field(
                     name="🏆 Classement Quiz",
-                    value=f"Position : **#{position}**\nScore total : **{quiz_score}** points",
+                    value=(
+                        f"Position : **#{position}**\n"
+                        f"Score total : **{quiz_score}** points\n"
+                        f"Rang quiz : **{quiz_title}**"
+                    ),
                     inline=False
                 )
 
