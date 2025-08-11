@@ -7,9 +7,11 @@ reminder settings, and notification channel setup.
 
 from __future__ import annotations
 
+import time
+import platform
 from datetime import datetime
 from typing import Optional
-import time
+
 import discord
 from discord.ext import commands
 
@@ -24,13 +26,13 @@ class Utils(commands.Cog):
         self.start_time = time.time()
 
     @commands.command(name="ping")
-    async def ping(self, ctx):
+    async def ping(self, ctx: commands.Context):
         """Affiche la latence du bot."""
         latency = round(self.bot.latency * 1000)  # en ms
         await ctx.send(f"🏓 Pong ! Latence : **{latency} ms**")
 
     @commands.command(name="uptime")
-    async def uptime(self, ctx):
+    async def uptime(self, ctx: commands.Context):
         """Affiche depuis combien de temps le bot est en ligne."""
         delta = time.time() - self.start_time
         days = int(delta // 86400)
@@ -40,7 +42,7 @@ class Utils(commands.Cog):
         await ctx.send(f"⏳ Uptime : **{days}j {hours}h {minutes}m {seconds}s**")
 
     @commands.command(name="botinfo")
-    async def botinfo(self, ctx):
+    async def botinfo(self, ctx: commands.Context):
         """Affiche des infos sur le bot."""
         embed = discord.Embed(
             title="🤖 Infos sur le bot",
@@ -56,25 +58,18 @@ class Utils(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="source")
-    async def source(self, ctx):
+    async def source(self, ctx: commands.Context):
         """Affiche le lien vers le code source du bot."""
-        await ctx.send("📦 Code source du bot : [GitHub](https://github.com/Zirnoix/AnimeBot)")
-
+        await ctx.send("📦 Code source du bot : https://github.com/Zirnoix/AnimeBot")
 
     @commands.command(name="setalert")
     async def setalert(self, ctx: commands.Context, time_str: str) -> None:
-        """Définit l'heure de l'alerte quotidienne (HH:MM).
-
-        Example:
-            !setalert 08:30
-        """
+        """Définit l'heure de l'alerte quotidienne (HH:MM). Ex: !setalert 08:30"""
         try:
-            # Validation du format de l'heure
             hour, minute = map(int, time_str.split(":"))
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise ValueError("Heure invalide")
 
-            # Sauvegarde des préférences
             prefs = core.load_preferences()
             uid = str(ctx.author.id)
             prefs.setdefault(uid, {})
@@ -82,25 +77,14 @@ class Utils(commands.Cog):
             core.save_preferences(prefs)
 
             await ctx.send(f"✅ Alerte quotidienne définie à **{hour:02d}:{minute:02d}**.")
-
         except ValueError:
             await ctx.send("❌ Format invalide. Utilise `!setalert HH:MM` (ex: `!setalert 08:30`).")
-        except Exception as e:
+        except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
 
     @commands.command(name="reminder")
     async def reminder(self, ctx: commands.Context, mode: Optional[str] = None) -> None:
-        """Active ou désactive les rappels d'épisodes.
-
-        Args:
-            mode: "on"/"off" pour activer/désactiver les rappels
-                 laissez vide pour voir l'état actuel
-
-        Examples:
-            !reminder on
-            !reminder off
-            !reminder
-        """
+        """Active ou désactive les rappels d'épisodes. Ex: !reminder on / off"""
         uid = str(ctx.author.id)
         settings = core.load_user_settings()
         settings.setdefault(uid, {})
@@ -120,11 +104,8 @@ class Utils(commands.Cog):
             else:
                 current = settings.get(uid, {}).get("reminder", True)
                 emoji = "🔔" if current else "🔕"
-                await ctx.send(
-                    f"{emoji} Les rappels sont actuellement "
-                    f"**{'activés' if current else 'désactivés'}** pour toi."
-                )
-        except Exception as e:
+                await ctx.send(f"{emoji} Les rappels sont actuellement **{'activés' if current else 'désactivés'}** pour toi.")
+        except Exception:
             await ctx.send("❌ Une erreur s'est produite.")
 
     @commands.command(name="setchannel")
@@ -136,9 +117,29 @@ class Utils(commands.Cog):
             config["channel_id"] = ctx.channel.id
             core.save_config(config)
             await ctx.send("✅ Ce salon a été défini pour les notifications.")
-        except Exception as e:
+        except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
 
 
-async def setup(bot):
+class BotAdmin(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @commands.command(name="setavatar")
+    @commands.is_owner()
+    async def set_avatar(self, ctx: commands.Context):
+        """Change l'avatar du bot avec l'image attachée au message."""
+        if not ctx.message.attachments:
+            return await ctx.send("❌ Envoie l'image **dans le même message** que la commande.")
+        try:
+            avatar_bytes = await ctx.message.attachments[0].read()
+            await self.bot.user.edit(avatar=avatar_bytes)
+            await ctx.send("✅ Avatar du bot mis à jour avec succès !")
+        except Exception as e:
+            await ctx.send(f"❌ Erreur : {e}")
+
+
+async def setup(bot: commands.Bot):
+    # Un seul setup qui ajoute les deux cogs
     await bot.add_cog(Utils(bot))
+    await bot.add_cog(BotAdmin(bot))
