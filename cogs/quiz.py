@@ -175,6 +175,9 @@ class Quiz(commands.Cog):
                     await core.add_xp(self.bot, ctx.channel, ctx.author.id, 12)
                     core.add_mini_score(ctx.author.id, "animequiz", 1)
 
+                    # 👉 NEW: progression mission “bonne réponse quiz solo”
+                    ctx.bot.dispatch("mission_progress", ctx.author.id, "_custom:quiz_solo_ok")
+
                     # Show other possible titles
                     other_titles = [t for t in correct_titles if normalize(t) != normalize(msg.content)]
                     if other_titles:
