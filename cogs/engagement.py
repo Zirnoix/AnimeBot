@@ -215,10 +215,16 @@ class Engagement(commands.Cog):
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
         if user.bot:
             return
-        if reaction.message.embeds:
-            title = reaction.message.embeds[0].title or ""
-            if "quiz" in title.lower():
-                await self._custom_progress(user.id, "_custom:react_quiz")
+        try:
+            msg = reaction.message
+            if msg.partial:
+                await msg.fetch()
+            if msg.embeds:
+                title = (msg.embeds[0].title or "").lower()
+                if "quiz" in title:
+                    await self._custom_progress(user.id, "_custom:react_quiz")
+        except Exception:
+            pass
 
     async def _custom_progress(self, uid: int, key: str):
         """Incrémente la mission si c’est une mission custom."""
@@ -226,19 +232,21 @@ class Engagement(commands.Cog):
         m = self._get_or_create_today_mission(uid)
         if m.get("completed") or key not in set(m.get("commands", [])):
             return
-        m["progress"] += 1
-        if m["progress"] >= m.get("goal", DEFAULT_GOAL):
+
+        m["progress"] = int(m.get("progress", 0)) + 1
+        if m["progress"] >= int(m.get("goal", DEFAULT_GOAL)):
             m["completed"] = True
             xp = int(m.get("reward_xp", DEFAULT_REWARD_XP))
-            # Envoie le MP ou message dans le salon
-            user = self.bot.get_user(int(uid))
+            # MP optionnel
+            user = self.bot.get_user(int(uid)) or await self.bot.fetch_user(int(uid))
             if user:
                 try:
                     await user.send(f"🎯 **Mission accomplie !** +{xp} XP")
                 except discord.Forbidden:
                     pass
-            # Ajout XP
-            await core.add_xp(self.bot, None, uid, xp)
+            # Ajout XP (uid en int, channel=None accepté)
+            await core.add_xp(self.bot, None, int(uid), xp)
+
         self.missions[uid] = m
         _save_json(MISSIONS_PATH, self.missions)
 
