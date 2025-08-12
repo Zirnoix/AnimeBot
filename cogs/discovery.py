@@ -48,7 +48,7 @@ class Discovery(commands.Cog):
     @commands.command(name="decouverte", aliases=["discover", "randomanime"])
     async def decouverte(self, ctx: commands.Context):
         """Propose un anime à découvrir (populaire/trending)."""
-        await ctx.trigger_typing()
+        await ctx.channel.trigger_typing()
         # page aléatoire (élargit un peu)
         page = random.randint(1, 500)
         try:
