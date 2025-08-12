@@ -50,7 +50,7 @@ MISSION_POOL = [
     ("use_decouverte",  "Découvre un anime avec `!decouverte`", {"decouverte", "discover", "randomanime"}),
 
     # Quiz
-    ("quiz_solo",       "Réponds correctement à un quiz solo (`!animequiz`)", {"animequiz"}),
+    ("quiz_solo",     "Réponds correctement à un quiz solo (`!animequiz`)", {"_custom:quiz_solo_ok"}),
     ("quiz_multi",      "Participe à un quiz multi (`!animequizmulti`)", {"animequizmulti"}),
     ("guess_year",      "Joue à `!guessyear` aujourd'hui", {"guessyear"}),
     ("guess_genre",     "Joue à `!guessgenre` aujourd'hui", {"guessgenre"}),
@@ -193,6 +193,15 @@ class Engagement(commands.Cog):
         await ctx.send(embed=embed)
 
     # ------------- listen to commands to track missions -------------
+
+    @commands.Cog.listener()
+    async def on_mission_progress(self, user_id: int, key: str):
+        # Permet aux autres cogs (quiz) de pousser une progression
+        try:
+            await self._custom_progress(user_id, key)
+        except Exception:
+            pass
+
     @commands.Cog.listener()
     async def on_command_completion(self, ctx: commands.Context):
         # Ignore bots
