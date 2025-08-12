@@ -40,12 +40,27 @@ def _yesterday_str() -> str:
     return d.strftime("%Y-%m-%d")
 
 # ----------------- missions catalog -----------------
-# Simples, vérifiables par usage de commandes (sans “bonne réponse” à vérifier)
+# key, label, target commands (qualified_name)
 MISSION_POOL = [
-    # key, label, target commands (qualified_name)
-    ("use_next",        "Utilise `!next` ou `!monnext` aujourd'hui",       {"next", "monnext"}),
+    # Planning / suivi
+    ("use_next",        "Utilise `!next` ou `!monnext` aujourd'hui", {"next", "monnext"}),
     ("use_planning",    "Consulte ton planning (`!planning` ou `!monplanning`)", {"planning", "monplanning"}),
-    ("use_decouverte",  "Découvre un anime avec `!decouverte`",            {"decouverte", "discover"}),
+
+    # Découverte
+    ("use_decouverte",  "Découvre un anime avec `!decouverte`", {"decouverte", "discover", "randomanime"}),
+
+    # Quiz
+    ("quiz_solo",       "Réponds correctement à un quiz solo (`!animequiz`)", {"animequiz"}),
+    ("quiz_multi",      "Participe à un quiz multi (`!animequizmulti`)", {"animequizmulti"}),
+    ("guess_year",      "Joue à `!guessyear` aujourd'hui", {"guessyear"}),
+    ("guess_genre",     "Joue à `!guessgenre` aujourd'hui", {"guessgenre"}),
+
+    # Combos
+    ("combo_view",      "Utilise 3 commandes différentes de suivi (`!next`, `!planning`, `!decouverte`) dans la journée", {"next", "monnext", "planning", "monplanning", "decouverte", "discover", "randomanime"}),
+
+    # Social
+    ("send_gg",         "Envoie un message contenant 'gg' aujourd'hui", {"_custom:send_gg"}),
+    ("react_quiz",      "Réagis à un quiz avec un emoji aujourd'hui", {"_custom:react_quiz"}),
 ]
 
 DEFAULT_REWARD_XP = 20
