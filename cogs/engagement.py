@@ -204,6 +204,44 @@ class Engagement(commands.Cog):
             # on ne casse pas l’exécution si tracking échoue
             pass
 
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot:
+            return
+        if "gg" in message.content.lower():
+            await self._custom_progress(message.author.id, "_custom:send_gg")
+
+    @commands.Cog.listener()
+    async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
+        if user.bot:
+            return
+        if reaction.message.embeds:
+            title = reaction.message.embeds[0].title or ""
+            if "quiz" in title.lower():
+                await self._custom_progress(user.id, "_custom:react_quiz")
+
+    async def _custom_progress(self, uid: int, key: str):
+        """Incrémente la mission si c’est une mission custom."""
+        uid = str(uid)
+        m = self._get_or_create_today_mission(uid)
+        if m.get("completed") or key not in set(m.get("commands", [])):
+            return
+        m["progress"] += 1
+        if m["progress"] >= m.get("goal", DEFAULT_GOAL):
+            m["completed"] = True
+            xp = int(m.get("reward_xp", DEFAULT_REWARD_XP))
+            # Envoie le MP ou message dans le salon
+            user = self.bot.get_user(int(uid))
+            if user:
+                try:
+                    await user.send(f"🎯 **Mission accomplie !** +{xp} XP")
+                except discord.Forbidden:
+                    pass
+            # Ajout XP
+            await core.add_xp(self.bot, None, uid, xp)
+        self.missions[uid] = m
+        _save_json(MISSIONS_PATH, self.missions)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Engagement(bot))
