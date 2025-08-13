@@ -1,19 +1,58 @@
-import os, re, random, textwrap
+"""
+!decouverte (aliases: !discover, !randomanime)
+- Pioche au hasard entre Popularité / Tendance / Score
+- Traduit la description en FR si DEEPL_API_KEY ou LIBRETRANSLATE_URL est défini
+"""
+
+from __future__ import annotations
+import os
+import re
+import random
+import asyncio
 from typing import Optional
+
 import discord
 from discord.ext import commands
+
 from modules import core
 
 try:
-    import aiohttp  # requis pour les appels HTTP asynchrones
+    import aiohttp  # pour la traduction (HTTP)
 except Exception:
     aiohttp = None
+
+# Tri (clé AniList, étiquette FR)
+SORTS = [
+    ("POPULARITY_DESC", "Popularité"),
+    ("TRENDING_DESC",   "Tendance"),
+    ("SCORE_DESC",      "Score"),
+]
+
+QUERY = """
+query ($page: Int, $sort: [MediaSort]) {
+  Page(page: $page, perPage: 1) {
+    media(type: ANIME, sort: $sort) {
+      id
+      title { romaji english native }
+      coverImage { large extraLarge color }
+      genres
+      episodes
+      format
+      season
+      seasonYear
+      averageScore
+      description(asHtml: false)
+      siteUrl
+    }
+  }
+}
+"""
 
 def _clean_html(txt: str) -> str:
     if not txt:
         return ""
     txt = txt.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
-    txt = re.sub(r"</?(i|b|em|strong)>", "", txt)
+    txt = re.sub(r"</?(i|b|em|strong|u)>", "", txt)
     txt = re.sub(r"<[^>]+>", "", txt)
     return txt.strip()
 
@@ -30,16 +69,12 @@ async def _translate_to_fr(text: str) -> Optional[str]:
     if not text:
         return None
 
-    # --- 1) DeepL ---
+    # 1) DeepL
     deepl_key = os.getenv("DEEPL_API_KEY")
     if deepl_key and aiohttp:
         try:
-            payload = {
-                "text": [text],
-                "target_lang": "FR",
-            }
             headers = {"Authorization": f"DeepL-Auth-Key {deepl_key}"}
-            # Free: api-free.deepl.com ; Pro: api.deepl.com
+            payload = {"text": [text], "target_lang": "FR"}
             deepl_url = os.getenv("DEEPL_API_URL", "https://api-free.deepl.com/v2/translate")
             async with aiohttp.ClientSession() as sess:
                 async with sess.post(deepl_url, data=payload, headers=headers, timeout=10) as resp:
@@ -51,7 +86,7 @@ async def _translate_to_fr(text: str) -> Optional[str]:
         except Exception:
             pass
 
-    # --- 2) LibreTranslate ---
+    # 2) LibreTranslate
     lt_url = os.getenv("LIBRETRANSLATE_URL")
     if lt_url and aiohttp:
         try:
@@ -70,8 +105,8 @@ async def _translate_to_fr(text: str) -> Optional[str]:
         except Exception:
             pass
 
-    # Aucun provider dispo
     return None
+
 
 class Discovery(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -79,15 +114,14 @@ class Discovery(commands.Cog):
 
     @commands.command(name="decouverte", aliases=["discover", "randomanime"])
     async def decouverte(self, ctx: commands.Context):
-        """Propose un anime à découvrir (populaire/trending)."""
+        """Propose un anime à découvrir (mix Popularité/Tendance/Score)."""
         async with ctx.typing():
             page = random.randint(1, 500)
-            sort = random.choice(SORTS)
+            sort_key, sort_label = random.choice(SORTS)
 
-            # core.query_anilist est synchrone -> on l’exécute hors boucle
+            # core.query_anilist est synchrone -> joue hors event loop
             try:
-                import asyncio
-                data = await asyncio.to_thread(core.query_anilist, QUERY, {"page": page, "sort": [sort]})
+                data = await asyncio.to_thread(core.query_anilist, QUERY, {"page": page, "sort": [sort_key]})
                 media_list = data.get("data", {}).get("Page", {}).get("media", []) or []
                 if not media_list:
                     raise ValueError("No media returned")
@@ -110,19 +144,19 @@ class Discovery(commands.Cog):
             desc_en = _clean_html(media.get("description") or "")
             url = media.get("siteUrl")
 
-            # --- Traduction FR si possible ---
+            # Traduction FR si possible
             desc_fr = await _translate_to_fr(desc_en)
             desc_display = _shorten(desc_fr or desc_en, 420)
 
-            fields = []
+            infos = []
             if media.get("episodes"):
-                fields.append(f"Épisodes : **{media['episodes']}**")
+                infos.append(f"Épisodes : **{media['episodes']}**")
             if media.get("format"):
-                fields.append(f"Format : **{media['format']}**")
+                infos.append(f"Format : **{media['format']}**")
             if media.get("seasonYear"):
-                fields.append(f"Saison : **{media.get('season','?')} {media['seasonYear']}**")
+                infos.append(f"Saison : **{media.get('season','?')} {media['seasonYear']}**")
             if score:
-                fields.append(f"Score moyen : **{score}/100**")
+                infos.append(f"Score moyen : **{score}/100**")
 
             embed = discord.Embed(
                 title=f"🔎 À découvrir : {title}",
@@ -132,11 +166,26 @@ class Discovery(commands.Cog):
             if img:
                 embed.set_image(url=img)
             embed.add_field(name="Genres", value=genres, inline=False)
-            if fields:
-                embed.add_field(name="Infos", value="\n".join(fields), inline=False)
-            embed.set_footer(text=f"Source : AniList • Tri : { 'Popularité' if sort=='POPULARITY_DESC' else 'Tendance' }")
+            if infos:
+                embed.add_field(name="Infos", value="\n".join(infos), inline=False)
+            footer = f"Source : AniList • Tri : {sort_label}"
+            if desc_fr:
+                footer += " • Trad auto"
+            embed.set_footer(text=footer)
 
             await ctx.send(embed=embed)
+
+    # Test de traduction rapide
+    @commands.command(name="trtest")
+    @commands.is_owner()
+    async def trtest(self, ctx: commands.Context, *, texte: str):
+        """Test de traduction EN->FR (DeepL/LibreTranslate)."""
+        tr = await _translate_to_fr(texte)
+        if tr:
+            await ctx.send(f"**FR :** {tr}")
+        else:
+            await ctx.send("❌ Pas de service de traduction dispo (DEEPL_API_KEY ou LIBRETRANSLATE_URL manquant).")
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Discovery(bot))
