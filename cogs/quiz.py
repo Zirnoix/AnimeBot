@@ -201,7 +201,7 @@ class Quiz(commands.Cog):
 
     @commands.command(name="animequizmulti")
     async def animequizmulti(self, ctx: commands.Context, nb_questions: int = 5) -> None:
-        """Lance un quiz multi questions (1 à 20)."""
+        """Lance un quiz multi questions (1 à 20) avec bonus de combo."""
         try:
             if not 1 <= nb_questions <= 20:
                 await ctx.send("❌ Tu dois choisir un nombre entre 1 et 20.")
@@ -211,6 +211,10 @@ class Quiz(commands.Cog):
             difficulties = ["easy", "normal", "hard"]
             score = 0
             total_xp = 0
+
+            # --- Nouveau: combo & bonus cumulés ---
+            combo = 0
+            combo_bonus_total = 0
 
             for i in range(nb_questions):
                 try:
@@ -224,11 +228,11 @@ class Quiz(commands.Cog):
                     anime = await self._get_random_anime(sort_option)
                     if not anime:
                         continue
-
+    
                     correct_titles = self._process_anime_titles(anime)
                     image = (anime.get("coverImage", {}).get("extraLarge") or
                              anime.get("coverImage", {}).get("large"))
-
+    
                     embed = discord.Embed(
                         title=f"❓ Question {i + 1}/{nb_questions} — difficulté `{difficulty}`",
                         description="Tu as **20 secondes** pour deviner. Tape `jsp` pour passer.",
@@ -236,19 +240,20 @@ class Quiz(commands.Cog):
                     )
                     if image:
                         embed.set_image(url=image)
-                    embed.set_footer(text=f"Genres : {', '.join(anime['genres'])}")
-
+                    embed.set_footer(text=f"Genres : {', '.join(anime.get('genres', []))}")
+    
                     await ctx.send(embed=embed)
-
+    
                     try:
                         msg = await self.bot.wait_for(
                             "message",
                             timeout=20.0,
                             check=lambda m: m.author == ctx.author and m.channel == ctx.channel
                         )
-
+    
                         if msg.content.strip().lower() == "jsp":
                             await ctx.send(f"⏭️ Passé. C'était **{anime['title']['romaji']}**.")
+                            combo = 0  # reset combo
                         else:
                             matches = self.title_matcher.find_matches(msg.content, correct_titles)
                             if matches:
@@ -257,47 +262,61 @@ class Quiz(commands.Cog):
                                 xp_gain = 5 if difficulty == "easy" else 10 if difficulty == "normal" else 15
                                 total_xp += xp_gain
                                 core.add_mini_score(ctx.author.id, "animequiz", 1)
+    
+                                # --- Combo logic ---
+                                combo += 1
+                                if combo == 3:
+                                    combo_bonus_total += 2
+                                    await ctx.send("✨ **Combo x3 !** +2 XP bonus")
+                                elif combo == 5:
+                                    combo_bonus_total += 5
+                                    await ctx.send("🌟 **Combo x5 !** +5 XP bonus")
                             else:
                                 await ctx.send(f"❌ Faux ! C'était **{anime['title']['romaji']}**.")
-
+                                combo = 0  # reset combo
+    
                     except asyncio.TimeoutError:
                         await ctx.send(f"⏰ Temps écoulé ! C'était **{anime['title']['romaji']}**.")
-
+                        combo = 0  # reset combo
+    
                 except Exception as e:
                     logger.error(f"Erreur question {i + 1}: {e}")
                     continue
-
+    
                 await asyncio.sleep(1.5)
-
+    
             # Résultats finaux
             scores = core.load_scores()
             uid = str(ctx.author.id)
-
-            # Pénalité si moins de 50% de bonnes réponses
+    
+            # Pénalité si < 50% de bonnes réponses
             if score < (nb_questions / 2):
                 penalty = 1
                 scores[uid] = max(0, scores.get(uid, 0) - penalty)
-                await ctx.send(f"⚠️ Tu as fait moins de 50% de bonnes réponses, -{penalty} point retiré.")
+                await ctx.send(f"⚠️ Moins de 50% de bonnes réponses, -{penalty} point retiré.")
             else:
                 scores[uid] = scores.get(uid, 0) + score
-
+    
             core.save_scores(scores)
+    
+            # --- Ajoute le bonus combo et crédite l'XP en une fois ---
+            total_xp += combo_bonus_total
             if total_xp > 0:
-                 await core.add_xp(self.bot, ctx.channel, ctx.author.id, total_xp)
-
-
-            # Embed de résultat final
+                await core.add_xp(self.bot, ctx.channel, ctx.author.id, total_xp)
+    
+            # Embed final
+            precision = (score / nb_questions * 100) if nb_questions > 0 else 0.0
             embed = discord.Embed(
                 title="🏁 Quiz terminé !",
                 description=(
                     f"Score final : **{score}/{nb_questions}**\n"
-                    f"XP gagnés : **{total_xp}**\n"
-                    f"Précision : **{(score / nb_questions * 100):.1f}%**"
+                    f"XP gagnés : **{total_xp}** *(dont **{combo_bonus_total}** de bonus combo)*\n"
+                    f"Précision : **{precision:.1f}%**"
                 ),
                 color=discord.Color.gold()
             )
             await ctx.send(embed=embed)
-
+    
         except Exception as e:
             logger.error(f"Erreur dans animequizmulti: {e}")
             await ctx.send("❌ Une erreur s'est produite durant le quiz.")
