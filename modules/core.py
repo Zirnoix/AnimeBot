@@ -45,7 +45,9 @@ logger = logging.getLogger(__name__)
 ###############################################################################
 # Configuration et chemins
 ###############################################################################
-    
+
+DEEPL_API_KEY = os.getenv("DEEPL_API_KEY")
+LOG = logging.getLogger(__name__)
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'assets')
 WINNER_FILE = os.path.join(DATA_DIR, "winner.json")
@@ -154,6 +156,31 @@ LEVEL_TITLES_GLOBAL = [
 ###############################################################################
 # Fonctions de gestion JSON et données de base
 ###############################################################################
+
+async def translate_text(text: str, target_lang: str = "FR") -> str:
+    """Traduit du texte avec DeepL (API Free)."""
+    if not DEEPL_API_KEY:
+        LOG.warning("Clé API DeepL manquante — traduction désactivée.")
+        return text  # Pas de traduction si clé absente
+
+    url = "https://api-free.deepl.com/v2/translate"
+    params = {
+        "auth_key": DEEPL_API_KEY,
+        "text": text,
+        "target_lang": target_lang,
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data=params) as resp:
+                if resp.status != 200:
+                    LOG.error(f"Erreur DeepL ({resp.status}) : {await resp.text()}")
+                    return text
+                data = await resp.json()
+                return data["translations"][0]["text"]
+    except Exception as e:
+        LOG.error(f"Erreur traduction DeepL : {e}")
+        return text
 
 def load_titles():
     if os.path.exists(TITLES_FILE):
