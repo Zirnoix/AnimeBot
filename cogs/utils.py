@@ -188,6 +188,15 @@ class Utils(commands.Cog):
         except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
 
+    @commands.command(name="trtest")
+    @commands.is_owner()
+    async def trtest(self, ctx: commands.Context, *, texte: str):
+        """Test rapide de traduction EN->FR (DeepL/LibreTranslate)."""
+        tr = await _translate_to_fr(texte)
+        if tr:
+            await ctx.send(f"**FR :** {tr}")
+        else:
+            await ctx.send("❌ Aucun service de traduction disponible (DEEPL_API_KEY ou LIBRETRANSLATE_URL manquant).")
 
 class BotAdmin(commands.Cog):
     def __init__(self, bot: commands.Bot):
