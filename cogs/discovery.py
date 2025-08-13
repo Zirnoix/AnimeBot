@@ -32,7 +32,7 @@ SORTS = [
 QUERY = """
 query ($page: Int, $sort: [MediaSort]) {
   Page(page: $page, perPage: 1) {
-    media(type: ANIME, sort: $sort) {
+    media(type: ANIME, sort: $sort, isAdult: false) {
       id
       title { romaji english native }
       coverImage { large extraLarge color }
