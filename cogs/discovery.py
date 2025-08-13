@@ -116,11 +116,21 @@ class Discovery(commands.Cog):
     # ----------------- helpers -----------------
 
     async def _fetch_random_media(self) -> Optional[Dict]:
-        page = random.randint(1, 500)
-        sort_key, _ = random.choice(SORTS)
-        data = await asyncio.to_thread(core.query_anilist, QUERY, {"page": page, "sort": [sort_key]})
-        media_list = data.get("data", {}).get("Page", {}).get("media", []) or []
-        return media_list[0] if media_list else None
+        BAD_FORMATS = {"MUSIC"}  # ajoute ici si tu veux en exclure d’autres
+        for _ in range(8):  # plusieurs tentatives
+            page = random.randint(1, 500)
+            sort_key, _ = random.choice(SORTS)
+            data = await asyncio.to_thread(core.query_anilist, QUERY, {"page": page, "sort": [sort_key]})
+            media_list = data.get("data", {}).get("Page", {}).get("media", []) or []
+            if not media_list:
+                continue
+            media = media_list[0]
+            fmt = (media.get("format") or "").upper()
+            if fmt in BAD_FORMATS:
+                continue  # on saute et on retente
+            return media
+        return None
+
 
     async def _build_embed(self, media: Dict) -> Tuple[discord.Embed, str]:
         sort_label = None  # on ne l’affiche plus ici, pas critique
