@@ -1,7 +1,8 @@
 """
 !decouverte (aliases: !discover, !randomanime)
-- Pioche au hasard entre Popularité / Tendance / Score
+- Tirage aléatoire entre Popularité / Tendance / Score
 - Traduit la description en FR si DEEPL_API_KEY ou LIBRETRANSLATE_URL est défini
+- Boutons: Encore (rafraîchir) / Ajouter au suivi (track)
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ import os
 import re
 import random
 import asyncio
-from typing import Optional
+from typing import Optional, Tuple, Dict
 
 import discord
 from discord.ext import commands
@@ -112,81 +113,128 @@ class Discovery(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    # ----------------- helpers -----------------
+
+    async def _fetch_random_media(self) -> Optional[Dict]:
+        page = random.randint(1, 500)
+        sort_key, _ = random.choice(SORTS)
+        data = await asyncio.to_thread(core.query_anilist, QUERY, {"page": page, "sort": [sort_key]})
+        media_list = data.get("data", {}).get("Page", {}).get("media", []) or []
+        return media_list[0] if media_list else None
+
+    async def _build_embed(self, media: Dict) -> Tuple[discord.Embed, str]:
+        sort_label = None  # on ne l’affiche plus ici, pas critique
+        title = (
+            media.get("title", {}).get("romaji")
+            or media.get("title", {}).get("english")
+            or media.get("title", {}).get("native")
+            or "Titre inconnu"
+        )
+        img = (
+            media.get("coverImage", {}).get("extraLarge")
+            or media.get("coverImage", {}).get("large")
+        )
+        genres = ", ".join(media.get("genres") or []) or "—"
+        score = media.get("averageScore")
+        url = media.get("siteUrl")
+
+        desc_src = _clean_html(media.get("description") or "")
+        desc_fr = await _translate_to_fr(desc_src)
+        desc_display = _shorten(desc_fr or desc_src, 420)
+
+        infos = []
+        if media.get("episodes"):
+            infos.append(f"Épisodes : **{media['episodes']}**")
+        if media.get("format"):
+            infos.append(f"Format : **{media['format']}**")
+        if media.get("seasonYear"):
+            infos.append(f"Saison : **{media.get('season','?')} {media['seasonYear']}**")
+        if score:
+            infos.append(f"Score moyen : **{score}/100**")
+
+        embed = discord.Embed(
+            title=f"🔎 À découvrir : {title}",
+            description=f"{desc_display}\n\n{url or ''}",
+            color=discord.Color.blurple()
+        )
+        if img:
+            embed.set_image(url=img)
+        embed.add_field(name="Genres", value=genres, inline=False)
+        if infos:
+            embed.add_field(name="Infos", value="\n".join(infos), inline=False)
+        footer = "Source : AniList"
+        if desc_fr:
+            footer += " • Trad auto"
+        embed.set_footer(text=footer)
+        return embed, title
+
+    # ----------------- command -----------------
+
     @commands.command(name="decouverte", aliases=["discover", "randomanime"])
     async def decouverte(self, ctx: commands.Context):
-        """Propose un anime à découvrir (mix Popularité/Tendance/Score)."""
+        """Propose un anime à découvrir (mix Popularité/Tendance/Score) + boutons."""
         async with ctx.typing():
-            page = random.randint(1, 500)
-            sort_key, sort_label = random.choice(SORTS)
-
-            # core.query_anilist est synchrone -> joue hors event loop
             try:
-                data = await asyncio.to_thread(core.query_anilist, QUERY, {"page": page, "sort": [sort_key]})
-                media_list = data.get("data", {}).get("Page", {}).get("media", []) or []
-                if not media_list:
-                    raise ValueError("No media returned")
-                media = media_list[0]
+                media = await self._fetch_random_media()
+                if not media:
+                    return await ctx.send("❌ Impossible de récupérer une recommandation.")
+                embed, title = await self._build_embed(media)
             except Exception:
                 return await ctx.send("❌ Impossible de récupérer une recommandation.")
 
+        view = DiscoverView(self, ctx.author.id, media)
+        await ctx.send(embed=embed, view=view)
+
+
+class DiscoverView(discord.ui.View):
+    def __init__(self, cog: Discovery, author_id: int, media: Dict):
+        super().__init__(timeout=40)
+        self.cog = cog
+        self.author_id = author_id
+        self.media = media  # dernier média affiché
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ Cette action ne t’est pas destinée.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="🔁 Encore une", style=discord.ButtonStyle.primary)
+    async def again(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            media = await self.cog._fetch_random_media()
+            if not media:
+                return await interaction.response.send_message("❌ Pas de nouveau résultat.", ephemeral=True)
+            embed, _ = await self.cog._build_embed(media)
+            self.media = media
+            await interaction.response.edit_message(embed=embed, view=self)
+        except Exception:
+            await interaction.response.send_message("❌ Erreur pendant le rafraîchissement.", ephemeral=True)
+
+    @discord.ui.button(label="➕ Ajouter au suivi", style=discord.ButtonStyle.success)
+    async def add_track(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
             title = (
-                media.get("title", {}).get("romaji")
-                or media.get("title", {}).get("english")
-                or media.get("title", {}).get("native")
-                or "Titre inconnu"
+                self.media.get("title", {}).get("romaji")
+                or self.media.get("title", {}).get("english")
+                or self.media.get("title", {}).get("native")
             )
-            img = (
-                media.get("coverImage", {}).get("extraLarge")
-                or media.get("coverImage", {}).get("large")
-            )
-            genres = ", ".join(media.get("genres") or []) or "—"
-            score = media.get("averageScore")
-            url = media.get("siteUrl")
+            if not title:
+                return await interaction.response.send_message("❌ Titre introuvable.", ephemeral=True)
 
-            # Description : nettoie, puis tente une trad FR
-            desc_src = _clean_html(media.get("description") or "")
-            desc_fr = await _translate_to_fr(desc_src)
-            desc_display = _shorten(desc_fr or desc_src, 420)
+            tracker = core.load_tracker()
+            uid = str(interaction.user.id)
+            lst = tracker.setdefault(uid, [])
+            norm = core.normalize(title)
+            if any(core.normalize(t) == norm for t in lst):
+                return await interaction.response.send_message("⚠️ Déjà dans ton suivi.", ephemeral=True)
 
-            infos = []
-            if media.get("episodes"):
-                infos.append(f"Épisodes : **{media['episodes']}**")
-            if media.get("format"):
-                infos.append(f"Format : **{media['format']}**")
-            if media.get("seasonYear"):
-                infos.append(f"Saison : **{media.get('season','?')} {media['seasonYear']}**")
-            if score:
-                infos.append(f"Score moyen : **{score}/100**")
-
-            embed = discord.Embed(
-                title=f"🔎 À découvrir : {title}",
-                description=f"{desc_display}\n\n{url or ''}",
-                color=discord.Color.blurple()
-            )
-            if img:
-                embed.set_image(url=img)
-            embed.add_field(name="Genres", value=genres, inline=False)
-            if infos:
-                embed.add_field(name="Infos", value="\n".join(infos), inline=False)
-            footer = f"Source : AniList • Tri : {sort_label}"
-            if desc_fr:
-                footer += " • Trad auto"
-            embed.set_footer(text=footer)
-
-            await ctx.send(embed=embed)
-
-    # Test de traduction rapide
-    @commands.command(name="trtest")
-    @commands.is_owner()
-    async def trtest(self, ctx: commands.Context, *, texte: str = None):
-        """Test de traduction EN->FR (DeepL/LibreTranslate)."""
-        if not texte:
-            return await ctx.send("❌ Il manque le texte à traduire.\nEx: `!trtest This is a test`")
-        tr = await _translate_to_fr(texte)
-        if tr:
-            await ctx.send(f"**FR :** {tr}")
-        else:
-            await ctx.send("❌ Pas de service de traduction dispo (DEEPL_API_KEY ou LIBRETRANSLATE_URL manquant).")
+            lst.append(title)
+            tracker[uid] = lst
+            core.save_tracker(tracker)
+            await interaction.response.send_message(f"✅ **{title}** ajouté à ton suivi.", ephemeral=True)
+        except Exception:
+            await interaction.response.send_message("❌ Impossible d’ajouter au suivi.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
