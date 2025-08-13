@@ -1,6 +1,9 @@
 # cogs/profile.py (ajoute ces imports)
+from __future__ import annotations
 from typing import Dict, Any, List, Tuple
 import json, os
+import discord
+from discord.ext import commands
 from discord.ui import View, Button
 from modules import core
 import modules.badges as badges
@@ -192,3 +195,7 @@ class Profile(commands.Cog):
             await ctx.send(embed=embed, view=view)
         else:
             await ctx.send(embed=embed)
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(Profile(bot))
+
