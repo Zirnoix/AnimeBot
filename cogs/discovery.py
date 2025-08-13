@@ -1,53 +1,19 @@
-"""
-Simple anime discovery command.
-!decouverte (aliases: !discover, !randomanime)
-
-- Mix POPULARITY_DESC / TRENDING_DESC (au hasard)
-- Description FR si un service de traduction est configuré (LIBRETRANSLATE_URL)
-"""
-
-from __future__ import annotations
-import os
-import random
-import re
-import textwrap
+import os, re, random, textwrap
 from typing import Optional
-
 import discord
 from discord.ext import commands
-
 from modules import core
 
-# 2 variantes de tri "intéressantes"
-SORTS = ["POPULARITY_DESC", "TRENDING_DESC"]
-
-QUERY = """
-query ($page: Int, $sort: [MediaSort]) {
-  Page(page: $page, perPage: 1) {
-    media(type: ANIME, sort: $sort) {
-      id
-      title { romaji english native }
-      coverImage { large extraLarge color }
-      genres
-      episodes
-      format
-      season
-      seasonYear
-      averageScore
-      description(asHtml: false)
-      siteUrl
-    }
-  }
-}
-"""
+try:
+    import aiohttp  # requis pour les appels HTTP asynchrones
+except Exception:
+    aiohttp = None
 
 def _clean_html(txt: str) -> str:
     if not txt:
         return ""
-    # petit nettoyage des balises fréquentes
     txt = txt.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
     txt = re.sub(r"</?(i|b|em|strong)>", "", txt)
-    # supprime toute autre balise HTML résiduelle
     txt = re.sub(r"<[^>]+>", "", txt)
     return txt.strip()
 
@@ -60,39 +26,67 @@ def _shorten(txt: str, limit: int = 420) -> str:
     return cut + "…"
 
 async def _translate_to_fr(text: str) -> Optional[str]:
-    """
-    Essaie de traduire via LibreTranslate (ou équivalent) si LIBRETRANSLATE_URL est défini.
-    Sinon retourne None (le code appelant fera fallback EN).
-    - Attendu: un service compatible /translate (POST) {q, source, target, format}
-    """
-    url = os.getenv("LIBRETRANSLATE_URL")
-    if not url or not text:
-        return None
-    try:
-        import aiohttp
-    except Exception:
+    """Essaie DeepL puis LibreTranslate. Retourne None si indisponible."""
+    if not text:
         return None
 
-    payload = {
-        "q": text,
-        "source": "auto",
-        "target": "fr",
-        "format": "text",
-    }
-    try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.post(url.rstrip("/") + "/translate", json=payload, timeout=10) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-                translated = data.get("translatedText")
-                return translated or None
-    except Exception:
-        return None
+    # --- 1) DeepL ---
+    deepl_key = os.getenv("DEEPL_API_KEY")
+    if deepl_key and aiohttp:
+        try:
+            payload = {
+                "text": [text],
+                "target_lang": "FR",
+            }
+            headers = {"Authorization": f"DeepL-Auth-Key {deepl_key}"}
+            # Free: api-free.deepl.com ; Pro: api.deepl.com
+            deepl_url = os.getenv("DEEPL_API_URL", "https://api-free.deepl.com/v2/translate")
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post(deepl_url, data=payload, headers=headers, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        tr = (data.get("translations") or [{}])[0].get("text")
+                        if tr:
+                            return tr
+        except Exception:
+            pass
+
+    # --- 2) LibreTranslate ---
+    lt_url = os.getenv("LIBRETRANSLATE_URL")
+    if lt_url and aiohttp:
+        try:
+            api_key = os.getenv("LIBRETRANSLATE_API_KEY")
+            payload = {"q": text, "source": "auto", "target": "fr", "format": "text"}
+            if api_key:
+                payload["api_key"] = api_key
+            endpoint = lt_url.rstrip("/") + "/translate"
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post(endpoint, json=payload, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        tr = data.get("translatedText")
+                        if tr:
+                            return tr
+        except Exception:
+            pass
+
+    # Aucun provider dispo
+    return None
 
 class Discovery(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    @commands.command(name="trtest")
+    @commands.is_owner()
+    async def trtest(self, ctx: commands.Context, *, texte: str):
+        """Test rapide de traduction EN->FR (DeepL/LibreTranslate)."""
+        tr = await _translate_to_fr(texte)
+        if tr:
+            await ctx.send(f"**FR :** {tr}")
+        else:
+            await ctx.send("❌ Aucun service de traduction disponible (DEEPL_API_KEY ou LIBRETRANSLATE_URL manquant).")
+
 
     @commands.command(name="decouverte", aliases=["discover", "randomanime"])
     async def decouverte(self, ctx: commands.Context):
