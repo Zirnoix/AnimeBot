@@ -20,6 +20,11 @@ STREAK_PATH   = "data/streaks.json"
 MISSIONS_PATH = "data/missions.json"
 
 # ----------------- tiny storage helpers -----------------
+def _bar(current: int, goal: int, width: int = 20) -> str:
+    goal = max(1, goal)
+    fill = max(0, min(width, int(current / goal * width)))
+    return "█" * fill + "░" * (width - fill)
+
 def _load_json(path: str, default):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -75,14 +80,14 @@ class Engagement(commands.Cog):
     # ------------- DAILY CHECK-IN / STREAK -------------
     @commands.command(name="checkin", aliases=["daily", "login"])
     async def checkin(self, ctx: commands.Context):
-        """Marque ta connexion du jour, augmente la série (streak) et donne un peu d'XP."""
+        """Check-in du jour : augmente ta série (streak) et donne de l’XP."""
         uid = str(ctx.author.id)
         today = _today_str()
         yesterday = _yesterday_str()
-        data = self.streaks.get(uid, {"last": None, "streak": 0})
+        data = self.streaks.get(uid, {"last": None, "streak": 0, "best": 0})
 
         if data.get("last") == today:
-            return await ctx.send("✅ Tu as déjà fait ton check-in aujourd'hui !")
+            return await ctx.send("✅ Tu as **déjà** fait ton check-in aujourd’hui.")
 
         # calcule la streak
         if data.get("last") == yesterday:
@@ -90,25 +95,59 @@ class Engagement(commands.Cog):
         else:
             data["streak"] = 1
 
+        # record perso
+        data["best"] = max(int(data.get("best", 0)), data["streak"])
         data["last"] = today
         self.streaks[uid] = data
         _save_json(STREAK_PATH, self.streaks)
 
-        # récompense simple : base 10 XP + bonus tous les 7 jours
-        streak = data["streak"]
-        bonus = 10 + (5 if streak % 7 == 0 else 0)
-        await core.add_xp(self.bot, ctx.channel, ctx.author.id, bonus)
+        # Barème clair (rapide au début, stable ensuite)
+        s = data["streak"]
+        if s == 1:
+            xp = 10
+        elif s == 2:
+            xp = 15
+        elif 3 <= s < 7:
+            xp = 20
+        else:
+            xp = 30  # cap à partir de 7+
+
+        await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp)
+
+        # viz de progression vers le prochain palier “fort” (7, 14, 21…)
+        next_milestone = ((s // 7) + 1) * 7
+        to_next = max(0, next_milestone - s)
+        bar = _bar(next_milestone - to_next, next_milestone)
 
         embed = discord.Embed(
             title="📆 Check-in quotidien",
             description=(
-                f"**Série actuelle :** {streak} 🔥\n"
-                f"**Récompense :** +{bonus} XP"
+                f"🔥 **Série actuelle :** {s} jour{'s' if s>1 else ''}\n"
+                f"🏅 **Meilleur record :** {data['best']}\n"
+                f"🎁 **Récompense :** +{xp} XP\n\n"
+                f"Prochain palier **{next_milestone}** : {bar}  (reste **{to_next}**)"
             ),
             color=discord.Color.green(),
         )
-        embed.set_footer(text="Reviens chaque jour pour augmenter ta série !")
+        embed.set_footer(text="Reviens chaque jour pour entretenir ta série !")
         await ctx.send(embed=embed)
+
+    @commands.command(name="streak")
+    async def streak(self, ctx: commands.Context):
+        """Affiche ta série quotidienne et ton record."""
+        uid = str(ctx.author.id)
+        data = self.streaks.get(uid, {"streak": 0, "best": 0})
+        s, b = int(data.get("streak", 0)), int(data.get("best", 0))
+        if s <= 0:
+            return await ctx.send("📭 Aucune série en cours. Utilise `!daily` pour commencer.")
+        next_milestone = ((s // 7) + 1) * 7
+        to_next = max(0, next_milestone - s)
+        bar = _bar(next_milestone - to_next, next_milestone)
+        await ctx.send(
+            f"🔥 **Série actuelle : {s}**  |  🏅 **Record : {b}**\n"
+            f"Prochain palier **{next_milestone}** : {bar} (reste **{to_next}**)"
+        )
+
 
     # ------------- DAILY MISSION -------------
     def _get_or_create_today_mission(self, uid: str) -> Dict[str, Any]:
