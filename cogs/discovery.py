@@ -77,17 +77,6 @@ class Discovery(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.command(name="trtest")
-    @commands.is_owner()
-    async def trtest(self, ctx: commands.Context, *, texte: str):
-        """Test rapide de traduction EN->FR (DeepL/LibreTranslate)."""
-        tr = await _translate_to_fr(texte)
-        if tr:
-            await ctx.send(f"**FR :** {tr}")
-        else:
-            await ctx.send("❌ Aucun service de traduction disponible (DEEPL_API_KEY ou LIBRETRANSLATE_URL manquant).")
-
-
     @commands.command(name="decouverte", aliases=["discover", "randomanime"])
     async def decouverte(self, ctx: commands.Context):
         """Propose un anime à découvrir (populaire/trending)."""
