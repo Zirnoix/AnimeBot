@@ -1,21 +1,30 @@
 """
 Simple anime discovery command.
 !decouverte (aliases: !discover, !randomanime)
+
+- Mix POPULARITY_DESC / TRENDING_DESC (au hasard)
+- Description FR si un service de traduction est configuré (LIBRETRANSLATE_URL)
 """
 
 from __future__ import annotations
+import os
 import random
+import re
 import textwrap
+from typing import Optional
 
 import discord
 from discord.ext import commands
 
 from modules import core
 
+# 2 variantes de tri "intéressantes"
+SORTS = ["POPULARITY_DESC", "TRENDING_DESC"]
+
 QUERY = """
-query ($page: Int) {
+query ($page: Int, $sort: [MediaSort]) {
   Page(page: $page, perPage: 1) {
-    media(type: ANIME, sort: POPULARITY_DESC) {
+    media(type: ANIME, sort: $sort) {
       id
       title { romaji english native }
       coverImage { large extraLarge color }
@@ -32,14 +41,54 @@ query ($page: Int) {
 }
 """
 
-def _shorten(txt: str, limit: int = 350) -> str:
+def _clean_html(txt: str) -> str:
+    if not txt:
+        return ""
+    # petit nettoyage des balises fréquentes
+    txt = txt.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    txt = re.sub(r"</?(i|b|em|strong)>", "", txt)
+    # supprime toute autre balise HTML résiduelle
+    txt = re.sub(r"<[^>]+>", "", txt)
+    return txt.strip()
+
+def _shorten(txt: str, limit: int = 420) -> str:
     if not txt:
         return "—"
-    # enlève balises html éventuelles
-    clean = txt.replace("<br>", "\n").replace("<i>", "").replace("</i>", "").replace("<b>", "").replace("</b>", "")
-    if len(clean) <= limit:
-        return clean
-    return clean[:limit].rsplit(" ", 1)[0] + "…"
+    if len(txt) <= limit:
+        return txt
+    cut = txt[:limit].rsplit(" ", 1)[0]
+    return cut + "…"
+
+async def _translate_to_fr(text: str) -> Optional[str]:
+    """
+    Essaie de traduire via LibreTranslate (ou équivalent) si LIBRETRANSLATE_URL est défini.
+    Sinon retourne None (le code appelant fera fallback EN).
+    - Attendu: un service compatible /translate (POST) {q, source, target, format}
+    """
+    url = os.getenv("LIBRETRANSLATE_URL")
+    if not url or not text:
+        return None
+    try:
+        import aiohttp
+    except Exception:
+        return None
+
+    payload = {
+        "q": text,
+        "source": "auto",
+        "target": "fr",
+        "format": "text",
+    }
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.post(url.rstrip("/") + "/translate", json=payload, timeout=10) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                translated = data.get("translatedText")
+                return translated or None
+    except Exception:
+        return None
 
 class Discovery(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -48,15 +97,14 @@ class Discovery(commands.Cog):
     @commands.command(name="decouverte", aliases=["discover", "randomanime"])
     async def decouverte(self, ctx: commands.Context):
         """Propose un anime à découvrir (populaire/trending)."""
-        # Affiche "en train d'écrire..." pendant tout le boulot
         async with ctx.typing():
-            # page aléatoire (élargit un peu)
             page = random.randint(1, 500)
+            sort = random.choice(SORTS)
 
-            # IMPORTANT: query_anilist est synchrone -> on la met hors event loop
+            # core.query_anilist est synchrone -> on l’exécute hors boucle
             try:
                 import asyncio
-                data = await asyncio.to_thread(core.query_anilist, QUERY, {"page": page})
+                data = await asyncio.to_thread(core.query_anilist, QUERY, {"page": page, "sort": [sort]})
                 media_list = data.get("data", {}).get("Page", {}).get("media", []) or []
                 if not media_list:
                     raise ValueError("No media returned")
@@ -76,8 +124,12 @@ class Discovery(commands.Cog):
             )
             genres = ", ".join(media.get("genres") or []) or "—"
             score = media.get("averageScore")
-            desc = _shorten(media.get("description") or "", 400)
+            desc_en = _clean_html(media.get("description") or "")
             url = media.get("siteUrl")
+
+            # --- Traduction FR si possible ---
+            desc_fr = await _translate_to_fr(desc_en)
+            desc_display = _shorten(desc_fr or desc_en, 420)
 
             fields = []
             if media.get("episodes"):
@@ -91,7 +143,7 @@ class Discovery(commands.Cog):
 
             embed = discord.Embed(
                 title=f"🔎 À découvrir : {title}",
-                description=f"{desc}\n\n{url or ''}",
+                description=f"{desc_display}\n\n{url or ''}",
                 color=discord.Color.blurple()
             )
             if img:
@@ -99,10 +151,9 @@ class Discovery(commands.Cog):
             embed.add_field(name="Genres", value=genres, inline=False)
             if fields:
                 embed.add_field(name="Infos", value="\n".join(fields), inline=False)
+            embed.set_footer(text=f"Source : AniList • Tri : { 'Popularité' if sort=='POPULARITY_DESC' else 'Tendance' }")
 
-            # envoie après le bloc typing
             await ctx.send(embed=embed)
-    
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Discovery(bot))
