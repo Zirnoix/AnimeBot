@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Tuple
 import json, os
 from discord.ui import View, Button
 from modules import core
-from modules import badges as badge_def
+import modules.badges as badges
 
 STREAK_PATH = "data/streaks.json"
 
