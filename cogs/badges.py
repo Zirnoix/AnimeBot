@@ -10,7 +10,7 @@ BADGES: Dict[str, Dict] = {
         "name": "GuessGenre",
         "desc": "Bonnes réponses au mini-jeu GuessGenre.",
         "thresholds": [25, 50, 100, 200],
-        "icons": ["🟩", "🟦", "🟨", "🟥"],
+        "icons": ["🎭", "🎭⭐", "🎭💠", "🎭👑"],
         "source": "mini:guessgenre",
     },
     "guessyear": {
