@@ -144,7 +144,13 @@ class Profile(commands.Cog):
                     "tier": tier,
                     "next_threshold": next_th,
                 }
-                badge_buttons_payload.append((bid, spec["name"], json.dumps(payload)))
+                # Après avoir calculé: count, tier, next_th, icon, spec["name"]
+                if next_th:
+                    label_text = f"{spec['name']} ({count}/{next_th})"
+                else:
+                    label_text = f"{spec['name']} ({count}) MAX"
+                badge_buttons_payload.append((bid, label_text, json.dumps(payload)))
+
             else:
                 # rien débloqué -> on n’affiche pas, (ou tu peux afficher un icône grisé si tu préfères)
                 pass
