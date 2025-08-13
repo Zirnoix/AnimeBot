@@ -141,12 +141,12 @@ class Discovery(commands.Cog):
             )
             genres = ", ".join(media.get("genres") or []) or "—"
             score = media.get("averageScore")
-            desc_en = _clean_html(media.get("description") or "")
             url = media.get("siteUrl")
 
-            # Traduction FR si possible
-            desc_fr = await _translate_to_fr(desc_en)
-            desc_display = _shorten(desc_fr or desc_en, 420)
+            # Description : nettoie, puis tente une trad FR
+            desc_src = _clean_html(media.get("description") or "")
+            desc_fr = await _translate_to_fr(desc_src)
+            desc_display = _shorten(desc_fr or desc_src, 420)
 
             infos = []
             if media.get("episodes"):
@@ -178,8 +178,10 @@ class Discovery(commands.Cog):
     # Test de traduction rapide
     @commands.command(name="trtest")
     @commands.is_owner()
-    async def trtest(self, ctx: commands.Context, *, texte: str):
+    async def trtest(self, ctx: commands.Context, *, texte: str = None):
         """Test de traduction EN->FR (DeepL/LibreTranslate)."""
+        if not texte:
+            return await ctx.send("❌ Il manque le texte à traduire.\nEx: `!trtest This is a test`")
         tr = await _translate_to_fr(texte)
         if tr:
             await ctx.send(f"**FR :** {tr}")
