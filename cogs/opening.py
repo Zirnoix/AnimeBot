@@ -146,6 +146,15 @@ class Openings(commands.Cog):
         random.shuffle(choices)
         correct_index = choices.index(correct_anime)
 
+        seek = random.randint(0, 60)  # par ex. commence entre 0 et 60s
+        await voice.play_clip_in_channel(
+            voice_channel,
+            filepath=filepath,
+            duration_sec=20,
+            disconnect_after=True
+            # si tu veux passer le seek, expose l’arg dans play_clip_in_channel ou appelle make_source directement
+        )
+
         # Lance l’audio (20s) – utilise le helper de modules/voice.py
         try:
             await voice.play_clip_in_channel(
