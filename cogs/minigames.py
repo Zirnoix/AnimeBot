@@ -399,94 +399,123 @@ class MiniGames(commands.Cog):
 
         await ctx.send(embed=embed, view=view)
 
-    @commands.command(name="guessop")
-    async def guess_op(self, ctx: commands.Context) -> None:
-        """Devine l'opening d'un anime."""
-        if not ctx.author.voice or not ctx.author.voice.channel:
-            await ctx.send("🔇 Tu dois être dans un salon vocal pour jouer à ce jeu.")
-            return
+@commands.command(name="guessop")
+async def guess_op(self, ctx: commands.Context) -> None:
+    """Devine l'opening d'un anime."""
+    # Vérification de la présence en vocal
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        await ctx.send("🔇 Tu dois être dans un salon vocal pour jouer à ce jeu.")
+        return
 
-        voice_channel = ctx.author.voice.channel
-        audio_folder = "assets/audio/openings"
+    voice_channel = ctx.author.voice.channel
+    audio_folder = "assets/audio/openings"
 
-        if not os.path.exists(audio_folder):
-            await ctx.send("❌ Le dossier des openings n'est pas configuré.")
-            return
+    if not os.path.exists(audio_folder):
+        await ctx.send("❌ Le dossier des openings n'est pas configuré.")
+        return
 
-        files = [f for f in os.listdir(audio_folder) if f.endswith(".mp3")]
-        if not files:
-            await ctx.send("❌ Aucun opening trouvé dans le dossier.")
-            return
+    files = [f for f in os.listdir(audio_folder) if f.endswith(".mp3")]
+    if not files:
+        await ctx.send("❌ Aucun opening trouvé dans le dossier.")
+        return
 
-        selected_file = random.choice(files)
-        correct_anime = selected_file.replace(".mp3", "")
+    selected_file = random.choice(files)
+    correct_anime = selected_file.replace(".mp3", "")
 
-        query = '''
-        query {
-          Page(perPage: 10) {
-            media(type: ANIME, sort: POPULARITY_DESC) {
-              title { romaji }
-            }
-          }
+    # Préparation de la liste de choix (1 bonne réponse + 3 leurres aléatoires)
+    query = '''
+    query {
+      Page(perPage: 10) {
+        media(type: ANIME, sort: POPULARITY_DESC) {
+          title { romaji }
         }
-        '''
-        try:
-            data = core.query_anilist(query)
-            anime_titles = [m["title"]["romaji"] for m in data["data"]["Page"]["media"]]
-            choices = [correct_anime]
+      }
+    }
+    '''
+    try:
+        data = core.query_anilist(query)
+        anime_titles = [m["title"]["romaji"] for m in data["data"]["Page"]["media"]]
+        choices = [correct_anime]
+        while len(choices) < 4:
+            alt = random.choice(anime_titles)
+            if alt not in choices:
+                choices.append(alt)
+        random.shuffle(choices)
+        correct_index = choices.index(correct_anime)
 
-            while len(choices) < 4:
-                alt = random.choice(anime_titles)
-                if alt not in choices:
-                    choices.append(alt)
+        # Connexion au salon vocal et lecture de l'extrait audio (20 secondes)
+        vc = await voice_channel.connect()
+        audio_source = discord.FFmpegPCMAudio(
+            os.path.join(audio_folder, selected_file),
+            executable="ffmpeg",
+            before_options="-t 20",  # limite la lecture à 20s
+            options="-vn"            # ignore la vidéo le cas échéant, audio only
+        )
+        vc.play(audio_source)
 
-            random.shuffle(choices)
-            correct_index = choices.index(correct_anime)
+        # Envoi de l'embed avec les choix
+        embed = discord.Embed(
+            title="🎵 Devine l'opening !",
+            description="De quel anime vient cet opening ?",
+            color=discord.Color.purple()
+        )
+        for i, title in enumerate(choices, 1):
+            embed.add_field(name=f"{i}️⃣", value=title, inline=False)
+        await ctx.send(embed=embed)
 
-            vc = await voice_channel.connect()
-            audio_source = discord.FFmpegPCMAudio(
-                os.path.join(audio_folder, selected_file),
-                executable='ffmpeg'
+        # Nouvelle fonction de vérification : n'importe quel utilisateur du vocal peut répondre
+        def check(m: discord.Message) -> bool:
+            return (
+                m.channel == ctx.channel
+                and m.content.isdigit()
+                and 1 <= int(m.content) <= 4
+                and not m.author.bot
+                and m.author.voice  # l'auteur a une connexion vocal...
+                and m.author.voice.channel == voice_channel  # ... dans le même salon vocal
             )
-            vc.play(audio_source)
 
-            embed = discord.Embed(
-                title="🎵 Devine l'opening !",
-                description="De quel anime vient cet opening ?",
-                color=discord.Color.purple()
-            )
-            for i, title in enumerate(choices, 1):
-                embed.add_field(name=f"{i}️⃣", value=title, inline=False)
-            await ctx.send(embed=embed)
-
-            def check(m: discord.Message) -> bool:
-                return (m.author == ctx.author and
-                        m.channel == ctx.channel and
-                        m.content.isdigit() and
-                        1 <= int(m.content) <= 4)
-
+        winner = None
+        # Temps limite de 30 secondes pour répondre
+        end_time = asyncio.get_running_loop().time() + 30  # ou +20 pour 20 secondes
+        while True:
+            # Calcule le temps restant à chaque itération
+            timeout = end_time - asyncio.get_running_loop().time()
+            if timeout <= 0:
+                break  # temps écoulé
             try:
-                msg = await self.bot.wait_for("message", timeout=30.0, check=check)
-                choice = int(msg.content) - 1
-
-                if choice == correct_index:
-                    await ctx.send("✅ Bonne réponse ! Tu gagnes 15 XP !")
-                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 15)
-                    core.add_mini_score(ctx.author.id, "guessop", 1)
-                else:
-                    await ctx.send(f"❌ Mauvaise réponse ! C'était : **{correct_anime}**")
-
+                msg = await self.bot.wait_for("message", timeout=timeout, check=check)
             except asyncio.TimeoutError:
-                await ctx.send(f"⏰ Temps écoulé ! La bonne réponse était : **{correct_anime}**")
+                break  # fin du timer sans réponse correcte
+            # Une réponse valide a été reçue
+            choice = int(msg.content) - 1
+            if choice == correct_index:
+                # Bonne réponse trouvée
+                winner = msg.author
+                vc.stop()  # stoppe la lecture audio immédiatement
+                await ctx.send(f"✅ Bonne réponse, {msg.author.mention} ! Tu gagnes 15 XP !")
+                await core.add_xp(self.bot, ctx.channel, msg.author.id, 15)
+                core.add_mini_score(msg.author.id, "guessop", 1)
+                break  # on sort de la boucle, le quiz est terminé
+            else:
+                # Mauvaise réponse -> on informe et on continue à attendre d'autres propositions
+                await ctx.send(f"❌ Mauvaise réponse, {msg.author.mention} !")
+                # (Le joueur peut éventuellement réessayer, ou laisser quelqu'un d'autre répondre)
+                continue
 
-        except Exception as e:
-            await ctx.send("❌ Une erreur s'est produite.")
+        # Si la boucle se termine sans vainqueur, notifier la bonne réponse
+        if winner is None:
+            vc.stop()  # on arrête l'audio si ce n'est pas déjà fini
+            await ctx.send(f"⏰ Temps écoulé ! La bonne réponse était : **{correct_anime}**")
 
-        finally:
-            try:
-                await vc.disconnect()
-            except:
-                pass
+    except Exception as e:
+        await ctx.send("❌ Une erreur s'est produite.")
+
+    finally:
+        # Déconnexion du salon vocal quoiqu'il arrive
+        try:
+            await vc.disconnect()
+        except:
+            pass
 
 
 async def setup(bot: commands.Bot) -> None:
