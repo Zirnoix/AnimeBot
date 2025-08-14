@@ -6,12 +6,12 @@ import discord
 
 FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
 
-def make_source(path: str, duration_sec: int = 20) -> discord.FFmpegPCMAudio:
-    # -t <sec> = coupe après N secondes ; -vn = ignore la vidéo
+def make_source(path: str, duration_sec: int = 20, seek_start: int = 0) -> discord.FFmpegPCMAudio:
+    # -ss <sec> = seek au début, -t <sec> = durée
     return discord.FFmpegPCMAudio(
         path,
         executable=FFMPEG_BIN,
-        before_options=f"-t {int(duration_sec)}",
+        before_options=f"-ss {int(seek_start)} -t {int(duration_sec)}",
         options="-vn"
     )
 
