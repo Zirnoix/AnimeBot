@@ -6,6 +6,9 @@ from discord.ext import commands
 
 from modules import core
 from modules.voice import play_clip_in_channel  # assure-toi que ce module existe
+from modules import voice
+
+
 
 class GuessOPView(discord.ui.View):
     def __init__(self, bot: commands.Bot, ctx: commands.Context, voice_channel: discord.VoiceChannel,
@@ -123,8 +126,12 @@ class Openings(commands.Cog):
         correct_index = choices.index(correct_anime)
 
         # Lance l’audio (20s) en tâche asynchrone
-        asyncio.create_task(
-            play_clip_in_channel(voice_channel, filepath, duration_sec=20, disconnect_after=True)
+        vc_channel = ctx.author.voice.channel
+        await voice.play_clip_in_channel(
+            vc_channel,
+            filepath=selected_mp3_path,
+            duration_sec=20,       # 20 secondes d’extrait
+            disconnect_after=True  # déconnecte à la fin
         )
 
         # Embed question
