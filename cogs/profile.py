@@ -185,11 +185,9 @@ class Profile(commands.Cog):
                 "animequiz": "Quiz Solo",
                 "animequizmulti": "Quiz Multi",
                 "higherlower": "Higher/Lower",
-                "highermean": "Higher/Mean",
                 "guessyear": "Guess Year",
                 "guessepisodes": "Guess Episodes",
                 "guessgenre": "Guess Genre",
-                "duel": "Duel",
             }
             value = ""
             for g, v in mini_scores.items():
