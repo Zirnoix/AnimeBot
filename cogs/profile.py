@@ -77,20 +77,20 @@ class Profile(commands.Cog):
 
     @commands.command(name="mycard")
     async def mycard(self, ctx: commands.Context) -> None:
-        """Affiche une carte de membre stylée avec les statistiques globales + badges."""
+        """Affiche une carte de membre stylée avec les statistiques globales + badges + streak."""
         user_id_str = str(ctx.author.id)
         user_id = ctx.author.id
-
+    
         # Progression
         levels = core.load_levels()
         user_data = levels.get(user_id_str, {"xp": 0, "level": 0})
         xp = user_data.get("xp", 0)
         level = user_data.get("level", 0)
         next_xp = core.xp_for_next_level(level)
-
+    
         total_segments = 20
         progress = max(0, min(total_segments, int((xp / max(1, next_xp)) * total_segments)))
-
+    
         level_colors = [
             (150, "🌈"), (140, "⬜"), (130, "🟫"), (120, "🟪"),
             (110, "🟦"), (100, "🟩"), (90, "🟥"), (80, "🟧"),
@@ -98,38 +98,42 @@ class Profile(commands.Cog):
             (30, "🟦"), (20, "🟥"), (10, "🟦"), (0, "🟩"),
         ]
         color_emoji = next(c for lvl, c in level_colors if level >= lvl)
-        filled = color_emoji * progress
-        empty = "⬛" * (total_segments - progress)
-        bar = filled + empty
-
+        bar = color_emoji * progress + "⬛" * (total_segments - progress)
+    
         title = core.get_title_for_global_level(level)
-
+    
         scores = core.load_scores()
         quiz_score = scores.get(user_id_str, 0)
         mini_scores = core.get_mini_scores(user_id)
-
-        # ======== BADGES ========
+    
+        # ======== COMPTEURS & STREAK ========
         counts = _get_user_counts(user_id)
-        badge_line_parts: List[str] = []
-        badge_buttons_payload: List[Tuple[str, str, str]] = []
-
+        streak_days = int(counts.get("streak_days", 0))
+    
+        # ======== BADGES ========
+        badge_icons = []
+        badge_buttons_payload = []
+        # On calcule aussi les “prochains paliers” si aucun badge
+        upcoming = []  # [(name, count, next_th, missing)]
+    
         for bid, spec in BADGES.items():
             source = spec.get("source", "")
             if source.startswith("mini:"):
                 key = source.split(":", 1)[1]
                 count = int(counts.get(key, 0))
             elif source == "streak:days":
-                count = int(counts.get("streak_days", 0))
+                count = streak_days
             else:
                 count = 0
-
+    
             thresholds = spec["thresholds"]
             icons = spec["icons"]
             tier, next_th = evaluate_tier(count, thresholds)
-
+    
             if tier >= 0:
+                # débloqué
                 icon = icons[tier] if tier < len(icons) else "🎖️"
-                badge_line_parts.append(icon)
+                badge_icons.append(icon)
                 payload = {
                     "name": spec["name"],
                     "icon": icon,
@@ -138,24 +142,44 @@ class Profile(commands.Cog):
                     "tier": tier,
                     "next_threshold": next_th,
                 }
-                if next_th:
-                    label_text = f"{spec['name']} ({count}/{next_th})"
-                else:
-                    label_text = f"{spec['name']} ({count}) MAX"
+                label_text = f"{spec['name']} ({count}/{next_th})" if next_th else f"{spec['name']} ({count}) MAX"
                 badge_buttons_payload.append((bid, label_text, json.dumps(payload)))
-
-        # Embed
+            else:
+                # pas encore débloqué → on retient le prochain palier pour l’affichage “prochains badges”
+                next_needed = thresholds[0] if thresholds else None
+                if next_needed:
+                    upcoming.append((spec["name"], count, next_needed, next_needed - count))
+    
+        # Trie les “prochains badges” par manque le plus petit
+        upcoming.sort(key=lambda x: x[3])
+        upcoming = upcoming[:3]
+    
+        # ======== EMBED ========
         embed = discord.Embed(
             title=f"🎴 Profil de {ctx.author.display_name}",
             color=discord.Color.from_rgb(255 - min(level * 2, 200), 100 + min(level, 100), 30)
         )
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
+    
         embed.add_field(name="🎖️ Titre", value=title, inline=True)
         embed.add_field(name="🧬 Niveau", value=f"{level}", inline=True)
         embed.add_field(name="🧪 XP", value=f"{xp} / {next_xp}", inline=True)
         embed.add_field(name="📈 Progression", value=bar, inline=False)
         embed.add_field(name="🏆 Score Quiz", value=f"{quiz_score}", inline=True)
-
+    
+        # 👉 STREAK toujours visible
+        # (affiche la série actuelle + petit hint pour le prochain palier de streak si défini)
+        next_streak_palier = None
+        for t in sorted(BADGES.get("streak", {}).get("thresholds", [])):
+            if streak_days < t:
+                next_streak_palier = t
+                break
+        streak_line = f"🔥 Série actuelle : **{streak_days}** jour(s)"
+        if next_streak_palier:
+            streak_line += f" • Prochain palier : **{streak_days}/{next_streak_palier}**"
+        embed.add_field(name="🔥 Streak", value=streak_line, inline=False)
+    
+        # Mini-jeux
         if mini_scores:
             mapping = {
                 "animequiz": "Quiz Solo",
@@ -172,15 +196,18 @@ class Profile(commands.Cog):
                 name = mapping.get(g, g.replace("_", " ").capitalize())
                 value += f"• **{name}** : {v}\n"
             embed.add_field(name="🎮 Mini-jeux", value=value, inline=False)
-
-        # Badges (ligne + boutons)
-        if badge_line_parts:
-            embed.add_field(name="🎖️ Badges", value=" ".join(badge_line_parts), inline=False)
+    
+        # Badges (ligne + boutons) OU message + “Prochains badges”
+        if badge_icons:
+            embed.add_field(name="🎖️ Badges", value=" ".join(badge_icons), inline=False)
             view = BadgesView(badge_buttons_payload)
             await ctx.send(embed=embed, view=view)
         else:
+            embed.add_field(name="🎖️ Badges", value="— Aucun badge débloqué pour l’instant.", inline=False)
+            if upcoming:
+                up_lines = [f"• **{name}** — {count}/{need}" for (name, count, need, _miss) in upcoming]
+                embed.add_field(name="🎯 Prochains badges à portée", value="\n".join(up_lines), inline=False)
             await ctx.send(embed=embed)
-
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Profile(bot))
