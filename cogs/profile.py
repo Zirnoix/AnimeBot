@@ -6,7 +6,7 @@ import discord
 from discord.ext import commands
 from discord.ui import View, Button
 from modules import core
-import modules.badges as badges
+from modules.badges import BADGES, evaluate_tier
 
 STREAK_PATH = "data/streaks.json"
 
