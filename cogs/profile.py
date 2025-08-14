@@ -1,40 +1,17 @@
-# cogs/profile.py (ajoute ces imports)
+# cogs/profile.py
 from __future__ import annotations
-from typing import Dict, Any, List, Tuple
-import json, os
+
+import json
+from typing import List, Tuple
+
 import discord
 from discord.ext import commands
-from discord.ui import View, Button
+
 from modules import core
 from modules.badges import BADGES, evaluate_tier
 
-STREAK_PATH = "data/streaks.json"
 
-def _load_streak(uid: int) -> int:
-    """Lit la streak actuelle depuis data/streaks.json (si présent)."""
-    try:
-        with open(STREAK_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f) or {}
-        info = data.get(str(uid)) or {}
-        return int(info.get("streak", 0))
-    except Exception:
-        return 0
-
-def _get_user_counts(uid: int) -> Dict[str, int]:
-    """
-    Agrège les compteurs nécessaires aux badges.
-    - mini-scores: via core.get_mini_scores(uid)
-    - streak: via data/streaks.json
-    """
-    counts: Dict[str, int] = {}
-    mini = core.get_mini_scores(uid) or {}  # ex: {"animequiz": 12, "guessgenre": 44, ...}
-    # map mini-scores
-    for k in ["animequiz", "animequizmulti", "guessgenre", "guessyear"]:
-        counts[k] = int(mini.get(k, 0))
-    # streak
-    counts["streak_days"] = _load_streak(uid)
-    return counts
-
+# ---------- HELPERS BADGES ----------
 def _get_user_counts(user_id: int) -> dict:
     """
     Agrège les compteurs utilisés par les badges :
@@ -67,6 +44,7 @@ class BadgesView(discord.ui.View):
                 style=discord.ButtonStyle.secondary,
                 custom_id=f"badge:{bid}"
             )
+
             async def on_click(interaction: discord.Interaction, payload=payload):
                 try:
                     data = json.loads(payload)
@@ -77,7 +55,7 @@ class BadgesView(discord.ui.View):
                 desc = data.get("desc", "")
                 count = data.get("count", 0)
                 next_th = data.get("next_threshold")
-                tier = int(data.get("tier", -1)) + 1  # tiers humains: 0→“aucun”, 1→bronze…
+                tier = int(data.get("tier", -1)) + 1  # 0→aucun, 1→palier1, etc.
                 nxt = f"{count}/{next_th}" if next_th else "MAX atteint"
                 txt = (
                     f"**{name}**\n{desc}\n"
@@ -89,28 +67,30 @@ class BadgesView(discord.ui.View):
             btn.callback = on_click
             self.add_item(btn)
 
-# ... ta classe Profile existe déjà, on complète la commande mycard
+
+# ---------- COG ----------
 class Profile(commands.Cog):
-    # ... __init__ etc. inchangés
+    """Profil + stats + badges."""
+
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
 
     @commands.command(name="mycard")
     async def mycard(self, ctx: commands.Context) -> None:
         """Affiche une carte de membre stylée avec les statistiques globales + badges."""
         user_id_str = str(ctx.author.id)
         user_id = ctx.author.id
-    
-        # Chargement données de progression
+
+        # Progression
         levels = core.load_levels()
         user_data = levels.get(user_id_str, {"xp": 0, "level": 0})
         xp = user_data.get("xp", 0)
         level = user_data.get("level", 0)
         next_xp = core.xp_for_next_level(level)
-    
-        # Progression (20 segments)
+
         total_segments = 20
         progress = max(0, min(total_segments, int((xp / max(1, next_xp)) * total_segments)))
-    
-        # Couleur barre par paliers
+
         level_colors = [
             (150, "🌈"), (140, "⬜"), (130, "🟫"), (120, "🟪"),
             (110, "🟦"), (100, "🟩"), (90, "🟥"), (80, "🟧"),
@@ -121,39 +101,35 @@ class Profile(commands.Cog):
         filled = color_emoji * progress
         empty = "⬛" * (total_segments - progress)
         bar = filled + empty
-    
-        # Titre global
+
         title = core.get_title_for_global_level(level)
-    
-        # Score quiz + mini-jeux
+
         scores = core.load_scores()
         quiz_score = scores.get(user_id_str, 0)
         mini_scores = core.get_mini_scores(user_id)
-    
+
         # ======== BADGES ========
         counts = _get_user_counts(user_id)
-        shown_badges: List[str] = []
         badge_line_parts: List[str] = []
         badge_buttons_payload: List[Tuple[str, str, str]] = []
-    
-        # Pour chaque badge défini, calcule le palier débloqué et prépare l’affichage
+
         for bid, spec in BADGES.items():
             source = spec.get("source", "")
-            count = 0
             if source.startswith("mini:"):
                 key = source.split(":", 1)[1]
                 count = int(counts.get(key, 0))
             elif source == "streak:days":
                 count = int(counts.get("streak_days", 0))
-    
+            else:
+                count = 0
+
             thresholds = spec["thresholds"]
             icons = spec["icons"]
             tier, next_th = evaluate_tier(count, thresholds)
-    
+
             if tier >= 0:
                 icon = icons[tier] if tier < len(icons) else "🎖️"
                 badge_line_parts.append(icon)
-                shown_badges.append(bid)
                 payload = {
                     "name": spec["name"],
                     "icon": icon,
@@ -167,21 +143,19 @@ class Profile(commands.Cog):
                 else:
                     label_text = f"{spec['name']} ({count}) MAX"
                 badge_buttons_payload.append((bid, label_text, json.dumps(payload)))
-            # sinon: pas encore atteint → on n’affiche pas
-    
-        # Embed final
+
+        # Embed
         embed = discord.Embed(
             title=f"🎴 Profil de {ctx.author.display_name}",
             color=discord.Color.from_rgb(255 - min(level * 2, 200), 100 + min(level, 100), 30)
         )
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
-    
         embed.add_field(name="🎖️ Titre", value=title, inline=True)
         embed.add_field(name="🧬 Niveau", value=f"{level}", inline=True)
         embed.add_field(name="🧪 XP", value=f"{xp} / {next_xp}", inline=True)
         embed.add_field(name="📈 Progression", value=bar, inline=False)
         embed.add_field(name="🏆 Score Quiz", value=f"{quiz_score}", inline=True)
-    
+
         if mini_scores:
             mapping = {
                 "animequiz": "Quiz Solo",
@@ -198,8 +172,8 @@ class Profile(commands.Cog):
                 name = mapping.get(g, g.replace("_", " ").capitalize())
                 value += f"• **{name}** : {v}\n"
             embed.add_field(name="🎮 Mini-jeux", value=value, inline=False)
-    
-        # Badges (ligne d’icônes) + boutons “info”
+
+        # Badges (ligne + boutons)
         if badge_line_parts:
             embed.add_field(name="🎖️ Badges", value=" ".join(badge_line_parts), inline=False)
             view = BadgesView(badge_buttons_payload)
@@ -207,6 +181,6 @@ class Profile(commands.Cog):
         else:
             await ctx.send(embed=embed)
 
+
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Profile(bot))
-
