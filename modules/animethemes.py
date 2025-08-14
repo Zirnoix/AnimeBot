@@ -110,8 +110,8 @@ def _passes_filters(
     return True
 
 async def random_opening_filtered(
-    min_year: int = 2005,
-    min_score_10: float = 5.0,  # 5/10
+    min_year: int = 2000,
+    min_score_10: float = 4,  # 4/10
     banned_genres: Optional[Set[str]] = None,
     banned_formats: Optional[Set[str]] = None,
     max_attempts: int = 10,
@@ -120,7 +120,7 @@ async def random_opening_filtered(
     Tente jusqu'à max_attempts de renvoyer (title, theme_label, video_url)
     qui passe les filtres AniList (année, score, genres exclus, formats exclus).
     """
-    banned_genres = banned_genres or {"mahou shoujo", "kids"}  # ajoute ce que tu veux
+    banned_genres = banned_genres or {}  # ajoute ce que tu veux
     banned_formats = banned_formats or {"MUSIC"}               # évite “Music”-only, ONA si tu veux etc.
 
     for _ in range(max_attempts):
