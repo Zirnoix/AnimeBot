@@ -6,3 +6,4 @@ python-dotenv
 Babel
 pytz
 aiofiles
+PyNaCl
