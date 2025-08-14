@@ -1,33 +1,48 @@
 # cogs/opening.py
 from __future__ import annotations
 import os, random, asyncio, re
+from typing import List
+
 import discord
 from discord.ext import commands
 
 from modules import core
-from modules import voice  # <-- garde uniquement celui-ci
+from modules import voice              # <-- utilise ton helper voice.play_clip_in_channel
+from modules import animethemes        # <-- provider AnimeThemes + filtres
 
+# ==== Configuration ====
+USE_ANIMETHEMES = True         # essaie AnimeThemes d'abord, sinon fallback local
+DURATION_SEC = 20              # durée de l'extrait
+ANSWER_TIMEOUT = 30            # temps pour répondre (secondes)
+
+# Filtres AniList (appliqués quand on pioche via AnimeThemes)
+MIN_YEAR = 2005
+MIN_SCORE_10 = 5.0
+BANNED_GENRES = {"mahou shoujo", "kids"}    # complète si besoin
+BANNED_FORMATS = {"MUSIC"}                  # ajoute "ONA" si tu veux
+
+LOCAL_AUDIO_FOLDER = "assets/audio/openings"   # fallback local
 
 def _clean_title_from_filename(name: str) -> str:
-    """Nettoie un nom de fichier en titre 'propre' (enlève extension, numéro OP/ED, crochets…)."""
+    """Nettoie un nom de fichier en titre : retire extension, 'OP/ED', crochets, underscores…"""
     base = os.path.splitext(name)[0]
-    # enlève tags entre [] ou () et suffixes type 'OP1', 'OP 2', 'Opening'
-    base = re.sub(r"[\[\(].*?[\]\)]", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"[\[\(].*?[\]\)]", "", base, flags=re.IGNORECASE)         # [..] ou (..)
     base = re.sub(r"\b(OP|OPENING|ED|ENDING)\s*\d*\b", "", base, flags=re.IGNORECASE)
     base = re.sub(r"[_\-]+", " ", base)
     base = re.sub(r"\s{2,}", " ", base).strip()
     return base or os.path.splitext(name)[0]
 
 
+# ================== UI (boutons) ==================
 class GuessOPView(discord.ui.View):
     def __init__(
         self,
         bot: commands.Bot,
         ctx: commands.Context,
         voice_channel: discord.VoiceChannel,
-        choices: list[str],
+        choices: List[str],
         correct_index: int,
-        timeout_sec: int = 30
+        timeout_sec: int = ANSWER_TIMEOUT
     ):
         super().__init__(timeout=timeout_sec)
         self.bot = bot
@@ -45,6 +60,7 @@ class GuessOPView(discord.ui.View):
             self.add_item(GuessOPButton(index=i))
 
     async def on_timeout(self):
+        # Grise les boutons à la fin
         for item in self.children:
             if isinstance(item, discord.ui.Button):
                 item.disabled = True
@@ -65,7 +81,7 @@ class GuessOPButton(discord.ui.Button):
         if interaction.user.bot:
             return await interaction.response.defer(ephemeral=True)
 
-        # doit être dans le même salon vocal
+        # doit être dans le même salon vocal que l’hôte du jeu
         if not interaction.user.voice or interaction.user.voice.channel != view.voice_channel:
             return await interaction.response.send_message(
                 "🔇 Tu dois être dans **le même salon vocal** pour répondre.",
@@ -92,8 +108,9 @@ class GuessOPButton(discord.ui.Button):
                 await interaction.response.send_message("❌ Mauvaise réponse.", ephemeral=True)
 
 
+# ================== COG ==================
 class Openings(commands.Cog):
-    """Mini-jeu GuessOP (openings d’anime, boutons, multi-joueurs)."""
+    """Mini-jeu GuessOP (openings d’anime, boutons, multi-joueurs, audio 20s)."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -101,27 +118,56 @@ class Openings(commands.Cog):
     @commands.command(name="guessop")
     async def guess_op(self, ctx: commands.Context) -> None:
         """Devine l'opening d'un anime (20s d'extrait, 4 boutons, podium de rapidité)."""
+        # Vérif vocal
         if not ctx.author.voice or not ctx.author.voice.channel:
             return await ctx.send("🔇 Tu dois être dans un **salon vocal** pour jouer.")
-        voice_channel = ctx.author.voice.channel
+        voice_channel: discord.VoiceChannel = ctx.author.voice.channel
 
-        audio_folder = "assets/audio/openings"
-        if not os.path.exists(audio_folder):
-            return await ctx.send("❌ Le dossier des openings n'est pas configuré (`assets/audio/openings`).")
+        correct_anime: str | None = None
+        media_source: str | None = None     # URL (AnimeThemes) OU chemin local
+        source_footer = ""
 
-        files = [f for f in os.listdir(audio_folder) if f.lower().endswith(".mp3")]
-        if not files:
-            return await ctx.send("❌ Aucun opening trouvé dans le dossier.")
+        # --------- 1) Essai AnimeThemes + filtres AniList ---------
+        if USE_ANIMETHEMES:
+            try:
+                got = await animethemes.random_opening_filtered(
+                    min_year=MIN_YEAR,
+                    min_score_10=MIN_SCORE_10,
+                    banned_genres=BANNED_GENRES,
+                    banned_formats=BANNED_FORMATS,
+                    max_attempts=12,
+                )
+            except Exception:
+                got = None
 
-        # Sélection du fichier audio
-        selected_file = random.choice(files)
-        filepath = os.path.join(audio_folder, selected_file)
-        correct_anime = _clean_title_from_filename(selected_file)
+            if got:
+                title, theme_label, video_url = got
+                correct_anime = title
+                media_source = video_url
+                source_footer = "Source OP : AnimeThemes.moe"
+            else:
+                # fallback local si aucun OP filtré trouvé
+                pass
 
-        # 4 choix : correct + 3 leurres AniList
+        # --------- 2) Fallback local ---------
+        if not media_source:
+            if not os.path.exists(LOCAL_AUDIO_FOLDER):
+                return await ctx.send(
+                    "❌ Aucun OP filtré trouvé et le dossier local n’existe pas "
+                    f"(`{LOCAL_AUDIO_FOLDER}`)."
+                )
+            files = [f for f in os.listdir(LOCAL_AUDIO_FOLDER) if f.lower().endswith(".mp3")]
+            if not files:
+                return await ctx.send("❌ Aucun opening trouvé dans le dossier local.")
+            pick = random.choice(files)
+            media_source = os.path.join(LOCAL_AUDIO_FOLDER, pick)
+            correct_anime = _clean_title_from_filename(pick)
+            source_footer = "Source : fichiers locaux"
+
+        # --------- 3) Prépare les 4 choix (leurres via AniList) ---------
         query = '''
         query {
-          Page(perPage: 50) {
+          Page(perPage: 60) {
             media(type: ANIME, sort: POPULARITY_DESC) {
               title { romaji }
             }
@@ -146,55 +192,55 @@ class Openings(commands.Cog):
         random.shuffle(choices)
         correct_index = choices.index(correct_anime)
 
-        seek = random.randint(0, 60)  # par ex. commence entre 0 et 60s
-        await voice.play_clip_in_channel(
-            voice_channel,
-            filepath=filepath,
-            duration_sec=20,
-            disconnect_after=True
-            # si tu veux passer le seek, expose l’arg dans play_clip_in_channel ou appelle make_source directement
-        )
-
-        # Lance l’audio (20s) – utilise le helper de modules/voice.py
+        # --------- 4) Lecture audio dans le vocal ---------
         try:
             await voice.play_clip_in_channel(
                 voice_channel,
-                filepath=filepath,      # <-- corrige le nom de variable
-                duration_sec=20,
+                filepath=media_source,     # URL (AnimeThemes) ou chemin local
+                duration_sec=DURATION_SEC,
                 disconnect_after=True
             )
         except Exception:
-            # on n’arrête pas le jeu si l’audio échoue
-            await ctx.send("⚠️ Impossible de jouer l'extrait audio (ffmpeg / permissions ?).")
+            # On n’annule pas la partie si l’audio foire (ffmpeg, réseau, permissions)
+            await ctx.send("⚠️ Impossible de jouer l'extrait audio (ffmpeg / URL / permissions ?).")
 
-        # Embed question
+        # --------- 5) Envoi de la question + boutons ---------
         em = discord.Embed(
             title="🎵 Devine l’opening !",
-            description="Clique sur **1–4** pour répondre (30s).",
+            description=f"Clique sur **1–4** pour répondre (**{ANSWER_TIMEOUT}s**).",
             color=discord.Color.purple()
         )
         for i, title in enumerate(choices, 1):
             em.add_field(name=f"{i}️⃣", value=title, inline=False)
+        if source_footer:
+            em.set_footer(text=source_footer)
 
-        # Vue + boutons
-        view = GuessOPView(self.bot, ctx, voice_channel, choices, correct_index, timeout_sec=30)
+        view = GuessOPView(self.bot, ctx, voice_channel, choices, correct_index, timeout_sec=ANSWER_TIMEOUT)
         msg = await ctx.send(embed=em, view=view)
         view.message = msg
 
-        # Attendre la fin
+        # --------- 6) Fin de manche & récompenses ---------
         try:
             await view.wait()
         except Exception:
             pass
 
-        # Résultats + XP
         if not view.winners_order and not view.others_correct:
+            # Désactive les boutons
+            try:
+                for item in view.children:
+                    if isinstance(item, discord.ui.Button):
+                        item.disabled = True
+                await msg.edit(view=view)
+            except Exception:
+                pass
             return await ctx.send(f"⏰ Temps écoulé ! La bonne réponse était : **{correct_anime}**")
 
         podium_xp = [15, 10, 7]
         others_xp = 3
         award_lines = []
 
+        # Podium
         for rank, user in enumerate(view.winners_order, start=1):
             xp = podium_xp[rank - 1]
             award_lines.append(f"**#{rank}** {user.mention} — +{xp} XP")
@@ -207,6 +253,7 @@ class Openings(commands.Cog):
             except Exception:
                 pass
 
+        # Autres bonnes réponses (hors top 3)
         for user in view.others_correct:
             award_lines.append(f"• {user.mention} — +{others_xp} XP")
             try:
