@@ -1,18 +1,34 @@
 # cogs/opening.py
 from __future__ import annotations
-import os, random, asyncio
+import os, random, asyncio, re
 import discord
 from discord.ext import commands
 
 from modules import core
-from modules.voice import play_clip_in_channel  # assure-toi que ce module existe
-from modules import voice
+from modules import voice  # <-- garde uniquement celui-ci
 
+
+def _clean_title_from_filename(name: str) -> str:
+    """Nettoie un nom de fichier en titre 'propre' (enlève extension, numéro OP/ED, crochets…)."""
+    base = os.path.splitext(name)[0]
+    # enlève tags entre [] ou () et suffixes type 'OP1', 'OP 2', 'Opening'
+    base = re.sub(r"[\[\(].*?[\]\)]", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"\b(OP|OPENING|ED|ENDING)\s*\d*\b", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"[_\-]+", " ", base)
+    base = re.sub(r"\s{2,}", " ", base).strip()
+    return base or os.path.splitext(name)[0]
 
 
 class GuessOPView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, ctx: commands.Context, voice_channel: discord.VoiceChannel,
-                 choices: list[str], correct_index: int, timeout_sec: int = 30):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        ctx: commands.Context,
+        voice_channel: discord.VoiceChannel,
+        choices: list[str],
+        correct_index: int,
+        timeout_sec: int = 30
+    ):
         super().__init__(timeout=timeout_sec)
         self.bot = bot
         self.ctx = ctx
@@ -38,9 +54,10 @@ class GuessOPView(discord.ui.View):
             except Exception:
                 pass
 
+
 class GuessOPButton(discord.ui.Button):
     def __init__(self, index: int):
-        super().__init__(label=str(index+1), style=discord.ButtonStyle.primary)
+        super().__init__(label=str(index + 1), style=discord.ButtonStyle.primary)
         self.index = index
 
     async def callback(self, interaction: discord.Interaction):
@@ -48,7 +65,7 @@ class GuessOPButton(discord.ui.Button):
         if interaction.user.bot:
             return await interaction.response.defer(ephemeral=True)
 
-        # Doit être dans le même salon vocal
+        # doit être dans le même salon vocal
         if not interaction.user.voice or interaction.user.voice.channel != view.voice_channel:
             return await interaction.response.send_message(
                 "🔇 Tu dois être dans **le même salon vocal** pour répondre.",
@@ -74,6 +91,7 @@ class GuessOPButton(discord.ui.Button):
             else:
                 await interaction.response.send_message("❌ Mauvaise réponse.", ephemeral=True)
 
+
 class Openings(commands.Cog):
     """Mini-jeu GuessOP (openings d’anime, boutons, multi-joueurs)."""
 
@@ -90,19 +108,20 @@ class Openings(commands.Cog):
         audio_folder = "assets/audio/openings"
         if not os.path.exists(audio_folder):
             return await ctx.send("❌ Le dossier des openings n'est pas configuré (`assets/audio/openings`).")
-        files = [f for f in os.listdir(audio_folder) if f.endswith(".mp3")]
+
+        files = [f for f in os.listdir(audio_folder) if f.lower().endswith(".mp3")]
         if not files:
             return await ctx.send("❌ Aucun opening trouvé dans le dossier.")
 
-        # Sélection d’un fichier audio
+        # Sélection du fichier audio
         selected_file = random.choice(files)
         filepath = os.path.join(audio_folder, selected_file)
-        correct_anime = os.path.splitext(selected_file)[0]
+        correct_anime = _clean_title_from_filename(selected_file)
 
         # 4 choix : correct + 3 leurres AniList
         query = '''
         query {
-          Page(perPage: 30) {
+          Page(perPage: 50) {
             media(type: ANIME, sort: POPULARITY_DESC) {
               title { romaji }
             }
@@ -116,23 +135,28 @@ class Openings(commands.Cog):
             pool = []
 
         choices = [correct_anime]
-        while len(choices) < 4 and pool:
-            alt = random.choice(pool)
-            if alt not in choices:
+        tries = 0
+        while len(choices) < 4 and pool and tries < 200:
+            alt = _clean_title_from_filename(random.choice(pool))
+            tries += 1
+            if alt and alt.lower() != correct_anime.lower() and alt not in choices:
                 choices.append(alt)
         while len(choices) < 4:
-            choices.append(f"Option {len(choices)+1}")
+            choices.append(f"Option {len(choices) + 1}")
         random.shuffle(choices)
         correct_index = choices.index(correct_anime)
 
-        # Lance l’audio (20s) en tâche asynchrone
-        vc_channel = ctx.author.voice.channel
-        await voice.play_clip_in_channel(
-            vc_channel,
-            filepath=selected_mp3_path,
-            duration_sec=20,       # 20 secondes d’extrait
-            disconnect_after=True  # déconnecte à la fin
-        )
+        # Lance l’audio (20s) – utilise le helper de modules/voice.py
+        try:
+            await voice.play_clip_in_channel(
+                voice_channel,
+                filepath=filepath,      # <-- corrige le nom de variable
+                duration_sec=20,
+                disconnect_after=True
+            )
+        except Exception:
+            # on n’arrête pas le jeu si l’audio échoue
+            await ctx.send("⚠️ Impossible de jouer l'extrait audio (ffmpeg / permissions ?).")
 
         # Embed question
         em = discord.Embed(
@@ -148,7 +172,7 @@ class Openings(commands.Cog):
         msg = await ctx.send(embed=em, view=view)
         view.message = msg
 
-        # Attendre fin
+        # Attendre la fin
         try:
             await view.wait()
         except Exception:
@@ -163,7 +187,7 @@ class Openings(commands.Cog):
         award_lines = []
 
         for rank, user in enumerate(view.winners_order, start=1):
-            xp = podium_xp[rank-1]
+            xp = podium_xp[rank - 1]
             award_lines.append(f"**#{rank}** {user.mention} — +{xp} XP")
             try:
                 await core.add_xp(self.bot, ctx.channel, user.id, xp)
@@ -203,6 +227,7 @@ class Openings(commands.Cog):
             pass
 
         await ctx.send(embed=res)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Openings(bot))
