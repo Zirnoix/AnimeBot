@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiohttp
+import asyncio
 import asyncio.subprocess as asp
 
 # ============ CONFIG ============
@@ -32,6 +33,7 @@ MAX_OPS = 200                               # limite totale à récupérer
 CONCURRENCY = 4                             # téléchargements simultanés
 
 # Endpoints
+ANIMETHEMES_BASE = "https://api.animethemes.moe"
 ANIMETHEMES_API = "https://api.animethemes.moe/anime"
 ANILIST_GQL = "https://graphql.anilist.co"
 
@@ -70,19 +72,30 @@ def pick_seek(max_seconds: int = 60) -> int:
     return random.randint(0, max_seconds)
 
 # ============ HTTP ============
-async def fetch_json(session: aiohttp.ClientSession, url: str, params: Optional[Dict[str, Any]] = None) -> Any:
+
+async def fetch_json(
+    session: aiohttp.ClientSession,
+    url: str,
+    params: Optional[Dict[str, Any]] = None,
+    accept_header: str = "application/vnd.api+json",
+) -> Optional[Dict[str, Any]]:
     headers = {
-        "Accept": "application/json",
+        "Accept": accept_header,
         "User-Agent": "AnimeBot-OPFetcher/1.0 (+https://github.com/Zirnoix/AnimeBot)"
     }
-    for _ in range(3):
+    for attempt in range(3):
         try:
             async with session.get(url, params=params, headers=headers, timeout=30) as resp:
-                if resp.status == 200:
+                status = resp.status
+                if status == 200:
                     return await resp.json()
-                # tiny backoff on non-200
-                await asyncio.sleep(0.8)
-        except Exception:
+                # Log utile
+                text = await resp.text()
+                print(f"[fetch_json] {url} -> HTTP {status}  (essai {attempt+1}/3)")
+                print(f"[fetch_json] Aperçu body: {text[:300]!r}")
+                await asyncio.sleep(1.0)
+        except Exception as e:
+            print(f"[fetch_json] Exception: {e} (essai {attempt+1}/3)")
             await asyncio.sleep(1.2)
     return None
 
@@ -128,11 +141,26 @@ async def anilist_lookup(session: aiohttp.ClientSession, ids: List[int]) -> Dict
     return out
 
 # ============ ANIMETHEMES ============
+async def api_status(session: aiohttp.ClientSession) -> bool:
+    """Ping rapide /status pour vérifier la connectivité."""
+    try:
+        url = f"{ANIMETHEMES_BASE}/status"
+        data = await fetch_json(session, url, params=None, accept_header="application/json")
+        ok = bool(data)
+        print(f"[*] /status -> {'OK' if ok else 'KO'} | payload keys: {list(data.keys()) if data else '—'}")
+        return ok
+    except Exception as e:
+        print(f"[*] /status exception: {e}")
+        return False
+        
 async def iter_animethemes(session: aiohttp.ClientSession):
     """
-    Iterate AnimeThemes anime with their themes + videos.
-    We fetch without server-side filters and filter locally.
+    Itère sur toutes les pages /anime avec include=animethemes.animethemeentries.videos,resources
+    Sans filtres côté serveur (on filtrera localement ensuite).
     """
+    # 1) Ping status
+    await api_status(session)
+
     page = 1
     while True:
         params = {
@@ -140,17 +168,39 @@ async def iter_animethemes(session: aiohttp.ClientSession):
             "perPage": 50,
             "include": "animethemes.animethemeentries.videos,resources",
         }
-        data = await fetch_json(session, ANIMETHEMES_API, params=params)
+
+        # Essai #1: JSON:API
+        data = await fetch_json(session, f"{ANIMETHEMES_BASE}/anime", params=params, accept_header="application/vnd.api+json")
+
+        # Essai #2: fallback Accept: application/json
         if not data:
+            data = await fetch_json(session, f"{ANIMETHEMES_BASE}/anime", params=params, accept_header="application/json")
+
+        if not data:
+            print(f"[iter_animethemes] Page {page}: aucune donnée JSON retournée.")
             break
-        anime_list = data.get("anime") or []
+
+        # L’API renvoie normalement la clé "anime"
+        anime_list = data.get("anime")
+        if anime_list is None:
+            # Log les clés pour comprendre la forme
+            print(f"[iter_animethemes] Page {page}: clé 'anime' absente. Clés retournées: {list(data.keys())}")
+            # Petit aperçu du JSON brut (au cas où)
+            # print(json.dumps(data, indent=2)[:800])
+            break
+
         if not anime_list:
+            print(f"[iter_animethemes] Page {page}: liste 'anime' vide, fin.")
             break
+
+        # yield au fil de l’eau
         for a in anime_list:
             yield a
-        # Pagination
+
         links = data.get("links") or {}
-        if not links.get("next"):
+        nxt = links.get("next")
+        print(f"[iter_animethemes] Page {page}: {len(anime_list)} animes. next={bool(nxt)}")
+        if not nxt:
             break
         page += 1
 
