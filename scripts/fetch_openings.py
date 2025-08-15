@@ -71,13 +71,19 @@ def pick_seek(max_seconds: int = 60) -> int:
 
 # ============ HTTP ============
 async def fetch_json(session: aiohttp.ClientSession, url: str, params: Optional[Dict[str, Any]] = None) -> Any:
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "AnimeBot-OPFetcher/1.0 (+https://github.com/Zirnoix/AnimeBot)"
+    }
     for _ in range(3):
         try:
-            async with session.get(url, params=params, timeout=30) as resp:
+            async with session.get(url, params=params, headers=headers, timeout=30) as resp:
                 if resp.status == 200:
                     return await resp.json()
+                # tiny backoff on non-200
+                await asyncio.sleep(0.8)
         except Exception:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.2)
     return None
 
 async def post_json(session: aiohttp.ClientSession, url: str, payload: Dict[str, Any]) -> Any:
@@ -124,29 +130,27 @@ async def anilist_lookup(session: aiohttp.ClientSession, ids: List[int]) -> Dict
 # ============ ANIMETHEMES ============
 async def iter_animethemes(session: aiohttp.ClientSession):
     """
-    Itère sur les entrées AnimeThemes avec leurs animethemes + videos.
-    On demande year>=MIN_YEAR côté AnimeThemes pour limiter.
+    Iterate AnimeThemes anime with their themes + videos.
+    We fetch without server-side filters and filter locally.
     """
     page = 1
     while True:
         params = {
             "page": page,
-            "perPage": 25,
+            "perPage": 50,
             "include": "animethemes.animethemeentries.videos,resources",
-            "filter[year]": f">={MIN_YEAR}",
-            # on pourrait aussi filtrer has=resources pour avoir anilist id, mais parfois c'est ailleurs
         }
         data = await fetch_json(session, ANIMETHEMES_API, params=params)
-        if not data or "anime" not in data:
+        if not data:
             break
         anime_list = data.get("anime") or []
         if not anime_list:
             break
         for a in anime_list:
             yield a
-        # pagination
-        pag = data.get("links", {})
-        if not pag.get("next"):
+        # Pagination
+        links = data.get("links") or {}
+        if not links.get("next"):
             break
         page += 1
 
