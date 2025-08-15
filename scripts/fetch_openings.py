@@ -9,7 +9,7 @@ from __future__ import annotations
 import json, re, asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
+import urllib.parse as _urlparse
 import aiohttp
 
 # ========= CONFIG =========
@@ -32,6 +32,21 @@ AT_ANIME  = f"{AT_BASE}/anime"
 ANILIST_GQL = "https://graphql.anilist.co"
 
 # ========= UTILS =========
+def derive_basename_from_link(link: str) -> str | None:
+    """
+    Essaie d'extraire un basename exploitable depuis une URL vidéo d'AnimeThemes.
+    Ex: https://.../video/Naruto-OP1.webm -> Naruto-OP1
+        https://.../video/Naruto-OP1?foo=bar -> Naruto-OP1
+    """
+    if not link:
+        return None
+    p = _urlparse.urlparse(link)
+    fname = os.path.basename(p.path)  # "Naruto-OP1.webm" ou "Naruto-OP1"
+    if not fname:
+        return None
+    base, ext = os.path.splitext(fname)
+    return base or fname
+    
 def ensure_dirs():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -67,6 +82,57 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, params: Optional[
             print(f"[fetch_json] Exception: {e} (try {attempt+1}/3)")
             await asyncio.sleep(1.0)
     return None
+
+async def iter_animethemes(session: aiohttp.ClientSession):
+    """
+    Itère /anime avec include=animethemes.animethemeentries.videos,resources.
+    Affiche des logs de debug pour suivre la collecte.
+    """
+    page_number = 1
+    total_candidates_seen = 0
+    while True:
+        params = {
+            "page[number]": page_number,
+            "page[size]": 50,
+            "include": "animethemes.animethemeentries.videos,resources",
+            # "filter[year]": f"{MIN_YEAR}..",  # tu peux tester ça si besoin
+        }
+
+        data = await fetch_json(session, f"{ANIMETHEMES_BASE}/anime", params=params)
+        if not data:
+            print(f"[anime] page {page_number}: no payload (stop).")
+            break
+
+        anime_list = data.get("anime")
+        if anime_list is None:
+            print(f"[anime] page {page_number}: clé 'anime' absente. Clés: {list(data.keys())}")
+            break
+        if not anime_list:
+            print(f"[anime] page {page_number}: liste vide. Fin.")
+            break
+
+        # comptage “potentiel”: combien ont au moins un theme OP avec entries/videos ?
+        page_candidates = 0
+        for a in anime_list:
+            themes = a.get("animethemes") or []
+            # compte rough pour debug
+            for th in themes:
+                if str(th.get("type", "")).upper() == "OP":
+                    entries = th.get("animethemeentries") or th.get("animethemeEntries") or []
+                    for e in entries:
+                        vids = e.get("videos") or []
+                        if vids:
+                            page_candidates += 1
+                            break
+
+            yield a
+
+        total_candidates_seen += page_candidates
+        nxt = (data.get("links") or {}).get("next")
+        print(f"[anime] page {page_number}: {len(anime_list)} animes • candidats cumulés: {total_candidates_seen}")
+        if not nxt:
+            break
+        page_number += 1
 
 async def download_file(session: aiohttp.ClientSession, url: str, dest: Path) -> bool:
     try:
@@ -180,6 +246,40 @@ def anime_anilist_id(anime_obj: dict) -> Optional[int]:
             except Exception:
                 pass
     return None
+
+def pick_op_videolink(animethemes_anime: Dict[str, Any]) -> List[Dict[str, str]]:
+    """
+    Retourne des candidates {url, label} en se basant sur le 'basename' si présent,
+    sinon en le déduisant du champ 'link'. On ne récupère que des OP.
+    """
+    out = []
+    themes = animethemes_anime.get("animethemes") or []
+    for th in themes:
+        th_type = str(th.get("type", "")).upper()
+        if th_type != "OP":
+            continue
+
+        label = (th.get("slug") or th.get("type") or "OP").upper()
+        entries = th.get("animethemeentries") or th.get("animethemeEntries") or []
+        for e in entries:
+            videos = e.get("videos") or []
+            for v in videos:
+                # priorité au 'basename' si présent
+                basename = v.get("basename")
+                if not basename:
+                    # fallback: essayer de dériver depuis 'link'
+                    basename = derive_basename_from_link(v.get("link", ""))
+
+                if basename:
+                    url = f"https://animethemes.moe/audio/{basename}.mp3"
+                    out.append({"url": url, "label": label})
+                else:
+                    # Debug utile: voir à quoi ressemblent les videos sans basename
+                    # (commente si trop verbeux)
+                    # print("[debug] video sans basename:", {k: v.get(k) for k in ("link", "filename", "audio")})
+                    pass
+
+    return out
 
 def is_op_theme(animetheme_obj: dict) -> bool:
     attrs = animetheme_obj.get("attributes") or {}
