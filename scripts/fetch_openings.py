@@ -7,52 +7,47 @@
 #   pip install aiohttp
 #   ffmpeg présent dans le PATH (ffmpeg --version)
 #
-# Paramètres modifiables (voir la section CONFIG).
+# Lancer:
+#   python scripts/fetch_openings.py
 # --------------------------------------------
 
 from __future__ import annotations
-import os, re, json, asyncio, shutil, random, string
+import os, re, json, asyncio, random
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-import asyncio
 import asyncio.subprocess as asp
 
 # ============ CONFIG ============
-OUT_DIR = Path("assets/audio/openings")
-TMP_DIR = Path("assets/_tmp_openings")
-MANIFEST = Path("assets/audio/manifest.json")
+OUT_DIR   = Path("assets/audio/openings")
+TMP_DIR   = Path("assets/_tmp_openings")
+MANIFEST  = Path("assets/audio/manifest.json")
 
-# Filtres
-MIN_YEAR = 2005
-MIN_SCORE_10 = 5.0                          # 5/10
-BANNED_GENRES = {"mahou shoujo", "kids"}    # à adapter
-BANNED_FORMATS = {"MUSIC"}                  # ex: {"MUSIC", "ONA"} si tu veux
-MAX_OPS = 200                               # limite totale à récupérer
-CONCURRENCY = 4                             # téléchargements simultanés
+# Interrupteurs
+USE_ANILIST_FILTERS = True          # coupe à False pour valider le flux brut
+LOG_EVERY_OP_FOUND  = False         # True = log chaque OP trouvé côté AnimeThemes
+
+# Filtres (si USE_ANILIST_FILTERS = True)
+MIN_YEAR      = 2005
+MIN_SCORE_10  = 5.0                 # 5/10 (AniList est /100)
+BANNED_GENRES = {"mahou shoujo", "kids"}
+BANNED_FORMATS = {"MUSIC"}          # ajoute "ONA" si besoin
+
+MAX_OPS      = 200                  # limite totale à récupérer
+CONCURRENCY  = 4                    # téléchargements simultanés
 
 # Endpoints
 ANIMETHEMES_BASE = "https://api.animethemes.moe"
-ANIMETHEMES_API = "https://api.animethemes.moe/anime"
-ANILIST_GQL = "https://graphql.anilist.co"
+ANILIST_GQL      = "https://graphql.anilist.co"
 
 # ============ UTILS ============
 def slugify(text: str) -> str:
-    text = re.sub(r"[^\w\s\-]", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"[^\w\s\-]", "", str(text), flags=re.IGNORECASE).strip()
     text = re.sub(r"\s+", " ", text)
-    text = text.replace(" ", "_")
-    return text[:100] or "untitled"
+    return (text.replace(" ", "_") or "untitled")[:100]
 
-def clean_title_from_filename(name: str) -> str:
-    base = Path(name).stem
-    base = re.sub(r"[\[\(].*?[\]\)]", "", base, flags=re.IGNORECASE)
-    base = re.sub(r"\b(OP|OPENING|ED|ENDING)\s*\d*\b", "", base, flags=re.IGNORECASE)
-    base = re.sub(r"[_\-]+", " ", base)
-    base = re.sub(r"\s{2,}", " ", base).strip()
-    return base or Path(name).stem
-
-def ensure_dirs():
+def ensure_dirs() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -88,7 +83,6 @@ async def fetch_json(
             async with session.get(url, params=params, headers=headers, timeout=30) as resp:
                 if resp.status == 200:
                     return await resp.json()
-                # log utile
                 text = await resp.text()
                 print(f"[fetch_json] {url} -> HTTP {resp.status} (try {attempt+1}/3)")
                 print(f"[fetch_json] Body preview: {text[:300]!r}")
@@ -99,62 +93,23 @@ async def fetch_json(
     return None
 
 async def post_json(session: aiohttp.ClientSession, url: str, payload: Dict[str, Any]) -> Any:
-    for _ in range(3):
+    for attempt in range(3):
         try:
             async with session.post(url, json=payload, timeout=30) as resp:
                 if resp.status == 200:
                     return await resp.json()
-        except Exception:
-            await asyncio.sleep(1.0)
+                text = await resp.text()
+                print(f"[post_json] {url} -> HTTP {resp.status} (try {attempt+1}/3)")
+                print(f"[post_json] Body preview: {text[:300]!r}")
+        except Exception as e:
+            print(f"[post_json] Exception: {e} (try {attempt+1}/3)")
+        await asyncio.sleep(1.0)
     return None
 
-# ============ ANILIST ============
-ANILIST_QUERY = """
-query($ids:[Int]) {
-  Page(perPage: 50) {
-    media(id_in: $ids, type: ANIME) {
-      id
-      title { romaji english native }
-      averageScore
-      format
-      genres
-      seasonYear
-    }
-  }
-}
-"""
-
-async def anilist_lookup(session: aiohttp.ClientSession, ids: List[int]) -> Dict[int, Dict]:
-    """Retourne {anilistId: mediaDict}."""
-    out: Dict[int, Dict] = {}
-    # batch par 50
-    for i in range(0, len(ids), 50):
-        chunk = ids[i:i+50]
-        data = await post_json(session, ANILIST_GQL, {"query": ANILIST_QUERY, "variables": {"ids": chunk}})
-        try:
-            medias = data["data"]["Page"]["media"]
-            for m in medias:
-                out[int(m["id"])] = m
-        except Exception:
-            pass
-    return out
-
 # ============ ANIMETHEMES ============
-async def api_status(session: aiohttp.ClientSession) -> bool:
-    """Ping rapide /status pour vérifier la connectivité."""
-    try:
-        url = f"{ANIMETHEMES_BASE}/status"
-        data = await fetch_json(session, url, params=None, accept_header="application/json")
-        ok = bool(data)
-        print(f"[*] /status -> {'OK' if ok else 'KO'} | payload keys: {list(data.keys()) if data else '—'}")
-        return ok
-    except Exception as e:
-        print(f"[*] /status exception: {e}")
-        return False
-        
 async def iter_animethemes(session: aiohttp.ClientSession):
     """
-    Itère sur toutes les pages /anime avec include=animethemes.animethemeentries.videos,resources
+    Itère les pages /anime en important thèmes + vidéos.
     Pagination JSON:API: page[number], page[size]
     """
     page_number = 1
@@ -163,15 +118,12 @@ async def iter_animethemes(session: aiohttp.ClientSession):
             "page[number]": page_number,
             "page[size]": 50,  # max 100
             "include": "animethemes.animethemeentries.videos,resources",
-            # Tu peux ajouter des filtres ici si besoin (ex: filter[year]=..., etc.)
         }
-
         data = await fetch_json(session, f"{ANIMETHEMES_BASE}/anime", params=params)
         if not data:
             print(f"[iter_animethemes] Page {page_number}: pas de données JSON.")
             break
 
-        # La clé est bien "anime" dans cette API
         anime_list = data.get("anime")
         if anime_list is None:
             print(f"[iter_animethemes] Page {page_number}: clé 'anime' absente. Clés: {list(data.keys())}")
@@ -193,11 +145,14 @@ async def iter_animethemes(session: aiohttp.ClientSession):
 def extract_anilist_id(anime: Dict[str, Any]) -> Optional[int]:
     """
     AnimeThemes fournit parfois anilistId directement,
-    sinon dans resources (site: anilist.co).
+    sinon via resources (site: anilist).
     """
     aid = anime.get("anilistId")
     if aid:
-        return int(aid)
+        try:
+            return int(aid)
+        except Exception:
+            pass
     for r in anime.get("resources") or []:
         site = (r.get("site") or "").lower()
         if "anilist" in site and r.get("externalId"):
@@ -207,79 +162,108 @@ def extract_anilist_id(anime: Dict[str, Any]) -> Optional[int]:
                 pass
     return None
 
-def choose_title(m: Dict[str, Any]) -> str:
-    t = m.get("title") or {}
-    return t.get("romaji") or t.get("english") or t.get("native") or "Titre inconnu"
+def extract_op_video_urls(anime: dict) -> list[str]:
+    """
+    Retourne la liste des liens vidéo (mp4/webm) pour les OP.
+    On ne force pas audio-only : ffmpeg extraiera l’audio.
+    """
+    out = []
+    for th in (anime.get("animethemes") or []):
+        if (th.get("type") or "").upper() != "OP":
+            continue
+        for entry in (th.get("animethemeentries") or []):
+            for v in (entry.get("videos") or []):
+                # priorité à v["link"] (stream mp4/webm)
+                url = v.get("link") or (v.get("audio") or {}).get("link")
+                if url:
+                    out.append(url)
+    if LOG_EVERY_OP_FOUND and out:
+        name = anime.get("name") or anime.get("slug") or anime.get("id")
+        print(f"[extract_op_video_urls] {name}: {len(out)} OP link(s)")
+    return out
+
+def choose_op_label(theme: dict) -> str:
+    # ex: "OP", "OP1", "OP2"…
+    slug = (theme.get("slug") or "").upper()
+    typ  = (theme.get("type") or "OP").upper()
+    return slug or typ or "OP"
+
+# ============ ANILIST ============
+ANILIST_QUERY = """
+query($ids:[Int]) {
+  Page(perPage: 50) {
+    media(id_in: $ids, type: ANIME) {
+      id
+      title { romaji english native }
+      averageScore
+      format
+      genres
+      seasonYear
+    }
+  }
+}
+"""
+
+async def anilist_lookup(session: aiohttp.ClientSession, ids: List[int]) -> Dict[int, Dict]:
+    out: Dict[int, Dict] = {}
+    for i in range(0, len(ids), 50):
+        chunk = ids[i:i+50]
+        data = await post_json(session, ANILIST_GQL, {"query": ANILIST_QUERY, "variables": {"ids": chunk}})
+        try:
+            medias = data["data"]["Page"]["media"]
+            for m in medias:
+                out[int(m["id"])] = m
+        except Exception:
+            pass
+    return out
 
 def allow_media(m: Dict[str, Any]) -> bool:
+    if not USE_ANILIST_FILTERS:
+        return True
     # année
     year = m.get("seasonYear") or 0
     if year and year < MIN_YEAR:
         return False
-    # score
+    # score (/100 sur AniList)
     score = m.get("averageScore")
-    if score is not None:
-        if (score / 10.0) < MIN_SCORE_10:  # AniList est /100
+    if score is not None and MIN_SCORE_10 is not None:
+        if (score / 10.0) < float(MIN_SCORE_10):
             return False
     # format
     fmt = (m.get("format") or "").upper()
-    if fmt in BANNED_FORMATS:
+    if fmt in {s.upper() for s in BANNED_FORMATS}:
         return False
     # genres
-    gset = set((m.get("genres") or []))
-    lg = {g.lower() for g in gset}
-    if lg & BANNED_GENRES:
+    lg = {g.lower() for g in (m.get("genres") or [])}
+    if lg & {g.lower() for g in BANNED_GENRES}:
         return False
     return True
 
-def pick_op_videolink(animethemes_anime: Dict[str, Any]) -> List[Dict[str, str]]:
-    """
-    Retourne une liste de candidates {url, label} à télécharger (OPs uniquement).
-    On récupère le premier 'video.link' par entry, ou celui marqué 'audio' si dispo.
-    """
-    out = []
-    themes = animethemes_anime.get("animethemes") or []
-    for th in themes:
-        if (th.get("type") or "").upper() != "OP":
-            continue
-        entries = th.get("animethemeentries") or []
-        for e in entries:
-            videos = e.get("videos") or []
-            # priorité aux vidéos avec audio, sinon fallback au premier lien
-            candidate = None
-            for v in videos:
-                if v.get("link"):
-                    candidate = v
-                    if v.get("audio") is True:
-                        break
-            if candidate and candidate.get("link"):
-                # label ex: OP1, OP2
-                suffix = th.get("slug") or th.get("type") or "OP"
-                label = suffix.upper()
-                out.append({"url": candidate["link"], "label": label})
-    return out
+def choose_title(m: Dict[str, Any]) -> str:
+    t = m.get("title") or {}
+    return t.get("romaji") or t.get("english") or t.get("native") or "Titre inconnu"
 
+# ============ DL & FFMPEG ============
 async def download_file(session: aiohttp.ClientSession, url: str, dest: Path) -> bool:
     try:
-        async with session.get(url, timeout=60) as resp:
+        async with session.get(url, timeout=90) as resp:
             if resp.status != 200:
+                print(f"[download] {url} -> HTTP {resp.status}")
                 return False
             with dest.open("wb") as f:
                 async for chunk in resp.content.iter_chunked(1 << 14):
                     if chunk:
                         f.write(chunk)
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[download] {url} -> exception {e}")
         return False
 
 async def ffmpeg_extract_20s(src: Path, dest_mp3: Path, seek: int = 0) -> bool:
-    """
-    Utilise ffmpeg pour extraire 20s en MP3.
-    """
     cmd = [
         "ffmpeg",
         "-y",
-        "-ss", str(seek),     # seek
+        "-ss", str(seek),
         "-i", str(src),
         "-t", "20",
         "-vn",
@@ -288,12 +272,13 @@ async def ffmpeg_extract_20s(src: Path, dest_mp3: Path, seek: int = 0) -> bool:
         str(dest_mp3),
     ]
     try:
-        proc = await asp.create_subprocess_exec(
-            *cmd, stdout=asp.PIPE, stderr=asp.PIPE
-        )
-        await proc.communicate()
+        proc = await asp.create_subprocess_exec(*cmd, stdout=asp.PIPE, stderr=asp.PIPE)
+        _out, _err = await proc.communicate()
+        if proc.returncode != 0:
+            print(f"[ffmpeg] returncode={proc.returncode} on {src.name}")
         return proc.returncode == 0
-    except Exception:
+    except Exception as e:
+        print(f"[ffmpeg] exception {e}")
         return False
 
 # ============ PIPELINE ============
@@ -302,39 +287,50 @@ async def process_one(session: aiohttp.ClientSession,
                       media: Dict[str, Any],
                       manifest: Dict[str, Any]) -> int:
     """
-    Traite un anime (déjà filtré), télécharge 1..n OPs -> MP3 20s.
+    Télécharge 1..n OPs pour un anime → extrait 20s MP3.
     Retourne le nombre de MP3 ajoutés.
     """
     added = 0
     title = choose_title(media)
-    ops = pick_op_videolink(anime_at)
-    if not ops:
-        return 0
+    safe_title = slugify(title)
 
-    for op in ops:
+    themes = anime_at.get("animethemes") or []
+    # Pour chaque thème OP, on prend une vidéo candidate
+    for th in themes:
+        if (th.get("type") or "").upper() != "OP":
+            continue
+
+        # trouve un lien vidéo
+        candidate_url = None
+        for e in (th.get("animethemeentries") or []):
+            for v in (e.get("videos") or []):
+                if v.get("link"):
+                    candidate_url = v["link"]
+                    break
+            if candidate_url:
+                break
+        if not candidate_url:
+            continue
+
         if len(manifest) >= MAX_OPS:
             break
-        url = op["url"]
-        label = op["label"] or "OP"
-        safe_title = slugify(title)
+
+        label = (th.get("slug") or th.get("type") or "OP").upper()
         base_name = f"{safe_title}_{label}.mp3"
         final_mp3 = OUT_DIR / base_name
-
-        # déjà présent ?
         if final_mp3.exists():
             continue
 
-        # download vidéo → tmp
-        ext = "webm" if ".webm" in url else "mp4"
+        ext = "webm" if ".webm" in candidate_url else "mp4"
         tmp_video = TMP_DIR / f"tmp_{safe_title}_{label}.{ext}"
-        ok = await download_file(session, url, tmp_video)
+
+        ok = await download_file(session, candidate_url, tmp_video)
         if not ok:
-            # tentative: parfois lien expire → on skip
             continue
 
-        # extract 20s
         seek = pick_seek(60)
         ok2 = await ffmpeg_extract_20s(tmp_video, final_mp3, seek=seek)
+
         # cleanup
         try:
             tmp_video.unlink(missing_ok=True)
@@ -361,7 +357,7 @@ async def main():
     total_added = 0
 
     async with aiohttp.ClientSession() as session:
-        # 1) Parcourir AnimeThemes (par pages)
+        # 1) Parcourir AnimeThemes (pages)
         print("→ Récupération AnimeThemes…")
         candidates: List[Dict[str, Any]] = []
         anilist_ids: List[int] = []
@@ -370,18 +366,25 @@ async def main():
             aid = extract_anilist_id(anime_at)
             if not aid:
                 continue
+            # Vérifie qu'on a bien des OP vidéos
+            op_urls = extract_op_video_urls(anime_at)
+            if not op_urls:
+                continue
             anilist_ids.append(aid)
             candidates.append({"at": anime_at, "aid": aid})
 
         if not candidates:
-            print("Aucun anime trouvé côté AnimeThemes.")
+            print("Aucun anime exploitable (pas d’OP vidéo trouvée).")
             return
+
+        print(f"→ Candidats AnimeThemes (avec OP vidéo): {len(candidates)}")
 
         # 2) Lookup AniList en batch
         print("→ Lookup AniList…")
         mdict = await anilist_lookup(session, anilist_ids)
+        print(f"→ Medias AniList récupérés: {len(mdict)}")
 
-        # 3) Filtrage et traitement concurrent
+        # 3) Filtrage + traitement concurrent
         sem = asyncio.Semaphore(CONCURRENCY)
 
         async def worker(item):
@@ -399,8 +402,6 @@ async def main():
 
         print("→ Téléchargements / conversions…")
         tasks = [asyncio.create_task(worker(c)) for c in candidates]
-        # Limite globale par MAX_OPS
-        # (arrêt grossier si on dépasse pendant la boucle)
         await asyncio.gather(*tasks)
 
     print(f"Terminé. Nouveaux OP ajoutés : {total_added}")
