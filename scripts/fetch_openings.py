@@ -162,24 +162,29 @@ def extract_anilist_id(anime: Dict[str, Any]) -> Optional[int]:
                 pass
     return None
 
-def extract_op_video_urls(anime: dict) -> list[str]:
+def extract_op_audio_urls(anime: dict) -> list[dict]:
     """
-    Retourne la liste des liens vidéo (mp4/webm) pour les OP.
-    On ne force pas audio-only : ffmpeg extraiera l’audio.
+    Retourne une liste de {url, label} pour les OP sous forme AUDIO direct
+    via https://animethemes.moe/audio/{basename}.mp3.
+    Si basename indisponible, on essaie 'link' vidéo en fallback.
     """
     out = []
-    for th in (anime.get("animethemes") or []):
+    themes = anime.get("animethemes") or []
+    for th in themes:
         if (th.get("type") or "").upper() != "OP":
             continue
-        for entry in (th.get("animethemeentries") or []):
-            for v in (entry.get("videos") or []):
-                # priorité à v["link"] (stream mp4/webm)
-                url = v.get("link") or (v.get("audio") or {}).get("link")
-                if url:
-                    out.append(url)
-    if LOG_EVERY_OP_FOUND and out:
-        name = anime.get("name") or anime.get("slug") or anime.get("id")
-        print(f"[extract_op_video_urls] {name}: {len(out)} OP link(s)")
+        label = (th.get("slug") or th.get("type") or "OP").upper()
+        entries = th.get("animethemeentries") or []
+        for e in entries:
+            videos = e.get("videos") or []
+            for v in videos:
+                basename = v.get("basename")
+                if basename:
+                    url = f"https://animethemes.moe/audio/{basename}.mp3"
+                    out.append({"url": url, "label": label})
+                elif v.get("link"):  # fallback très rare
+                    # on pourra encore extraire l'audio depuis la vidéo si tu veux
+                    out.append({"url": v["link"], "label": label})
     return out
 
 def choose_op_label(theme: dict) -> str:
@@ -287,67 +292,49 @@ async def process_one(session: aiohttp.ClientSession,
                       media: Dict[str, Any],
                       manifest: Dict[str, Any]) -> int:
     """
-    Télécharge 1..n OPs pour un anime → extrait 20s MP3.
-    Retourne le nombre de MP3 ajoutés.
+    Télécharge des OP AUDIO prêts à l’emploi (MP3 complet) via /audio/{basename}.mp3.
+    Pas d’extraction ffmpeg nécessaire ici.
     """
     added = 0
     title = choose_title(media)
     safe_title = slugify(title)
 
-    themes = anime_at.get("animethemes") or []
-    # Pour chaque thème OP, on prend une vidéo candidate
-    for th in themes:
-        if (th.get("type") or "").upper() != "OP":
-            continue
+    ops = extract_op_audio_urls(anime_at)
+    if not ops:
+        return 0
 
-        # trouve un lien vidéo
-        candidate_url = None
-        for e in (th.get("animethemeentries") or []):
-            for v in (e.get("videos") or []):
-                if v.get("link"):
-                    candidate_url = v["link"]
-                    break
-            if candidate_url:
-                break
-        if not candidate_url:
-            continue
-
+    for op in ops:
         if len(manifest) >= MAX_OPS:
             break
 
-        label = (th.get("slug") or th.get("type") or "OP").upper()
+        url = op["url"]
+        label = op.get("label") or "OP"
         base_name = f"{safe_title}_{label}.mp3"
         final_mp3 = OUT_DIR / base_name
+
         if final_mp3.exists():
             continue
 
-        ext = "webm" if ".webm" in candidate_url else "mp4"
-        tmp_video = TMP_DIR / f"tmp_{safe_title}_{label}.{ext}"
-
-        ok = await download_file(session, candidate_url, tmp_video)
+        ok = await download_file(session, url, final_mp3)
         if not ok:
+            # si l’audio direct échoue et que c’était une vidéo fallback,
+            # tu pourrais ici tenter la voie ffmpeg -> mp3 (optionnel)
             continue
 
-        seek = pick_seek(60)
-        ok2 = await ffmpeg_extract_20s(tmp_video, final_mp3, seek=seek)
-
-        # cleanup
-        try:
-            tmp_video.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-        if ok2 and final_mp3.exists() and final_mp3.stat().st_size > 0:
-            manifest[base_name] = {
-                "title": title,
-                "label": label,
-                "anilistId": media.get("id"),
-                "year": media.get("seasonYear"),
-            }
-            save_manifest(manifest)
-            added += 1
+        # garde une trace
+        manifest[base_name] = {
+            "title": title,
+            "label": label,
+            "anilistId": media.get("id"),
+            "year": media.get("seasonYear"),
+            "source": url,
+            "type": "audio_direct"
+        }
+        save_manifest(manifest)
+        added += 1
 
     return added
+
 
 async def main():
     print("→ Préparation des dossiers…")
@@ -367,7 +354,7 @@ async def main():
             if not aid:
                 continue
             # Vérifie qu'on a bien des OP vidéos
-            op_urls = extract_op_video_urls(anime_at)
+            op_urls = extract_op_audio_urls(anime_at)
             if not op_urls:
                 continue
             anilist_ids.append(aid)
