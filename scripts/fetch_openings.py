@@ -127,52 +127,86 @@ def derive_basename_from_link(link: str) -> str | None:
     return base or fname
 
 # ---------- Extraction OP audio ----------
+def _get_attr(d: dict, *keys, default=None):
+    # petit helper: va chercher une clé dans attributes/à la racine/variantes
+    if not d:
+        return default
+    attrs = d.get("attributes") or {}
+    for k in keys:
+        if k in d:
+            return d[k]
+        if k in attrs:
+            return attrs[k]
+    return default
+
 def pick_op_audio_links(anime: dict, index: dict[tuple[str,str], dict]) -> list[dict]:
     """
-    Retourne des {url,label} d’OP en MP3 direct.
-    Essaie via relationships (included) puis fallback via attributes inline.
+    Retourne des {url,label} d’OP audio.
+    Ordre de priorité :
+    1) video.audio.link (si présent et .mp3)
+    2) /audio/{basename}.mp3 (classique)
+    3) /static/audio/{basename}.mp3 (fallback)
+    4) /assets/audio/{basename}.mp3 (fallback)
     """
     out: list[dict] = []
 
-    # 1) via relationships + included
+    # 1) récupérer les themes (relationships ou inline)
     themes = rel_items(anime, index, "animethemes", "animetheme", "themes")
     if not themes:
-        # 2) fallback: inline attributes (rare)
-        themes = (ja_attr(anime, "animethemes") or ja_attr(anime, "themes") or [])
-        # dans ce cas, “entries”/“videos” peuvent aussi être inline
+        themes = (_get_attr(anime, "animethemes") or
+                  _get_attr(anime, "themes") or [])
 
     def iter_entries(theme_obj: dict) -> list[dict]:
-        # via relationships
         ents = rel_items(theme_obj, index, "animethemeentries", "animethemeEntries", "entries")
         if ents:
             return ents
-        # sinon inline
-        return (ja_attr(theme_obj, "animethemeentries") or
-                ja_attr(theme_obj, "animethemeEntries") or
-                ja_attr(theme_obj, "entries") or [])
+        return (_get_attr(theme_obj, "animethemeentries") or
+                _get_attr(theme_obj, "animethemeEntries") or
+                _get_attr(theme_obj, "entries") or [])
 
     def iter_videos(entry_obj: dict) -> list[dict]:
         vids = rel_items(entry_obj, index, "videos")
         if vids:
             return vids
-        return ja_attr(entry_obj, "videos") or []
+        return _get_attr(entry_obj, "videos") or []
 
     for th in themes:
-        ttype = str(ja_attr(th, "type", "")).upper()
+        ttype = str(_get_attr(th, "type", default="")).upper()
         if ttype != "OP":
             continue
-        label = (ja_attr(th, "slug") or ja_attr(th, "type") or "OP")
-        label = label.upper()
-        entries = iter_entries(th)
-        for e in entries:
-            videos = iter_videos(e)
-            for v in videos:
-                basename = ja_attr(v, "basename")
+        label = (_get_attr(th, "slug") or _get_attr(th, "type") or "OP")
+        label = str(label).upper()
+
+        for e in iter_entries(th):
+            for v in iter_videos(e):
+                # 1) url audio directe si dispo
+                audio_obj = _get_attr(v, "audio") or v.get("audio")
+                audio_link = None
+                if isinstance(audio_obj, dict):
+                    audio_link = _get_attr(audio_obj, "link") or audio_obj.get("link")
+
+                # 2) sinon, on essaie par basename
+                basename = _get_attr(v, "basename")
                 if not basename:
-                    link = ja_attr(v, "link") or v.get("link")
-                    basename = derive_basename_from_link(link or "")
+                    link = _get_attr(v, "link") or v.get("link")
+                    if link:
+                        # ex: https://.../something.webm -> basename "something"
+                        from urllib.parse import urlparse
+                        fname = os.path.basename(urlparse(link).path)
+                        base, _ = os.path.splitext(fname)
+                        if base:
+                            basename = base
+
+                candidates = []
+                if audio_link and audio_link.lower().endswith(".mp3"):
+                    candidates.append(audio_link)
                 if basename:
-                    url = f"https://animethemes.moe/audio/{basename}.mp3"
+                    candidates.append(f"https://animethemes.moe/audio/{basename}.mp3")
+                    candidates.append(f"https://animethemes.moe/static/audio/{basename}.mp3")
+                    candidates.append(f"https://animethemes.moe/assets/audio/{basename}.mp3")
+
+                # on pousse toutes les candidates (le download testera)
+                for url in candidates:
                     out.append({"url": url, "label": label})
     return out
 
@@ -285,18 +319,27 @@ def extract_anilist_id(anime: dict, index: dict[tuple[str,str], dict]) -> int | 
     return None
 
 # ---------- Download ----------
-async def download_file(session: aiohttp.ClientSession, url: str, dest: Path) -> bool:
-    try:
-        async with session.get(url, timeout=60) as resp:
-            if resp.status != 200:
-                return False
-            with dest.open("wb") as f:
-                async for chunk in resp.content.iter_chunked(1 << 14):
-                    if chunk:
-                        f.write(chunk)
-        return True
-    except Exception:
-        return False
+async def download_first_ok(session: aiohttp.ClientSession, urls: list[str], dest: Path) -> bool:
+    """
+    Essaie chaque URL jusqu'à en trouver une qui renvoie 200, puis télécharge.
+    Loggue le premier code non-200 pour debug.
+    """
+    for i, url in enumerate(urls, 1):
+        try:
+            async with session.get(url, timeout=60) as resp:
+                if resp.status == 200:
+                    # Téléchargement en stream
+                    with dest.open("wb") as f:
+                        async for chunk in resp.content.iter_chunked(1 << 14):
+                            if chunk:
+                                f.write(chunk)
+                    return True
+                else:
+                    print(f"[download] {url} -> {resp.status}")
+        except Exception as e:
+            print(f"[download] EXC {type(e).__name__}: {e} for {url} (try {i})")
+    return False
+
 
 def unique_path(p: Path) -> Path:
     if not p.exists():
@@ -309,44 +352,63 @@ def unique_path(p: Path) -> Path:
             return q
         i += 1
 
-async def process_one(session: aiohttp.ClientSession,
-                      anime_at: dict,
-                      at_index: dict[tuple[str,str], dict],
-                      media: dict,
-                      manifest: dict) -> int:
+async def process_one(
+    session: aiohttp.ClientSession,
+    anime_at: dict,
+    at_index: dict[tuple[str, str], dict],
+    media: dict,
+    manifest: dict
+) -> int:
     added = 0
     title = choose_title(media)
     ops = pick_op_audio_links(anime_at, at_index)
     if not ops:
         return 0
 
+    print(f"[{title}] OP candidats: {len(ops)}")
+
     for op in ops:
         if len(manifest) >= MAX_OPS:
             break
-        url = op["url"]
-        label = (op.get("label") or "OP").upper()
-        name = unique_path(OUT_DIR / f"{slugify(title)}_{label}.mp3")
 
-        ok = await download_file(session, url, name)
+        # op["url"] peut être une str OU une liste d'URLs candidates
+        urls = op.get("url")
+        if isinstance(urls, str):
+            candidates = [urls]
+        elif isinstance(urls, (list, tuple)):
+            candidates = list(urls)
+        else:
+            continue  # rien d'utilisable
+
+        label = (op.get("label") or "OP").upper()
+        out_path = unique_path(OUT_DIR / f"{slugify(title)}_{label}.mp3")
+
+        ok = await download_first_ok(session, candidates, out_path)
         if not ok:
+            # rien n'a marché pour cet entry → on passe au suivant
             continue
 
+        # sécurité taille > 0
         try:
-            if name.stat().st_size <= 0:
-                name.unlink(missing_ok=True); continue
+            if out_path.stat().st_size <= 0:
+                out_path.unlink(missing_ok=True)
+                continue
         except Exception:
             continue
 
-        manifest[name.name] = {
+        # enregistre dans le manifest
+        manifest[out_path.name] = {
             "title": title,
             "label": label,
             "anilistId": media.get("id"),
             "year": media.get("seasonYear"),
-            "source": "AnimeThemes(audio)",
+            "source": "AnimeThemes(audio)"
         }
         save_manifest(manifest)
         added += 1
+
     return added
+
 
 # ---------- Main ----------
 ANILIST_QUERY_IDS = """
@@ -386,6 +448,17 @@ async def main():
         print(f"→ Candidats: {len(candidates)} — lookup AniList…")
         mdict = await anilist_lookup(session, ids)
 
+        matched = sum(1 for c in candidates if c["aid"] in mdict)
+        print(f"→ AniList mappés: {matched}/{len(candidates)}")
+        
+        passed = 0
+        for c in candidates:
+            m = mdict.get(c["aid"])
+            if m and allow_media(m):
+                passed += 1
+        print(f"→ Qui passent les filtres: {passed}/{matched}")
+
+
         print("→ Téléchargements…")
         sem = asyncio.Semaphore(CONCURRENCY)
 
@@ -401,6 +474,14 @@ async def main():
 
         tasks = [asyncio.create_task(worker(c)) for c in candidates]
         await asyncio.gather(*tasks)
+
+    print("→ Preview premières URLs audio candidates :")
+    for c in candidates[:3]:
+        at = c["at"]; idx = c["idx"]; m = mdict.get(c["aid"])
+        if not m:
+            continue
+        ops_preview = pick_op_audio_links(at, idx)[:3]
+        print("   ", choose_title(m), [o["url"] for o in ops_preview])
 
     print(f"Terminé. Nouveaux OP ajoutés : {total_added}")
     print(f"Dossier:  {OUT_DIR.resolve()}")
