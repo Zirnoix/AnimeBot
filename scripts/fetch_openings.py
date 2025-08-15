@@ -1,13 +1,12 @@
 # scripts/fetch_openings.py
-# Télécharge des OP (audio MP3) depuis AnimeThemes via /videos?filter[themeType]=OP
+# Télécharge des OP (audio MP3) depuis AnimeThemes via /anime + included (videos, resources)
 # Sauvegarde dans assets/audio/openings et écrit un manifest.json
 #
 # Dépendances:
 #   pip install aiohttp
-#   (ffmpeg non requis ici)
 #
 from __future__ import annotations
-import os, re, json, asyncio
+import json, re, asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,12 +15,12 @@ import aiohttp
 # ========= CONFIG =========
 OUT_DIR   = Path("assets/audio/openings")
 MANIFEST  = Path("assets/audio/manifest.json")
-MAX_OPS   = 300          # combien d'OP au total (augmente si tu veux)
-PAGE_SIZE = 100          # 100 max selon l’API
-CONCURRENCY = 6          # téléchargements simultanés
+MAX_OPS   = 300           # combien d’OP au total (augmente si tu veux)
+PAGE_SIZE = 50            # 50 est sûr; 100 fonctionne souvent aussi
+CONCURRENCY = 6           # téléchargements simultanés
 
-# Filtres AniList (désactive d’abord si tu veux “voir du son” arriver)
-USE_ANILIST_FILTERS = True
+# Filtres AniList (mets True plus tard, une fois que tu vois des fichiers arriver)
+USE_ANILIST_FILTERS = False
 MIN_YEAR      = 2005
 MIN_SCORE_10  = 5.0
 BANNED_GENRES = {"mahou shoujo", "kids"}
@@ -29,7 +28,7 @@ BANNED_FORMATS = {"MUSIC"}
 
 # Endpoints
 AT_BASE   = "https://api.animethemes.moe"
-AT_VIDEOS = f"{AT_BASE}/videos"   # JSON:API
+AT_ANIME  = f"{AT_BASE}/anime"
 ANILIST_GQL = "https://graphql.anilist.co"
 
 # ========= UTILS =========
@@ -54,19 +53,19 @@ def slugify(text: str) -> str:
     return text.replace(" ", "_")[:100] or "untitled"
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, params: Optional[Dict[str, Any]]=None) -> Optional[dict]:
-    headers = {"Accept": "application/vnd.api+json", "User-Agent": "AnimeBot-OPFetcher/2.0"}
+    headers = {"Accept": "application/vnd.api+json", "User-Agent": "AnimeBot-OPFetcher/3.0"}
     for attempt in range(3):
         try:
-            async with session.get(url, params=params, headers=headers, timeout=40) as resp:
+            async with session.get(url, params=params, headers=headers, timeout=50) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 txt = await resp.text()
                 print(f"[fetch_json] {url} -> {resp.status} (try {attempt+1}/3)")
                 print(f"[fetch_json] body: {txt[:240]!r}")
-                await asyncio.sleep(1.2)
+                await asyncio.sleep(1.0)
         except Exception as e:
             print(f"[fetch_json] Exception: {e} (try {attempt+1}/3)")
-            await asyncio.sleep(1.2)
+            await asyncio.sleep(1.0)
     return None
 
 async def download_file(session: aiohttp.ClientSession, url: str, dest: Path) -> bool:
@@ -102,10 +101,12 @@ query($ids:[Int]) {
 
 async def anilist_lookup(session: aiohttp.ClientSession, ids: List[int]) -> Dict[int, Dict]:
     out: Dict[int, Dict] = {}
+    if not ids:
+        return out
     for i in range(0, len(ids), 50):
         chunk = ids[i:i+50]
         try:
-            async with session.post(ANILIST_GQL, json={"query": ANILIST_QUERY, "variables": {"ids": chunk}}, timeout=40) as resp:
+            async with session.post(ANILIST_GQL, json={"query": ANILIST_QUERY, "variables": {"ids": chunk}}, timeout=50) as resp:
                 data = await resp.json()
             for m in data["data"]["Page"]["media"]:
                 out[int(m["id"])] = m
@@ -116,67 +117,61 @@ async def anilist_lookup(session: aiohttp.ClientSession, ids: List[int]) -> Dict
 def allow_media(m: Dict[str, Any]) -> bool:
     if not USE_ANILIST_FILTERS:
         return True
-    # année
     year = m.get("seasonYear") or 0
     if year and year < MIN_YEAR:
         return False
-    # score (/100 → /10)
     score = m.get("averageScore")
     if score is not None and (score/10.0) < MIN_SCORE_10:
         return False
-    # format
     fmt = (m.get("format") or "").upper()
     if fmt in BANNED_FORMATS:
         return False
-    # genres
     lg = {g.lower() for g in (m.get("genres") or [])}
     if lg & BANNED_GENRES:
         return False
     return True
 
-# ========= PARSING /videos =========
-def map_included(included: List[dict]) -> Tuple[Dict[str, dict], Dict[str, dict]]:
-    """Retourne deux maps: anime_by_id, videos_by_id (si besoin) depuis included."""
-    anime_by_id: Dict[str, dict] = {}
-    videos_by_id: Dict[str, dict] = {}
+# ========= JSON:API HELPERS =========
+def build_included_maps(included: List[dict]) -> Dict[str, Dict[str, dict]]:
+    """
+    Retourne un dict de maps par type: {"videos": {id:obj}, "animethemes": {...}, "animethemeentries": {...}, "anime": {...}}
+    """
+    out: Dict[str, Dict[str, dict]] = {}
     for obj in included or []:
         t = obj.get("type")
-        if t == "anime":
-            anime_by_id[str(obj.get("id"))] = obj
-        elif t == "videos":
-            videos_by_id[str(obj.get("id"))] = obj
-    return anime_by_id, videos_by_id
+        if not t:
+            continue
+        out.setdefault(t, {})
+        out[t][str(obj.get("id"))] = obj
+    return out
 
-def extract_video_records(payload: dict) -> List[dict]:
-    """
-    L'endpoint /videos renvoie généralement:
-    - data: [ {type:"videos", id, attributes:{basename, ...}, relationships:{anime:{data:{type,id}} ...}} ]
-    - included: [ objets 'anime', ... ]
-    """
-    data = payload.get("data")
+def get_rel_ids(obj: dict, rel_name: str) -> List[str]:
+    rel = (obj.get("relationships") or {}).get(rel_name) or {}
+    data = rel.get("data")
     if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        return [data]
+        return [str(d.get("id")) for d in data if d.get("id") is not None]
+    if isinstance(data, dict) and data.get("id") is not None:
+        return [str(data["id"])]
     return []
 
-def get_anime_for_video(video: dict, anime_by_id: Dict[str, dict]) -> Optional[dict]:
-    rel = (video.get("relationships") or {}).get("anime", {})
-    ref = (rel.get("data") or {})
-    if ref.get("type") == "anime":
-        return anime_by_id.get(str(ref.get("id")))
-    return None
+def video_basename(video_obj: dict) -> Optional[str]:
+    return (video_obj.get("attributes") or {}).get("basename")
 
-def extract_anilist_id_from_anime(anime_obj: dict) -> Optional[int]:
-    # Dans included anime.attributes, AnimeThemes met souvent anilistId directement
-    try:
-        aid = (anime_obj.get("attributes") or {}).get("anilist_id") or (anime_obj.get("attributes") or {}).get("anilistId")
-        if aid:
+def anime_title(anime_obj: dict) -> str:
+    attrs = anime_obj.get("attributes") or {}
+    return attrs.get("name") or attrs.get("slug") or "Anime"
+
+def anime_anilist_id(anime_obj: dict) -> Optional[int]:
+    attrs = anime_obj.get("attributes") or {}
+    # souvent anilist_id est présent
+    aid = attrs.get("anilist_id") or attrs.get("anilistId")
+    if aid:
+        try:
             return int(aid)
-    except Exception:
-        pass
-    # sinon regarde 'resources' si présent (mais pas garanti sur /videos)
-    resources = (anime_obj.get("attributes") or {}).get("resources") or []
+        except Exception:
+            pass
+    # sinon, parfois 'resources' imbriqués
+    resources = attrs.get("resources") or []
     for r in resources:
         site = (r.get("site") or "").lower()
         if "anilist" in site and r.get("external_id"):
@@ -186,56 +181,98 @@ def extract_anilist_id_from_anime(anime_obj: dict) -> Optional[int]:
                 pass
     return None
 
+def is_op_theme(animetheme_obj: dict) -> bool:
+    attrs = animetheme_obj.get("attributes") or {}
+    return (attrs.get("type") or "").upper() == "OP"
+
 # ========= MAIN =========
 async def main():
     ensure_dirs()
     manifest = load_manifest()
     total = 0
-    collected_ids: List[int] = []
-    to_process: List[Tuple[str, str, Optional[int]]] = []
-    # (basename, title_fallback, anilistId?)
 
     async with aiohttp.ClientSession() as session:
         page = 1
+        collected_aids: List[int] = []
+        candidates: List[Tuple[str, str, Optional[int]]] = []
+        # (basename, title_fallback, anilistId)
+
         while True:
             if total >= MAX_OPS:
                 break
+
             params = {
-                "filter[themeType]": "OP",
                 "page[number]": page,
                 "page[size]": PAGE_SIZE,
-                "include": "anime",  # on veut l'anime lié
+                "include": "animethemes.animethemeentries.videos,resources",
             }
-            payload = await fetch_json(session, AT_VIDEOS, params=params)
+            payload = await fetch_json(session, AT_ANIME, params=params)
             if not payload:
-                print(f"[videos] page {page}: no payload, stop.")
+                print(f"[anime] page {page}: no payload, stop.")
                 break
 
-            videos = extract_video_records(payload)
-            included = payload.get("included") or []
-            anime_by_id, _ = map_included(included)
-
-            if not videos:
-                print(f"[videos] page {page}: 0 videos, stop.")
+            # primary data: “anime” (JSON:API pluralized dans cette API)
+            anime_list = payload.get("anime")
+            if anime_list is None:
+                print(f"[anime] page {page}: clé 'anime' absente. keys={list(payload.keys())}")
+                break
+            if not anime_list:
+                print(f"[anime] page {page}: vide, stop.")
                 break
 
-            for v in videos:
-                attrs = v.get("attributes") or {}
-                basename = attrs.get("basename")
-                if not basename:
+            maps = build_included_maps(payload.get("included") or [])
+            animethemes_map = maps.get("animethemes", {})
+            entries_map     = maps.get("animethemeentries", {})
+            videos_map      = maps.get("videos", {})
+            anime_map       = maps.get("anime", {})
+
+            for anime_primary in anime_list:
+                # l’anime lui-même est dans primary (souvent aussi dupliqué dans included)
+                # on récupère sa version included si dispo pour avoir attributes complets
+                anime_id = str(anime_primary.get("id"))
+                anime_obj = anime_map.get(anime_id, anime_primary)
+
+                # tous les animethemes liés à cet anime
+                theme_ids = get_rel_ids(anime_obj, "animethemes")
+                if not theme_ids:
                     continue
-                # titre fallback (si pas AniList)
-                title_fallback = (attrs.get("title") or "").strip() or "Anime"
 
-                anime_obj = get_anime_for_video(v, anime_by_id)
-                anilist_id = extract_anilist_id_from_anime(anime_obj) if anime_obj else None
+                # filtre OPs
+                op_theme_ids = [tid for tid in theme_ids if is_op_theme(animethemes_map.get(tid, {}))]
+                if not op_theme_ids:
+                    continue
 
-                to_process.append((basename, title_fallback, anilist_id))
-                if anilist_id:
-                    collected_ids.append(anilist_id)
+                # pour chaque theme OP -> entries -> videos -> basename
+                for tid in op_theme_ids:
+                    th = animethemes_map.get(tid)
+                    if not th:
+                        continue
+                    entry_ids = get_rel_ids(th, "animethemeentries")
+                    if not entry_ids:
+                        continue
+                    for eid in entry_ids:
+                        entry = entries_map.get(eid)
+                        if not entry:
+                            continue
+                        vid_ids = get_rel_ids(entry, "videos")
+                        if not vid_ids:
+                            continue
+                        for vid_id in vid_ids:
+                            vobj = videos_map.get(vid_id)
+                            if not vobj:
+                                continue
+                            basename = video_basename(vobj)
+                            if not basename:
+                                continue
 
-            print(f"[videos] page {page}: {len(videos)} items")
-            # pagination
+                            title_fb = anime_title(anime_obj)
+                            aid = anime_anilist_id(anime_obj)
+                            candidates.append((basename, title_fb, aid))
+                            if aid:
+                                collected_aids.append(aid)
+
+            print(f"[anime] page {page}: {len(anime_list)} animes • candidats cumulés: {len(candidates)}")
+
             links = payload.get("links") or {}
             if not links.get("next"):
                 break
@@ -243,21 +280,23 @@ async def main():
             if page > 200:  # garde-fou
                 break
 
-        # Enrichissement AniList
+        # Lookup AniList
         print("→ AniList lookup…")
-        mdict = await anilist_lookup(session, list(set(collected_ids))) if collected_ids else {}
+        mdict = await anilist_lookup(session, list(set(collected_aids)))
 
-        # Filtrage + téléchargement
+        # Téléchargements
+        print("→ Téléchargements…")
         sem = asyncio.Semaphore(CONCURRENCY)
+        downloaded = 0
+
         async def worker(basename: str, title_fb: str, aid: Optional[int]):
-            nonlocal total
-            if total >= MAX_OPS:
+            nonlocal downloaded
+            if downloaded >= MAX_OPS:
                 return
             m = mdict.get(aid) if aid else None
             if m and not allow_media(m):
                 return
 
-            # Choix du titre final
             if m:
                 t = m.get("title") or {}
                 title = t.get("romaji") or t.get("english") or t.get("native") or title_fb
@@ -267,40 +306,35 @@ async def main():
                 year  = None
 
             safe = slugify(title)
-            label = "OP"
-            fname = f"{safe}_{label}.mp3"
+            fname = f"{safe}_OP.mp3"
             dest = OUT_DIR / fname
             if dest.exists():
                 return
 
             url = f"https://animethemes.moe/audio/{basename}.mp3"
-            ok = await download_file(session, url, dest)
+
+            async with sem:
+                ok = await download_file(session, url, dest)
             if not ok:
                 return
 
             manifest[fname] = {
                 "title": title,
-                "label": label,
+                "label": "OP",
                 "anilistId": aid,
                 "year": year,
                 "source": url,
                 "type": "audio_direct"
             }
             save_manifest(manifest)
-            total += 1
+            downloaded += 1
 
-        print("→ Téléchargements…")
-        tasks = []
-        for basename, tfb, aid in to_process:
-            if len(tasks) >= MAX_OPS:
-                break
-            tasks.append(asyncio.create_task(worker(basename, tfb, aid)))
-
+        tasks = [asyncio.create_task(worker(b, t, a)) for (b, t, a) in candidates]
         if tasks:
             await asyncio.gather(*tasks)
 
-    print(f"Terminé. Nouveaux OP ajoutés : {total}")
-    print(f"Dossier: {OUT_DIR.resolve()}")
+    print(f"Terminé. Nouveaux OP ajoutés : {sum(1 for k in load_manifest().keys())}")
+    print(f"Dossier:  {OUT_DIR.resolve()}")
     print(f"Manifest: {MANIFEST.resolve()}")
 
 if __name__ == "__main__":
