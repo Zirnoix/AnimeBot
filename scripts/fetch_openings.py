@@ -72,6 +72,15 @@ async def post_json(session: aiohttp.ClientSession, url: str, payload: dict) -> 
     return None
 
 # ---------- JSON:API helpers robustes ----------
+def sanitize_basename(name: str) -> str:
+    """
+    Prend un nom de fichier ou un 'basename' potentiel et retire toute extension vidéo
+    (.webm/.mp4/.mkv) + espaces parasites.
+    """
+    base = os.path.basename(name or "")
+    base, _ext = os.path.splitext(base)  # retire .webm / .mp4 / .mkv
+    return base.strip()
+
 def ja_attr(obj: dict, key: str, default=None):
     if key in obj:  # parfois à la racine
         return obj.get(key, default)
@@ -143,14 +152,16 @@ def pick_op_audio_links(anime: dict, index: dict[tuple[str,str], dict]) -> list[
     """
     Retourne des {url,label} d’OP audio.
     Ordre de priorité :
-    1) video.audio.link (si présent et .mp3)
+    1) video.audio.link (si présent et déjà .mp3)
     2) /audio/{basename}.mp3 (classique)
     3) /static/audio/{basename}.mp3 (fallback)
     4) /assets/audio/{basename}.mp3 (fallback)
+
+    On fabrique 'basename' à partir de v['basename'] si dispo, sinon v['link'] (en enlevant l'extension vidéo !)
+    On tente aussi des variantes sans certains suffixes de qualité (ex: -NCBD1080).
     """
     out: list[dict] = []
 
-    # 1) récupérer les themes (relationships ou inline)
     themes = rel_items(anime, index, "animethemes", "animetheme", "themes")
     if not themes:
         themes = (_get_attr(anime, "animethemes") or
@@ -170,6 +181,33 @@ def pick_op_audio_links(anime: dict, index: dict[tuple[str,str], dict]) -> list[
             return vids
         return _get_attr(entry_obj, "videos") or []
 
+    # petits helpers pour variantes de basename
+    def basename_variants(b: str) -> list[str]:
+        """
+        Génère quelques variantes plausibles :
+        - tel quel
+        - sans suffixes 'NC...' / 'BD...' / résolutions
+        - version sans '-NCBD1080' etc.
+        """
+        b = sanitize_basename(b)
+        variants = {b}
+
+        # retire suffixes fréquents de type -NC..., -BD..., -1080p, -720p, etc.
+        v1 = re.sub(r"-(NC(?:OP|ED)?[A-Za-z0-9]*|BD[0-9]+p|[0-9]{3,4}p)$", "", b, flags=re.IGNORECASE)
+        variants.add(v1)
+
+        # parfois double suffixe (on applique deux fois)
+        v2 = re.sub(r"-(NC(?:OP|ED)?[A-Za-z0-9]*|BD[0-9]+p|[0-9]{3,4}p)$", "", v1, flags=re.IGNORECASE)
+        variants.add(v2)
+
+        # variante sans “NCBD1080” littéral si présent
+        variants.add(b.replace("-NCBD1080", ""))
+        variants.add(b.replace("-NCBD", ""))
+
+        # nettoie variantes vides
+        variants = {x for x in variants if x}
+        return list(variants)
+
     for th in themes:
         ttype = str(_get_attr(th, "type", default="")).upper()
         if ttype != "OP":
@@ -179,35 +217,34 @@ def pick_op_audio_links(anime: dict, index: dict[tuple[str,str], dict]) -> list[
 
         for e in iter_entries(th):
             for v in iter_videos(e):
-                # 1) url audio directe si dispo
+                # 1) lien audio direct ?
                 audio_obj = _get_attr(v, "audio") or v.get("audio")
-                audio_link = None
                 if isinstance(audio_obj, dict):
-                    audio_link = _get_attr(audio_obj, "link") or audio_obj.get("link")
+                    link = _get_attr(audio_obj, "link") or audio_obj.get("link")
+                    if link and link.lower().endswith(".mp3"):
+                        out.append({"url": link, "label": label})
+                        continue  # on garde aussi les reconstructions ci-dessous, mais ce lien est prioritaire
 
-                # 2) sinon, on essaie par basename
-                basename = _get_attr(v, "basename")
-                if not basename:
-                    link = _get_attr(v, "link") or v.get("link")
-                    if link:
-                        # ex: https://.../something.webm -> basename "something"
-                        from urllib.parse import urlparse
-                        fname = os.path.basename(urlparse(link).path)
-                        base, _ = os.path.splitext(fname)
-                        if base:
-                            basename = base
+                # 2) (re)construction à partir d’un basename
+                bname = _get_attr(v, "basename")
+                if not bname:
+                    # derive depuis video.link
+                    vlink = _get_attr(v, "link") or v.get("link")
+                    if vlink:
+                        bname = sanitize_basename(vlink)
 
-                candidates = []
-                if audio_link and audio_link.lower().endswith(".mp3"):
-                    candidates.append(audio_link)
-                if basename:
-                    candidates.append(f"https://animethemes.moe/audio/{basename}.mp3")
-                    candidates.append(f"https://animethemes.moe/static/audio/{basename}.mp3")
-                    candidates.append(f"https://animethemes.moe/assets/audio/{basename}.mp3")
+                if not bname:
+                    continue
 
-                # on pousse toutes les candidates (le download testera)
-                for url in candidates:
-                    out.append({"url": url, "label": label})
+                for b in basename_variants(bname):
+                    candidates = [
+                        f"https://animethemes.moe/audio/{b}.mp3",
+                        f"https://animethemes.moe/static/audio/{b}.mp3",
+                        f"https://animethemes.moe/assets/audio/{b}.mp3",
+                    ]
+                    # on les donnera à download_first_ok (qui testera jusqu’à 200)
+                    out.append({"url": candidates, "label": label})
+
     return out
 
 # ---------- AniList ----------
