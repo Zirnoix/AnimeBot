@@ -86,16 +86,15 @@ async def fetch_json(
     for attempt in range(3):
         try:
             async with session.get(url, params=params, headers=headers, timeout=30) as resp:
-                status = resp.status
-                if status == 200:
+                if resp.status == 200:
                     return await resp.json()
-                # Log utile
+                # log utile
                 text = await resp.text()
-                print(f"[fetch_json] {url} -> HTTP {status}  (essai {attempt+1}/3)")
-                print(f"[fetch_json] Aperçu body: {text[:300]!r}")
+                print(f"[fetch_json] {url} -> HTTP {resp.status} (try {attempt+1}/3)")
+                print(f"[fetch_json] Body preview: {text[:300]!r}")
                 await asyncio.sleep(1.0)
         except Exception as e:
-            print(f"[fetch_json] Exception: {e} (essai {attempt+1}/3)")
+            print(f"[fetch_json] Exception: {e} (try {attempt+1}/3)")
             await asyncio.sleep(1.2)
     return None
 
@@ -156,53 +155,40 @@ async def api_status(session: aiohttp.ClientSession) -> bool:
 async def iter_animethemes(session: aiohttp.ClientSession):
     """
     Itère sur toutes les pages /anime avec include=animethemes.animethemeentries.videos,resources
-    Sans filtres côté serveur (on filtrera localement ensuite).
+    Pagination JSON:API: page[number], page[size]
     """
-    # 1) Ping status
-    await api_status(session)
-
-    page = 1
+    page_number = 1
     while True:
         params = {
-            "page": page,
-            "perPage": 50,
+            "page[number]": page_number,
+            "page[size]": 50,  # max 100
             "include": "animethemes.animethemeentries.videos,resources",
+            # Tu peux ajouter des filtres ici si besoin (ex: filter[year]=..., etc.)
         }
 
-        # Essai #1: JSON:API
-        data = await fetch_json(session, f"{ANIMETHEMES_BASE}/anime", params=params, accept_header="application/vnd.api+json")
-
-        # Essai #2: fallback Accept: application/json
+        data = await fetch_json(session, f"{ANIMETHEMES_BASE}/anime", params=params)
         if not data:
-            data = await fetch_json(session, f"{ANIMETHEMES_BASE}/anime", params=params, accept_header="application/json")
-
-        if not data:
-            print(f"[iter_animethemes] Page {page}: aucune donnée JSON retournée.")
+            print(f"[iter_animethemes] Page {page_number}: pas de données JSON.")
             break
 
-        # L’API renvoie normalement la clé "anime"
+        # La clé est bien "anime" dans cette API
         anime_list = data.get("anime")
         if anime_list is None:
-            # Log les clés pour comprendre la forme
-            print(f"[iter_animethemes] Page {page}: clé 'anime' absente. Clés retournées: {list(data.keys())}")
-            # Petit aperçu du JSON brut (au cas où)
-            # print(json.dumps(data, indent=2)[:800])
+            print(f"[iter_animethemes] Page {page_number}: clé 'anime' absente. Clés: {list(data.keys())}")
             break
-
         if not anime_list:
-            print(f"[iter_animethemes] Page {page}: liste 'anime' vide, fin.")
+            print(f"[iter_animethemes] Page {page_number}: liste vide. Fin.")
             break
 
-        # yield au fil de l’eau
         for a in anime_list:
             yield a
 
         links = data.get("links") or {}
         nxt = links.get("next")
-        print(f"[iter_animethemes] Page {page}: {len(anime_list)} animes. next={bool(nxt)}")
+        print(f"[iter_animethemes] Page {page_number}: {len(anime_list)} animes — next={bool(nxt)}")
         if not nxt:
             break
-        page += 1
+        page_number += 1
 
 def extract_anilist_id(anime: Dict[str, Any]) -> Optional[int]:
     """
