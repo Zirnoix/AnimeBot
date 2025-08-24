@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List
 import discord
 from discord.ext import commands, tasks
-
+from discord import app_commands
 from modules import core
 
 # Configuration du logging
@@ -65,6 +65,21 @@ class AnimeBot(commands.Bot):
         """Configure le bot au démarrage."""
         await self.load_extensions()
         self.start_tasks()
+        # --- [AJOUT] Slash command /ping minimaliste ---
+        @app_commands.command(name="ping", description="Répond avec Pong et la latence.")
+        async def ping_slash(interaction: discord.Interaction):
+            latency_ms = round(self.latency * 1000)
+            await interaction.response.send_message(f"Pong ! {latency_ms} ms")
+
+        try:
+            # On ajoute la commande et on synchronise l'arbre global
+            self.tree.add_command(ping_slash)
+            await self.tree.sync()
+            logger.info("Slash command /ping enregistrée et synchronisée.")
+        except Exception as e:
+            logger.error(f"Échec d'enregistrement de /ping : {e}")
+        # --- [FIN AJOUT] ---
+
 
     async def on_ready(self):
         """Appelé quand le bot est prêt et connecté."""
