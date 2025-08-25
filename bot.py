@@ -332,6 +332,20 @@ class AnimeBot(commands.Bot):
             )
         return embed
 
+class AnimeBot(commands.Bot):
+    async def setup_hook(self):
+        # (Optionnel) pour tester instantanément sur ton serveur de dev
+        # self.tree.copy_global_to(guild=discord.Object(id=GUILD_ID_TEST))
+        # await self.tree.sync(guild=discord.Object(id=GUILD_ID_TEST))
+        pass
+
+@commands.is_owner()
+@commands.command(name="sync")
+async def sync_cmd(ctx: commands.Context):
+    synced = await ctx.bot.tree.sync()  # global (propagation lente mais propre)
+    await ctx.send(f"{len(synced)} slash commands synchronisées.")
+
+
 # Création de l'instance du bot
 bot = AnimeBot()
 
