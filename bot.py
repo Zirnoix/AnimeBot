@@ -338,10 +338,49 @@ async def sync_cmd(ctx: commands.Context):
     synced = await ctx.bot.tree.sync()  # global
     await ctx.send(f"{len(synced)} slash commands synchronisées.")
 
+@commands.is_owner()
+@commands.command(name="sync_guild")
+async def sync_guild(ctx: commands.Context, guild_id: int = None):
+    """Sync slash sur 1 serveur (instantané). Utilise l'ID du serveur courant si non fourni."""
+    try:
+        guild = discord.Object(id=guild_id or ctx.guild.id)
+        synced = await ctx.bot.tree.sync(guild=guild)
+        await ctx.send(f"✅ Sync GUILD {guild.id} : {len(synced)} commande(s).")
+    except Exception as e:
+        await ctx.send(f"❌ Sync guild échec : {e}")
+
+@commands.is_owner()
+@commands.command(name="list_slash")
+async def list_slash(ctx: commands.Context):
+    """Liste ce que le bot a actuellement dans bot.tree (côté code) avant publication."""
+    try:
+        cmds = ctx.bot.tree.get_commands()  # côté bot (pas ce qui est déjà publié)
+        lines = [f"- {c.name} ({c.__class__.__name__})" for c in cmds]
+        chunk = "\n".join(lines) or "(aucune)"
+        # évite les messages trop longs
+        for i in range(0, len(chunk), 1800):
+            await ctx.send(f"```{chunk[i:i+1800]}```")
+    except Exception as e:
+        await ctx.send(f"❌ list_slash échec : {e}")
+
+@commands.is_owner()
+@commands.command(name="sync_global")
+async def sync_global(ctx: commands.Context):
+    """Force la sync globale (peut prendre du temps à apparaître côté Discord)."""
+    try:
+        synced = await ctx.bot.tree.sync()
+        await ctx.send(f"🌍 Sync GLOBAL : {len(synced)} commande(s).")
+    except Exception as e:
+        await ctx.send(f"❌ Sync global échec : {e}")
+
+
 
 # Création de l'instance du bot
 bot = AnimeBot()
 bot.add_command(sync_cmd)  # <<< on enregistre la commande définie au module
+bot.add_command(sync_guild)
+bot.add_command(list_slash)
+bot.add_command(sync_global)
 
 if __name__ == "__main__":
     # Vérification de la présence du token
