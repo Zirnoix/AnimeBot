@@ -373,6 +373,19 @@ async def sync_global(ctx: commands.Context):
     except Exception as e:
         await ctx.send(f"❌ Sync global échec : {e}")
 
+@commands.is_owner()
+@commands.command(name="list_all_cmds")
+async def list_all_cmds(ctx: commands.Context):
+    from discord.ext import commands as dpy
+    rows = []
+    for cmd in sorted(ctx.bot.commands, key=lambda c: c.qualified_name):
+        typ = ("HYBRID" if isinstance(cmd, dpy.HybridCommand)
+               else "GROUP-HYBRID" if isinstance(cmd, dpy.HybridGroup)
+               else "PREFIX")
+        rows.append(f"{cmd.qualified_name} -> {typ}")
+    chunk = "\n".join(rows) or "(aucune)"
+    for i in range(0, len(chunk), 1800):
+        await ctx.send(f"```{chunk[i:i+1800]}```")
 
 
 # Création de l'instance du bot
@@ -381,6 +394,7 @@ bot.add_command(sync_cmd)  # <<< on enregistre la commande définie au module
 bot.add_command(sync_guild)
 bot.add_command(list_slash)
 bot.add_command(sync_global)
+bot.add_command(list_all_cmds)
 
 if __name__ == "__main__":
     # Vérification de la présence du token
