@@ -18,6 +18,7 @@ from datetime import datetime
 from modules import core
 from modules.image import generate_next_card
 from time import time
+from typing import Optional
 
 class Episodes(commands.Cog):
     """Cog gérant les plannings et les notifications d'épisodes.
@@ -40,7 +41,9 @@ class Episodes(commands.Cog):
         self.bot = bot
 
     @commands.command(name="prochains")
-    async def prochains(self, ctx: commands.Context, *args: str) -> None:
+    async def prochains(self, ctx: commands.Context, query: Optional[str] = None) -> None:
+        # back-compat : reconstruire "args" comme avant si le corps du code l'utilise
+        args = tuple(query.split()) if query else tuple()
         """Affiche la liste des prochains épisodes à venir.
 
         Permet de voir les prochaines sorties avec options de filtrage :
