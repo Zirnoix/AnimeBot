@@ -13,13 +13,24 @@ import asyncio
 import logging
 import difflib
 from datetime import datetime
-from typing import Optional, Set, Dict, List, Tuple
-from modules.core import normalize, FileConfig
+from typing import Optional, Set, Dict, List, Tuple, Any
+
 import discord
 from discord.ext import commands
 from modules import core
+from modules.core import normalize, FileConfig
 
 logger = logging.getLogger(__name__)
+
+# --- petit utilitaire pour éviter "This interaction failed" côté slash ---
+async def _maybe_defer(ctx: commands.Context, ephemeral: bool = False) -> None:
+    try:
+        # ctx.interaction existe quand la commande est appelée en slash
+        if hasattr(ctx, "interaction") and ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(ephemeral=ephemeral)
+    except Exception:
+        pass
+
 
 class TitleMatcher:
     """Gestionnaire de correspondance des titres d'anime."""
@@ -29,9 +40,7 @@ class TitleMatcher:
 
     def clean_title(self, title: str) -> str:
         """Nettoie un titre pour la comparaison."""
-        # Supprime les caractères spéciaux et la ponctuation
         cleaned = core.normalize(title)
-        # Supprime les mots communs qui ne sont pas significatifs
         stop_words = {"the", "a", "an", "season", "part", "episode", "movie", "saison"}
         words = [w for w in cleaned.split() if w not in stop_words]
         return " ".join(words)
@@ -43,25 +52,23 @@ class TitleMatcher:
     def find_matches(self, guess: str, correct_titles: Set[str], threshold: float = 0.85) -> List[str]:
         """Trouve les correspondances possibles pour une réponse."""
         cleaned_guess = self.clean_title(guess)
-        matches = []
+        matches: List[str] = []
 
         for title in correct_titles:
             cleaned_title = self.clean_title(title)
 
-            # Vérification exacte
             if cleaned_guess == cleaned_title:
                 return [title]
 
-            # Vérification partielle
             if cleaned_guess in cleaned_title or cleaned_title in cleaned_guess:
                 matches.append(title)
                 continue
 
-            # Vérification de similarité
             if self.get_similarity(cleaned_guess, cleaned_title) >= threshold:
                 matches.append(title)
 
         return matches
+
 
 class Quiz(commands.Cog):
     """Cog for anime quiz commands."""
@@ -102,10 +109,14 @@ class Quiz(commands.Cog):
                 titles.add(syn)
 
         return titles
-    @commands.command(name="animequiz")
+
+    # ---------- COMMANDES HYBRIDES (fonctionnent en / ET en !) ----------
+
+    @commands.hybrid_command(name="animequiz", description="Lance un quiz pour deviner un anime à partir de son image.")
     async def animequiz(self, ctx: commands.Context, difficulty: str = "normal") -> None:
         """Lance un quiz pour deviner un anime à partir de son image."""
         try:
+            await _maybe_defer(ctx)
             await ctx.send("🎮 Préparation du quiz...")
 
             difficulty = difficulty.lower()
@@ -122,7 +133,6 @@ class Quiz(commands.Cog):
 
             correct_titles = self._process_anime_titles(anime)
 
-            # Création de l'embed
             embed = discord.Embed(
                 title="❓ Quel est cet anime ?",
                 description=(
@@ -133,13 +143,13 @@ class Quiz(commands.Cog):
                 color=discord.Color.orange(),
             )
 
-            # Utiliser la meilleure image disponible
             image_url = (anime.get("coverImage", {}).get("extraLarge") or
                          anime.get("coverImage", {}).get("large"))
             if image_url:
                 embed.set_image(url=image_url)
 
-            hint = "Genre" + ("s" if len(anime["genres"]) > 1 else "") + " : " + ", ".join(anime["genres"])
+            genres = anime.get("genres", [])
+            hint = ("Genre" + ("s" if len(genres) > 1 else "") + " : " + ", ".join(genres)) if genres else "Bonne chance !"
             embed.set_footer(text=hint)
 
             await ctx.send(embed=embed)
@@ -154,8 +164,8 @@ class Quiz(commands.Cog):
                 if msg.content.strip().lower() == "jsp":
                     titles = [
                         f"🇯🇵 {anime['title']['romaji']}",
-                        f"🇬🇧 {anime['title']['english']}" if anime['title']['english'] else None,
-                        f"📝 {anime['title']['native']}" if anime['title']['native'] else None,
+                        f"🇬🇧 {anime['title']['english']}" if anime['title'].get('english') else None,
+                        f"📝 {anime['title']['native']}" if anime['title'].get('native') else None,
                     ]
                     titles = [t for t in titles if t]
                     await ctx.send(f"⏭️ Question passée. Les titres possibles étaient :\n{chr(10).join(titles)}")
@@ -165,28 +175,25 @@ class Quiz(commands.Cog):
                 if matches:
                     await ctx.send(f"✅ Bonne réponse, **{ctx.author.display_name}** !")
 
-                    # Update scores and XP
                     scores = core.load_scores()
                     uid = str(ctx.author.id)
                     scores[uid] = scores.get(uid, 0) + 1
                     core.save_scores(scores)
 
                     xp_amount = 5 if difficulty == "easy" else 10 if difficulty == "normal" else 15
-                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 12)
+                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_amount)
                     core.add_mini_score(ctx.author.id, "animequiz", 1)
 
-                    # 👉 NEW: progression mission “bonne réponse quiz solo”
                     ctx.bot.dispatch("mission_progress", ctx.author.id, "_custom:quiz_solo_ok")
 
-                    # Show other possible titles
                     other_titles = [t for t in correct_titles if normalize(t) != normalize(msg.content)]
                     if other_titles:
                         await ctx.send(f"💡 Autres titres acceptés : {', '.join(other_titles)}")
                 else:
                     titles = [
                         f"🇯🇵 {anime['title']['romaji']}",
-                        f"🇬🇧 {anime['title']['english']}" if anime['title']['english'] else None,
-                        f"📝 {anime['title']['native']}" if anime['title']['native'] else None,
+                        f"🇬🇧 {anime['title']['english']}" if anime['title'].get('english') else None,
+                        f"📝 {anime['title']['native']}" if anime['title'].get('native') else None,
                     ]
                     titles = [t for t in titles if t]
                     await ctx.send(f"❌ Mauvaise réponse. C'était :\n{chr(10).join(titles)}")
@@ -197,12 +204,12 @@ class Quiz(commands.Cog):
         except Exception as e:
             logger.error(f"Erreur dans animequiz: {e}")
             await ctx.send("❌ Une erreur s'est produite lors du quiz.")
-        
 
-    @commands.command(name="animequizmulti")
+    @commands.hybrid_command(name="animequizmulti", description="Lance un quiz multi-questions (1 à 20) avec bonus de combo.")
     async def animequizmulti(self, ctx: commands.Context, nb_questions: int = 5) -> None:
         """Lance un quiz multi questions (1 à 20) avec bonus de combo."""
         try:
+            await _maybe_defer(ctx)
             if not 1 <= nb_questions <= 20:
                 await ctx.send("❌ Tu dois choisir un nombre entre 1 et 20.")
                 return
@@ -212,7 +219,6 @@ class Quiz(commands.Cog):
             score = 0
             total_xp = 0
 
-            # --- Nouveau: combo & bonus cumulés ---
             combo = 0
             combo_bonus_total = 0
 
@@ -228,11 +234,11 @@ class Quiz(commands.Cog):
                     anime = await self._get_random_anime(sort_option)
                     if not anime:
                         continue
-    
+
                     correct_titles = self._process_anime_titles(anime)
                     image = (anime.get("coverImage", {}).get("extraLarge") or
                              anime.get("coverImage", {}).get("large"))
-    
+
                     embed = discord.Embed(
                         title=f"❓ Question {i + 1}/{nb_questions} — difficulté `{difficulty}`",
                         description="Tu as **20 secondes** pour deviner. Tape `jsp` pour passer.",
@@ -241,19 +247,19 @@ class Quiz(commands.Cog):
                     if image:
                         embed.set_image(url=image)
                     embed.set_footer(text=f"Genres : {', '.join(anime.get('genres', []))}")
-    
+
                     await ctx.send(embed=embed)
-    
+
                     try:
                         msg = await self.bot.wait_for(
                             "message",
                             timeout=20.0,
                             check=lambda m: m.author == ctx.author and m.channel == ctx.channel
                         )
-    
+
                         if msg.content.strip().lower() == "jsp":
                             await ctx.send(f"⏭️ Passé. C'était **{anime['title']['romaji']}**.")
-                            combo = 0  # reset combo
+                            combo = 0
                         else:
                             matches = self.title_matcher.find_matches(msg.content, correct_titles)
                             if matches:
@@ -262,8 +268,7 @@ class Quiz(commands.Cog):
                                 xp_gain = 5 if difficulty == "easy" else 10 if difficulty == "normal" else 15
                                 total_xp += xp_gain
                                 core.add_mini_score(ctx.author.id, "animequiz", 1)
-    
-                                # --- Combo logic ---
+
                                 combo += 1
                                 if combo == 3:
                                     combo_bonus_total += 2
@@ -273,38 +278,34 @@ class Quiz(commands.Cog):
                                     await ctx.send("🌟 **Combo x5 !** +5 XP bonus")
                             else:
                                 await ctx.send(f"❌ Faux ! C'était **{anime['title']['romaji']}**.")
-                                combo = 0  # reset combo
-    
+                                combo = 0
+
                     except asyncio.TimeoutError:
                         await ctx.send(f"⏰ Temps écoulé ! C'était **{anime['title']['romaji']}**.")
-                        combo = 0  # reset combo
-    
+                        combo = 0
+
                 except Exception as e:
                     logger.error(f"Erreur question {i + 1}: {e}")
                     continue
-    
+
                 await asyncio.sleep(1.5)
-    
-            # Résultats finaux
+
             scores = core.load_scores()
             uid = str(ctx.author.id)
-    
-            # Pénalité si < 50% de bonnes réponses
+
             if score < (nb_questions / 2):
                 penalty = 1
                 scores[uid] = max(0, scores.get(uid, 0) - penalty)
                 await ctx.send(f"⚠️ Moins de 50% de bonnes réponses, -{penalty} point retiré.")
             else:
                 scores[uid] = scores.get(uid, 0) + score
-    
+
             core.save_scores(scores)
-    
-            # --- Ajoute le bonus combo et crédite l'XP en une fois ---
+
             total_xp += combo_bonus_total
             if total_xp > 0:
                 await core.add_xp(self.bot, ctx.channel, ctx.author.id, total_xp)
-    
-            # Embed final
+
             precision = (score / nb_questions * 100) if nb_questions > 0 else 0.0
             embed = discord.Embed(
                 title="🏁 Quiz terminé !",
@@ -316,15 +317,16 @@ class Quiz(commands.Cog):
                 color=discord.Color.gold()
             )
             await ctx.send(embed=embed)
-    
+
         except Exception as e:
             logger.error(f"Erreur dans animequizmulti: {e}")
             await ctx.send("❌ Une erreur s'est produite durant le quiz.")
 
-    @commands.command(name="duel")
+    @commands.hybrid_command(name="duel", description="Affronte un ami en duel de 3 questions.")
     async def duel(self, ctx: commands.Context, opponent: discord.Member) -> None:
         """Affronte un ami en duel de 3 questions."""
         try:
+            await _maybe_defer(ctx)
             if opponent.bot:
                 await ctx.send("🤖 Tu ne peux pas défier un bot.")
                 return
@@ -333,7 +335,6 @@ class Quiz(commands.Cog):
                 await ctx.send("🙃 Tu ne peux pas te défier toi-même.")
                 return
 
-            # Annonce du duel
             embed = discord.Embed(
                 title="⚔️ Défi de quiz anime !",
                 description=f"**{ctx.author.display_name}** défie **{opponent.display_name}** !\n"
@@ -348,7 +349,6 @@ class Quiz(commands.Cog):
 
             for i in range(3):
                 try:
-                    # Préparation de la question
                     difficulty = random.choice(difficulties)
                     sort_option = {
                         "easy": "POPULARITY_DESC",
@@ -362,7 +362,6 @@ class Quiz(commands.Cog):
 
                     correct_titles = self._process_anime_titles(anime)
 
-                    # Création de l'embed
                     embed = discord.Embed(
                         title=f"🎮 Duel – Question {i + 1}/3",
                         description=(
@@ -372,11 +371,15 @@ class Quiz(commands.Cog):
                         color=discord.Color.red(),
                     )
 
-                    if image := (anime.get("coverImage", {}).get("extraLarge") or
-                                 anime.get("coverImage", {}).get("large")):
+                    image = (anime.get("coverImage", {}).get("extraLarge") or
+                             anime.get("coverImage", {}).get("large"))
+                    if image:
                         embed.set_image(url=image)
 
-                    embed.set_footer(text=f"Genres : {', '.join(anime['genres'])}")
+                    genres = anime.get("genres", [])
+                    if genres:
+                        embed.set_footer(text=f"Genres : {', '.join(genres)}")
+
                     await ctx.send(embed=embed)
 
                     def check(m: discord.Message) -> bool:
@@ -405,7 +408,6 @@ class Quiz(commands.Cog):
 
                 await asyncio.sleep(1)
 
-            # Résultats du duel
             s1, s2 = scores[ctx.author.id], scores[opponent.id]
 
             embed = discord.Embed(
@@ -423,7 +425,8 @@ class Quiz(commands.Cog):
                     f"**{ctx.author.display_name}** {s1} - {s2} **{opponent.display_name}**\n"
                     f"🎖️ +20 XP pour le vainqueur !"
                 )
-                await core.add_xp(self.bot, ctx.channel, ctx.author.id, 20)
+                await core.add_xp(self.bot, ctx.channel, winner.id, 20)  # (petite correction logique)
+
                 core.add_mini_score(winner.id, "duel", 1)
 
             await ctx.send(embed=embed)
@@ -432,16 +435,16 @@ class Quiz(commands.Cog):
             logger.error(f"Erreur dans duel: {e}")
             await ctx.send("❌ Une erreur s'est produite pendant le duel.")
 
-    @commands.command(name="quiztop")
+    @commands.hybrid_command(name="quiztop", description="Affiche le top 10 des scores du quiz.")
     async def quiztop(self, ctx: commands.Context) -> None:
         """Affiche le top 10 des scores du quiz."""
         try:
+            await _maybe_defer(ctx, ephemeral=False)
             scores = core.load_scores()
             if not scores:
                 await ctx.send("🏆 Aucun score enregistré pour l'instant.")
                 return
 
-            # Préparation du classement
             leaderboard = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:10]
 
             embed = discord.Embed(
@@ -449,8 +452,7 @@ class Quiz(commands.Cog):
                 color=discord.Color.gold()
             )
 
-            # Construction du classement
-            lines = []
+            lines: List[str] = []
             for i, (uid, score) in enumerate(leaderboard, 1):
                 try:
                     user = await self.bot.fetch_user(int(uid))
@@ -463,7 +465,6 @@ class Quiz(commands.Cog):
 
             embed.description = "\n\n".join(lines) if lines else "Aucun score."
 
-            # Informations supplémentaires
             winner_data = core.load_json(core.WINNER_FILE, None)
             if winner_data:
                 try:
@@ -478,7 +479,6 @@ class Quiz(commands.Cog):
                 except Exception:
                     pass
 
-            # Compteur avant reset
             now = datetime.now(tz=core.TIMEZONE)
             if now.month == 12:
                 next_month = now.replace(year=now.year + 1, month=1, day=1)
@@ -500,11 +500,11 @@ class Quiz(commands.Cog):
             logger.error(f"Erreur dans quiztop: {e}")
             await ctx.send("❌ Une erreur s'est produite.")
 
-    @commands.command(name="myrank")
+    @commands.hybrid_command(name="myrank", description="Affiche ton rang, ton XP et ton titre.")
     async def myrank(self, ctx: commands.Context) -> None:
         """Affiche ton rang, ton XP et ton titre."""
         try:
-            # Chargement des données
+            await _maybe_defer(ctx, ephemeral=False)
             levels = core.load_levels()
             scores = core.load_scores()
 
@@ -515,13 +515,11 @@ class Quiz(commands.Cog):
             level = user_data["level"]
             next_xp = core.xp_for_next_level(level)
 
-            # Création de l'embed
             embed = discord.Embed(
                 title=f"🏅 Rang de {ctx.author.display_name}",
                 color=discord.Color.purple()
             )
 
-            # Barre de progression
             progress = core.get_xp_bar(xp, next_xp)
             title = core.get_title_for_global_level(level)
 
@@ -535,22 +533,22 @@ class Quiz(commands.Cog):
                 inline=False
             )
 
-            # Position dans le classement
             if quiz_score > 0:
-                quiz_title = core.get_title_for_quiz_score(quiz_score)  # On récupère le rang quiz
-    
+                quiz_title = core.get_title_for_quiz_score(quiz_score)
+
                 sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-                position = next(i for i, (uid, _) in enumerate(sorted_scores, 1) if uid == str(ctx.author.id))
-    
-                embed.add_field(
-                    name="🏆 Classement Quiz",
-                    value=(
-                        f"Position : **#{position}**\n"
-                        f"Score total : **{quiz_score}** points\n"
-                        f"Rang quiz : **{quiz_title}**"
-                    ),
-                    inline=False
-                )
+                position = next((i for i, (uid, _) in enumerate(sorted_scores, 1) if uid == str(ctx.author.id)), None)
+
+                if position is not None:
+                    embed.add_field(
+                        name="🏆 Classement Quiz",
+                        value=(
+                            f"Position : **#{position}**\n"
+                            f"Score total : **{quiz_score}** points\n"
+                            f"Rang quiz : **{quiz_title}**"
+                        ),
+                        inline=False
+                    )
 
             await ctx.send(embed=embed)
 
