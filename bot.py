@@ -22,6 +22,24 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from modules import core
 
+# --- MONKEY PATCH HYBRID (avant tout chargement de cogs) ---
+# Objectif : toute commande préfixée devient hybride sans modifier les cogs
+try:
+    # must be done AVANT l'import effectif des cogs
+    if hasattr(commands, "hybrid_command") and hasattr(commands, "hybrid_group"):
+        # 1) remplacer les décorateurs "module-level"
+        commands.command = commands.hybrid_command
+        commands.group = commands.hybrid_group
+
+        # 2) si des cogs font "from discord.ext.commands import command/group",
+        #    ils liront ces objets DÉJÀ patchés (car on modifie le module à la source)
+        # (rien d'autre à faire)
+    else:
+        logger.warning("⚠️ Version de discord.py trop ancienne ? Pas de hybrid_command/hybrid_group.")
+except Exception as e:
+    logger.error(f"Monkey-patch hybrid a échoué : {e}")
+# --- FIN MONKEY PATCH ---
+
 # Configuration du logging
 logging.basicConfig(
     level=logging.INFO,
@@ -387,6 +405,17 @@ async def list_all_cmds(ctx: commands.Context):
     for i in range(0, len(chunk), 1800):
         await ctx.send(f"```{chunk[i:i+1800]}```")
 
+@commands.is_owner()
+@commands.command(name="sync_here")
+async def sync_here(ctx: commands.Context):
+    try:
+        guild = discord.Object(id=ctx.guild.id)
+        ctx.bot.tree.copy_global_to(guild=guild)
+        synced = await ctx.bot.tree.sync(guild=guild)
+        await ctx.send(f"📌 Copié + sync sur ce serveur : {len(synced)} commande(s).")
+    except Exception as e:
+        await ctx.send(f"❌ sync_here échec : {e}")
+
 
 # Création de l'instance du bot
 bot = AnimeBot()
@@ -395,6 +424,7 @@ bot.add_command(sync_guild)
 bot.add_command(list_slash)
 bot.add_command(sync_global)
 bot.add_command(list_all_cmds)
+bot.add_command(sync_here)
 
 if __name__ == "__main__":
     # Vérification de la présence du token
