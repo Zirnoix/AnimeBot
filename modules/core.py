@@ -37,16 +37,25 @@ import io
 from io import BytesIO  # utilisé par generate_profile_card
 
 # ================= LOGGING =================
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
+# Évite de dupliquer les handlers si bot.py a déjà appelé basicConfig.
+if not logging.root.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('bot.log', encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
 logger = logging.getLogger(__name__)
 LOG = logger
+
+
+def anilist_error_user_message() -> str:
+    """Message Discord unifié quand l’API AniList est indisponible ou ne renvoie rien d’exploitable."""
+    return (
+        "❌ L’API AniList ne répond pas pour le moment. Réessaie dans quelques minutes."
+    )
 
 # ================= CONFIG & PATHS =================
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY")
@@ -411,14 +420,16 @@ def get_airings_global(days: int = 14, limit: int = 200) -> List[dict]:
 def get_airings_for_guild(guild_id: int, *, days: int = 7, limit: int = 200) -> List[dict]:
     """
     Retourne les sorties à venir filtrées par la whitelist du serveur.
+    Utilise **guild_whitelist** (rempli par /airings all, add, etc.) et fusionne
+    l’ancienne table **guild_airings** si elle contenait encore des IDs.
     Forme: [{airingAt, episode, media{ id, siteUrl, title{...}, cover, genres }}]
     """
-    ids = set(guild_airings_ids(guild_id))
+    ids: Set[int] = {int(x["media_id"]) for x in guild_whitelist_list(guild_id)}
+    ids |= {int(x) for x in guild_airings_ids(guild_id)}
     if not ids:
         return []
     all_items = get_airings_global(days=days, limit=max(limit, 200))
     out = [it for it in all_items if ((it.get("media") or {}).get("id") in ids)]
-    # On garde l’ordre par date (get_airings_global est déjà trié)
     return out[:limit]
 
 def get_next_for_guild(guild_id: int) -> Optional[dict]:
@@ -1513,12 +1524,16 @@ def normalize_title(title: str) -> str:
 
 def find_similar_titles(query: str, threshold: float = 0.85) -> List[str]:
     query = normalize_title(query)
+    if not query:
+        return []
     cache = load_json(FileConfig.TITLE_CACHE, [])
     matches: List[str] = []
     for title in cache:
         if not title:
             continue
-        if query == title or (query in title or title in query):
+        if query == title or (
+            len(query) >= 2 and (query in title or title in query)
+        ):
             matches.append(title)
             continue
         if difflib.SequenceMatcher(None, query, title).ratio() >= threshold:

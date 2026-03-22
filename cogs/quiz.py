@@ -97,15 +97,21 @@ class TitleMatcher:
 
     def find_matches(self, guess: str, correct_titles: Set[str], threshold: float = 0.85) -> List[str]:
         cleaned_guess = self.clean_title(guess)
+        # Emojis / ponctuation seule → normalize vide ; "" in "n'importe quel titre" est True en Python.
+        if not cleaned_guess:
+            return []
         matches: List[str] = []
         for title in correct_titles:
             cleaned_title = self.clean_title(title)
             if cleaned_guess == cleaned_title:
                 return [title]
-            if cleaned_guess in cleaned_title or cleaned_title in cleaned_guess:
+            # Sous-chaîne : exiger au moins 2 caractères pour éviter les faux positifs (ex. "" ou "a").
+            if len(cleaned_guess) >= 2 and (
+                cleaned_guess in cleaned_title or cleaned_title in cleaned_guess
+            ):
                 matches.append(title)
                 continue
-            if self.get_similarity(cleaned_guess, cleaned_title) >= threshold:
+            if len(cleaned_guess) >= 2 and self.get_similarity(cleaned_guess, cleaned_title) >= threshold:
                 matches.append(title)
         return matches
 
@@ -274,7 +280,7 @@ class Quiz(commands.Cog):
 
             anime = await self._fetch_random_anilist_media(sort_option)
             if not anime:
-                await ctx.send("❌ Impossible de trouver un anime correspondant (AniList). Réessaie.")
+                await ctx.send(core.anilist_error_user_message())
                 return
 
             correct_titles = self._titles_set(anime)
@@ -539,7 +545,7 @@ class Quiz(commands.Cog):
             for i in range(1, manches + 1):
                 anime = await self._fetch_random_anilist_media(sort_option)
                 if not anime:
-                    await ctx.send("❌ Impossible de récupérer une question, manche annulée.")
+                    await ctx.send(core.anilist_error_user_message())
                     continue
     
                 correct_titles = self._titles_set(anime)

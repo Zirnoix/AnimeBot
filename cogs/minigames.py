@@ -94,7 +94,7 @@ class MiniGames(commands.Cog):
         '''
         data = core.query_anilist(query, {"page": page})
         if not data or not data.get("data"):
-            await ctx.send("❌ Impossible de récupérer des données pour le mini-jeu.")
+            await ctx.send(core.anilist_error_user_message())
             return
 
         media_list = data["data"]["Page"]["media"]
@@ -243,7 +243,7 @@ class MiniGames(commands.Cog):
                 continue
 
         if not anime:
-            await ctx.send("❌ Impossible de récupérer un anime avec un nombre d'épisodes connu.")
+            await ctx.send(core.anilist_error_user_message())
             return
 
         title = anime["title"]["romaji"]
@@ -313,7 +313,7 @@ class MiniGames(commands.Cog):
                 continue
 
         if not anime:
-            await ctx.send("❌ Impossible de récupérer un anime avec des genres.")
+            await ctx.send(core.anilist_error_user_message())
             return
 
         title = anime["title"]["romaji"]
@@ -370,7 +370,7 @@ class MiniGames(commands.Cog):
         '''
         data = core.query_anilist(query, {"page": page})
         if not data or "data" not in data:
-            await ctx.send("❌ Impossible de récupérer les personnages.")
+            await ctx.send(core.anilist_error_user_message())
             return
 
         characters = data["data"]["Page"]["characters"]

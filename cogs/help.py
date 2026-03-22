@@ -478,6 +478,7 @@ class Help(commands.Cog):
             title="📖 Aide — Essentiel",
             description=(
                 "Voici les commandes principales pour bien démarrer.\n"
+                "• Les **slash** `/…` sont la méthode recommandée ; le préfixe **`!`** fonctionne aussi sur les commandes hybrid.\n"
                 "• Tape `/help <commande>` pour le **détail** d’une commande.\n"
                 "• Clique **Voir tout (MP)** pour la liste complète (sections curatées)."
             ),
@@ -495,7 +496,9 @@ class Help(commands.Cog):
         ]
         for name, desc in picks:
             em.add_field(name=name, value=_compact_one_line(desc), inline=False)
-        em.set_footer(text="Aide Essentiel — /help <commande> pour le détail. ‘Voir tout (MP)’ pour tout explorer.")
+        em.set_footer(
+            text="Slash /… ou ! sur les hybrid — /help <commande> pour le détail — ‘Voir tout (MP)’ pour tout explorer."
+        )
 
         view = CoreHelpView(self._build_curated_pages, ephemeral=is_slash)
         await self._send_embed_ctx_or_itx(target, embed=em, view=view, ephemeral=is_slash)
