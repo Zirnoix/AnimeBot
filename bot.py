@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import discord
+from discord.client import Client
 from discord.ext import commands, tasks
 from discord import app_commands
 
@@ -128,7 +129,8 @@ class AnimeBot(commands.Bot):
             )
         except Exception:
             pass
-        await super().on_interaction(interaction)
+        # commands.Bot n'expose pas toujours on_interaction via super() selon la version.
+        await Client.on_interaction(self, interaction)
 
     # ---------- Chargement des cogs ----------
     async def _load_extensions(self) -> None:
@@ -442,7 +444,8 @@ async def _block_prefix_invocation(ctx: commands.Context) -> bool:
 # ========= Gestion des erreurs App Commands =========
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.CommandRegistrationError):
+    _reg_err = getattr(app_commands, "CommandRegistrationError", None)
+    if _reg_err is not None and isinstance(error, _reg_err):
         LOG.warning("CommandRegistrationError: %s", error)
         try:
             if not interaction.response.is_done():

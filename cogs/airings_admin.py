@@ -116,7 +116,8 @@ class PageAddSelect(discord.ui.Select):
             options=opts,
             row=3,
         )
-        self.parent = parent
+        # discord.ui.Item a une propriété `parent` en lecture seule — ne pas l'écraser.
+        self.airings_view = parent
 
     async def callback(self, interaction: discord.Interaction) -> None:
         vals = [v for v in self.values if v != "0"]
@@ -125,10 +126,10 @@ class PageAddSelect(discord.ui.Select):
             return
         added = 0
         for v in vals:
-            if core.guild_whitelist_add(self.parent.guild_id, int(v)):
+            if core.guild_whitelist_add(self.airings_view.guild_id, int(v)):
                 added += 1
-        self.parent.refresh_whitelist()
-        nv = _build_airings_view(self.parent.guild_id, self.parent.items, self.parent.days, self.parent.page)
+        self.airings_view.refresh_whitelist()
+        nv = _build_airings_view(self.airings_view.guild_id, self.airings_view.items, self.airings_view.days, self.airings_view.page)
         await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
         await interaction.followup.send(f"✅ **{added}** animé(s) ajouté(s) à la veille du serveur.", ephemeral=True)
 
@@ -155,7 +156,7 @@ class PageRemoveSelect(discord.ui.Select):
             options=opts,
             row=4,
         )
-        self.parent = parent
+        self.airings_view = parent
 
     async def callback(self, interaction: discord.Interaction) -> None:
         vals = [v for v in self.values if v != "0"]
@@ -164,10 +165,10 @@ class PageRemoveSelect(discord.ui.Select):
             return
         removed = 0
         for v in vals:
-            if core.guild_whitelist_remove(self.parent.guild_id, int(v)):
+            if core.guild_whitelist_remove(self.airings_view.guild_id, int(v)):
                 removed += 1
-        self.parent.refresh_whitelist()
-        nv = _build_airings_view(self.parent.guild_id, self.parent.items, self.parent.days, self.parent.page)
+        self.airings_view.refresh_whitelist()
+        nv = _build_airings_view(self.airings_view.guild_id, self.airings_view.items, self.airings_view.days, self.airings_view.page)
         await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
         await interaction.followup.send(f"🗑️ **{removed}** animé(s) retiré(s) de la veille.", ephemeral=True)
 
