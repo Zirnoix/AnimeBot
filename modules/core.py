@@ -1,0 +1,1983 @@
+# modules/core.py
+"""
+Module core pour le AnimeBot.
+
+Ce module centralise toutes les fonctionnalités essentielles :
+- Gestion des fichiers et données persistantes (scores, niveaux, préférences)
+- Interface avec l'API AniList (recherche, statistiques, épisodes)
+- Génération d'images (cartes de profil, épisodes)
+- Gestion des titres et correspondances
+- Utilitaires de formatage et normalisation
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import re
+import unicodedata
+import random
+import time
+import difflib
+from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from typing import Any, Optional, Dict, List, Set, Union, Tuple, Iterable
+import sqlite3
+import discord
+import requests
+import pytz
+from zoneinfo import ZoneInfo
+import aiohttp
+import aiofiles
+from babel.dates import format_datetime
+from PIL import Image, ImageDraw, ImageFont
+import io
+from io import BytesIO  # utilisé par generate_profile_card
+
+# ================= LOGGING =================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+LOG = logger
+
+# ================= CONFIG & PATHS =================
+DEEPL_API_KEY = os.getenv("DEEPL_API_KEY")
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'assets')
+_USER_URL_RE = re.compile(r"https?://(www\.)?anilist\.co/user/([^/?#]+)/?", re.I)
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(ASSETS_DIR, exist_ok=True)
+DB_PATH = os.getenv("DB_PATH", "data/bot.db")
+os.makedirs("data", exist_ok=True)
+
+WINNER_FILE = os.path.join(DATA_DIR, "winner.json")
+TITLES_FILE = os.path.join(DATA_DIR, "user_titles.json")  # chemin rendu cohérent
+CACHE_FILE = os.path.join(DATA_DIR, "anime_titles.json")  # idem
+
+class FileConfig:
+    """Configuration des chemins de fichiers."""
+    PREFERENCES   = os.path.join(DATA_DIR, "preferences.json")
+    QUIZ_SCORES   = os.path.join(DATA_DIR, "quiz_scores.json")
+    LINKED_USERS  = os.path.join(DATA_DIR, "linked_users.json")
+    LEVELS        = os.path.join(DATA_DIR, "quiz_levels.json")
+    TRACKER       = os.path.join(DATA_DIR, "anitracker.json")
+    USER_SETTINGS = os.path.join(DATA_DIR, "user_settings.json")
+    NOTIFIED      = os.path.join(DATA_DIR, "notified.json")
+    LINKS         = os.path.join(DATA_DIR, "user_links.json")
+    TITLE_CACHE   = os.path.join(DATA_DIR, "title_cache.json")
+    WINNER        = os.path.join(DATA_DIR, "quiz_winner.json")
+    MINI_SCORES   = os.path.join(DATA_DIR, "mini_scores.json")
+    CONFIG        = os.path.join(DATA_DIR, "config.json")
+    GUESSOP_SCORES  = os.path.join(DATA_DIR, "guessop_scores.json")
+    GUESSCHAR_SCORES = os.path.join(DATA_DIR, "guesschar_scores.json")
+
+_AIRING_SORT_FIX = {
+    "AIRING_AT": "TIME",
+    "AIRING_AT_DESC": "TIME_DESC",
+}
+
+# Variables d'environnement et constantes
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+ANILIST_USERNAME = os.getenv("ANILIST_USERNAME", "Zirnoixdcoco")
+_ANILIST_USERNAME_RE = re.compile(r"^[A-Za-z0-9_][-A-Za-z0-9_]{1,31}$")
+TIMEZONE = pytz.timezone(os.getenv("BOT_TIMEZONE", "Europe/Paris"))
+OWNER_ID = 180389173985804288
+
+# Constantes pour les dates
+JOURS_FR = {
+    "Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi",
+    "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi",
+    "Sunday": "Dimanche"
+}
+
+# Émojis pour les genres
+GENRE_EMOJIS = {
+    "Action": "⚔️", "Comedy": "😂", "Drama": "🎭", "Fantasy": "🧙‍♂️",
+    "Romance": "💕", "Sci-Fi": "🚀", "Horror": "👻", "Mystery": "🕵️",
+    "Sports": "🏅", "Music": "🎵", "Slice of Life": "🍃",
+    "Adventure": "🌍", "Supernatural": "🔮", "Mecha": "🤖",
+    "Psychological": "🧠", "Thriller": "🔪"
+}
+
+# Titres de niveaux (paliers de 5)
+LEVEL_TITLES_QUIZ = [
+    (0, "👶 Nouveau"), (5, "🌱 Apprenti"), (10, "📘 Amateur"), (15, "📚 Otaku Confirmé"),
+    (20, "🎯 Expert"), (25, "🔥 Maître Otaku"), (30, "🧠 Sensei"), (35, "🧩 Stratège"),
+    (40, "🏆 Champion"), (45, "🌟 Légende Locale"), (50, "💎 Légende Nationale"),
+    (55, "🗿 Icône Anime"), (60, "🐉 Mythe"), (65, "🛐 Dieu Otaku"),
+    (70, "☄️ Divinité Universelle"), (75, "🔮 Omniscient Otaku"),
+    (80, "⚡ Maître des Éclairs"), (85, "🌌 Voyageur Galactique"),
+    (90, "🏮 Gardien des Animes"), (95, "🎭 Maître des Illusions"),
+    (100, "👑 Roi des Otakus")
+]
+
+# Titres niveau GLOBAL (XP)
+LEVEL_TITLES_GLOBAL = [
+    (0, "👶 Novice"), (3, "🌱 Initié"), (6, "📗 Débutant"), (9, "🔧 Pratiquant"),
+    (12, "🧭 Explorateur"), (15, "🎯 Approuvé"), (20, "⚔️ Aspirant"), (25, "🏹 Disciple"),
+    (30, "🛡️ Chevalier"), (37, "🧠 Stratège"), (44, "🔥 Maître"), (51, "🌪️ Virtuose"),
+    (58, "💎 Élite"), (65, "🌟 Héroïque"), (72, "🐉 Archon"), (79, "⚡ Dominant"),
+    (86, "🌌 Mythique"), (93, "🏆 Parangon"), (100, "👑 Souverain"), (107, "🗼 Éminence"),
+    (114, "🜲 Arcaniste"), (121, "🪽 Séraphin"), (128, "☄️ Sidéral"),
+    (135, "🜚 Transcendant"), (142, "🛐 Divin"), (150, "♾️ Apothéose"),
+]
+
+_ANILIST_CACHE = {
+    "profile": {},      # { key: {"ts": <epoch>, "data": {...}} }
+    "list_count": {},   # total d'entrées de la liste
+    "upcoming": {},     # prochains épisodes
+}
+_TTL_SEC = int(os.getenv("ANILIST_TTL_HOURS", "6")) * 3600
+
+def _fresh(bucket: str, key: str) -> bool:
+    ent = _ANILIST_CACHE[bucket].get(key)
+    return bool(ent) and (time.time() - ent["ts"] < _TTL_SEC)
+
+# ================= JSON HELPERS =================
+async def translate_text(text: str, target_lang: str = "FR") -> str:
+    """Traduit du texte via DeepL (si clé présente)."""
+    if not DEEPL_API_KEY:
+        LOG.warning("Clé API DeepL manquante — traduction désactivée.")
+        return text
+    url = "https://api-free.deepl.com/v2/translate"
+    params = {"auth_key": DEEPL_API_KEY, "text": text, "target_lang": target_lang}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data=params) as resp:
+                if resp.status != 200:
+                    LOG.error(f"Erreur DeepL ({resp.status}) : {await resp.text()}")
+                    return text
+                data = await resp.json()
+                return data["translations"][0]["text"]
+    except Exception as e:
+        LOG.error(f"Erreur traduction DeepL : {e}")
+        return text
+
+def load_titles():
+    if os.path.exists(TITLES_FILE):
+        with open(TITLES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_titles(titles):
+    with open(TITLES_FILE, "w", encoding="utf-8") as f:
+        json.dump(titles, f, ensure_ascii=False, indent=2)
+
+def load_json(path: str, default: Any) -> Any:
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Erreur lors du chargement de {path}: {e}")
+        return default
+
+def save_json(path: str, data: Any) -> None:
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Erreur lors de la sauvegarde de {path}: {e}")
+
+# ================= SCORES / NIVEAUX =================
+def xp_for_next_level(level: int) -> int:
+    base_xp = 50
+    growth = 1.08
+    return int(base_xp * (growth ** level))
+
+def load_scores() -> dict:
+    return load_json(FileConfig.QUIZ_SCORES, {})
+
+def save_scores(scores: dict) -> None:
+    save_json(FileConfig.QUIZ_SCORES, scores)
+
+def load_levels() -> dict:
+    return load_json(FileConfig.LEVELS, {})
+
+def save_levels(data: dict) -> None:
+    save_json(FileConfig.LEVELS, data)
+
+async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True):
+    """
+    Ajoute de l'XP, gère le level-up (avec XP "reste" après passage),
+    annonce optionnelle dans le salon, et DISPATCH l'événement 'level_up'.
+    """
+    levels = load_levels()
+    key = str(user_id)
+    data = levels.get(key, {"xp": 0, "level": 0})
+
+    old_level = int(data.get("level", 0))
+    old_title = get_title_for_global_level(old_level)
+
+    # maj xp
+    data["xp"] = int(data.get("xp", 0)) + int(amount)
+
+    # calc level-up (ta logique: on dépense l'XP requise et on garde le reste)
+    leveled = False
+    while True:
+        need = xp_for_next_level(int(data["level"]))
+        if data["xp"] < need:
+            break
+        data["xp"] -= need
+        data["level"] = int(data["level"]) + 1
+        leveled = True
+
+    # persist
+    levels[key] = data
+    save_levels(levels)
+
+    new_level = int(data["level"])
+    new_title = get_title_for_global_level(new_level)
+
+    # 🔔 annonce optionnelle (si channel fourni)
+    if announce and (new_title != old_title) and channel is not None:
+        try:
+            await channel.send(
+                f"🎉 **<@{user_id}>** atteint le rang **{new_title}** (niv. {new_level}) !"
+            )
+        except Exception:
+            pass
+
+    # ✅ DISPATCH de l'event 'level_up' (consommé par le cog Engagement)
+    if leveled:
+        try:
+            bot.dispatch("level_up", user_id, new_level)
+        except Exception:
+            pass
+
+    return {
+        "leveled": leveled,
+        "old_level": old_level,
+        "new_level": new_level,
+        "old_title": old_title,
+        "new_title": new_title,
+    }
+
+def get_title_for_global_level(level: int) -> str:
+    current_title = LEVEL_TITLES_GLOBAL[0][1]
+    for req_level, title in LEVEL_TITLES_GLOBAL:
+        if level >= req_level:
+            current_title = title
+        else:
+            break
+    return current_title
+
+def get_title_for_quiz_score(score: int) -> str:
+    current_title = LEVEL_TITLES_QUIZ[0][1]
+    for req_score, title in LEVEL_TITLES_QUIZ:
+        if score >= req_score:
+            current_title = title
+        else:
+            break
+    return current_title
+
+# ================= FORMAT DATES / ANILIST HELPERS =================
+def format_airing_datetime_fr(ts: int, tz_name: str = "Europe/Paris") -> str:
+    if not ts:
+        return "date inconnue"
+    dt_local = datetime.fromtimestamp(ts, tz=ZoneInfo(tz_name))
+    months = ["janv.", "févr.", "mars", "avr.", "mai", "juin",
+              "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+    weekdays = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
+    wd = weekdays[dt_local.weekday()]
+    mo = months[dt_local.month - 1]
+    return f"{wd} {dt_local.day} {mo} {dt_local:%H:%M}"
+
+# ================= ANIList API / QUERIES =================
+# --- WHITELIST SERVEUR (séries suivies) ---
+def _ensure_guild_airings_table():
+    conn = _db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS guild_airings (
+            guild_id   INTEGER NOT NULL,
+            media_id   INTEGER NOT NULL,
+            added_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+            PRIMARY KEY (guild_id, media_id)
+        )
+    """)
+    conn.commit()
+
+def guild_airings_ids(guild_id: int) -> List[int]:
+    _ensure_guild_airings_table()
+    conn = _db()
+    rows = conn.execute("SELECT media_id FROM guild_airings WHERE guild_id=?", (int(guild_id),)).fetchall()
+    return [r[0] for r in rows]
+
+def guild_airings_add(guild_id: int, media_id: int) -> bool:
+    _ensure_guild_airings_table()
+    conn = _db()
+    try:
+        conn.execute("INSERT OR IGNORE INTO guild_airings (guild_id, media_id) VALUES (?,?)", (int(guild_id), int(media_id)))
+        conn.commit()
+        # retourne True s'il y a eu insertion
+        cur = conn.execute("SELECT changes()").fetchone()
+        return bool(cur and cur[0])
+    except Exception:
+        return False
+
+def guild_airings_remove(guild_id: int, media_id: int) -> bool:
+    _ensure_guild_airings_table()
+    conn = _db()
+    cur = conn.execute("DELETE FROM guild_airings WHERE guild_id=? AND media_id=?", (int(guild_id), int(media_id)))
+    conn.commit()
+    return cur.rowcount > 0
+
+def get_airings_global(days: int = 14, limit: int = 200) -> List[dict]:
+    """
+    Planning global des sorties (tous animes, non-adult) sur [now ; now+days].
+    Retourne une liste triée par airingAt asc:
+      {airingAt, episode, media{ id, title{...}, siteUrl, coverImage, genres }}
+    """
+    days = max(1, min(31, int(days or 14)))
+    now = int(time.time())
+    end = now + days * 86400
+
+    out: List[dict] = []
+    page = 1
+    per_page = 50
+    # On plafonne le nombre total d'entrées pour éviter le spam
+    remaining = max(1, limit)
+
+    query = """
+    query ($page:Int!, $perPage:Int!, $now:Int!, $end:Int!) {
+      Page(page:$page, perPage:$perPage) {
+        pageInfo { hasNextPage }
+        airingSchedules(
+          notYetAired: true,
+          airingAt_greater: $now,
+          airingAt_lesser:  $end,
+          sort: [TIME]
+        ) {
+          airingAt
+          episode
+          media {
+            id
+            siteUrl
+            title { romaji english native }
+            coverImage { large }
+            genres
+            isAdult
+          }
+        }
+      }
+    }
+    """
+
+    while remaining > 0:
+        data = query_anilist(query, {
+            "page": page, "perPage": per_page, "now": now, "end": end
+        }) or {}
+        pg = (data.get("data") or {}).get("Page") or {}
+        items = pg.get("airingSchedules") or []
+
+        # filtre sécurité (non-adulte)
+        for s in items:
+            m = s.get("media") or {}
+            if m.get("isAdult"):
+                continue
+            out.append({
+                "airingAt": s.get("airingAt"),
+                "episode": s.get("episode"),
+                "media": {
+                    "id": m.get("id"),
+                    "siteUrl": m.get("siteUrl"),
+                    "title": m.get("title") or {},
+                    "cover": (m.get("coverImage") or {}).get("large"),
+                    "genres": m.get("genres") or [],
+                }
+            })
+            remaining -= 1
+            if remaining <= 0:
+                break
+
+        if remaining <= 0 or not (pg.get("pageInfo") or {}).get("hasNextPage"):
+            break
+        page += 1
+
+    out = [x for x in out if isinstance(x.get("airingAt"), int)]
+    out.sort(key=lambda x: x["airingAt"])
+    return out
+
+def get_airings_for_guild(guild_id: int, *, days: int = 7, limit: int = 200) -> List[dict]:
+    """
+    Retourne les sorties à venir filtrées par la whitelist du serveur.
+    Forme: [{airingAt, episode, media{ id, siteUrl, title{...}, cover, genres }}]
+    """
+    ids = set(guild_airings_ids(guild_id))
+    if not ids:
+        return []
+    all_items = get_airings_global(days=days, limit=max(limit, 200))
+    out = [it for it in all_items if ((it.get("media") or {}).get("id") in ids)]
+    # On garde l’ordre par date (get_airings_global est déjà trié)
+    return out[:limit]
+
+def get_next_for_guild(guild_id: int) -> Optional[dict]:
+    """
+    Premier item (le plus proche) de la whitelist serveur.
+    """
+    items = get_airings_for_guild(guild_id, days=14, limit=500)
+    return items[0] if items else None
+
+# ================= AIRINGS — Whitelist par serveur =================
+
+def search_media(query: str, limit: int = 10) -> List[dict]:
+    """Recherche AniList Media(type:ANIME). Retourne [{id,title{...},siteUrl,coverImage{large}}]."""
+    q = """
+    query ($q:String, $page:Int!, $perPage:Int!){
+      Page(page:$page, perPage:$perPage){
+        media(search:$q, type:ANIME, sort:POPULARITY_DESC){
+          id
+          siteUrl
+          title{ romaji english native }
+          coverImage{ large }
+        }
+      }
+    }"""
+    data = query_anilist(q, {"q": query, "page": 1, "perPage": max(1, min(25, limit or 10))}) or {}
+    page = (data.get("data") or {}).get("Page") or {}
+    items = page.get("media") or []
+    out = []
+    for m in items:
+        out.append({
+            "id": m.get("id"),
+            "siteUrl": m.get("siteUrl"),
+            "title": (m.get("title") or {}),
+            "coverImage": (m.get("coverImage") or {}),
+        })
+    return out
+
+def _ensure_guild_whitelist_table():
+    conn = _db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS guild_whitelist (
+            guild_id   INTEGER NOT NULL,
+            media_id   INTEGER NOT NULL,
+            title_romaji TEXT,
+            site_url     TEXT,
+            cover        TEXT,
+            added_at   INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, media_id)
+        )
+    """)
+    conn.commit()
+
+def guild_whitelist_add(guild_id: int, media_id: int) -> dict | None:
+    """Ajoute un media dans la whitelist du serveur. Retourne infos du média pour feedback."""
+    _ensure_guild_whitelist_table()
+    # récupérer infos du média
+    q = """
+    query ($id:Int){
+      Media(id:$id, type:ANIME){
+        id
+        siteUrl
+        title{ romaji english native }
+        coverImage{ large }
+      }
+    }"""
+    data = query_anilist(q, {"id": int(media_id)}) or {}
+    m = ((data.get("data") or {}).get("Media")) or None
+    if not m:
+        return None
+    title = (m.get("title") or {}).get("romaji") or (m.get("title") or {}).get("english") or (m.get("title") or {}).get("native") or str(media_id)
+    site = m.get("siteUrl")
+    cover = (m.get("coverImage") or {}).get("large")
+    conn = _db()
+    conn.execute(
+        "INSERT OR REPLACE INTO guild_whitelist (guild_id, media_id, title_romaji, site_url, cover, added_at) VALUES (?,?,?,?,?,strftime('%s','now'))",
+        (int(guild_id), int(media_id), title, site, cover)
+    )
+    conn.commit()
+    return {"id": media_id, "title": m.get("title") or {}, "siteUrl": site, "cover": cover}
+
+def guild_whitelist_remove(guild_id: int, media_id: int) -> bool:
+    _ensure_guild_whitelist_table()
+    conn = _db()
+    cur = conn.execute("DELETE FROM guild_whitelist WHERE guild_id=? AND media_id=?", (int(guild_id), int(media_id)))
+    conn.commit()
+    return cur.rowcount > 0
+
+def guild_whitelist_list(guild_id: int) -> List[dict]:
+    _ensure_guild_whitelist_table()
+    conn = _db()
+    rows = conn.execute("SELECT media_id, title_romaji, site_url, cover, added_at FROM guild_whitelist WHERE guild_id=? ORDER BY added_at DESC", (int(guild_id),)).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "media_id": r[0], "title_romaji": r[1], "siteUrl": r[2], "cover": r[3], "added_at": r[4]
+        })
+    return out
+
+def filter_airings_for_guild(guild_id: int, items: List[dict]) -> List[dict]:
+    """Filtre une liste d'airings (get_airings_global) selon la whitelist du serveur."""
+    wl = set(x["media_id"] for x in guild_whitelist_list(guild_id))
+    out = []
+    for it in (items or []):
+        mid = ((it.get("media") or {}).get("id"))
+        if mid in wl:
+            out.append(it)
+    return out
+
+def _normalize_airing_sort(query: str) -> str:
+    """
+    Rend compatibles les vieux enums AniList :
+      - AIRING_AT[_DESC] -> TIME[_DESC]
+      - Force le format liste si on voit 'sort: TIME' ou 'sort: TIME_DESC'
+      - Gère les cas avec listes multiples (ex: sort: [AIRING_AT, EPISODE_DESC])
+      - Insensible aux espaces
+    """
+    if not isinstance(query, str):
+        return query
+
+    q = query
+
+    # 1) Remplace tous les tokens enum obsolètes, y compris dans des listes multiples
+    #    (on remplace d'abord _DESC pour ne pas transformer deux fois)
+    q = re.sub(r"\bAIRING_AT_DESC\b", "TIME_DESC", q)
+    q = re.sub(r"\bAIRING_AT\b", "TIME", q)
+
+    # 2) Si on trouve sort: TIME (sans crochets), on met des crochets
+    #    (on évite de re-bracket si c'est déjà une liste)
+    q = re.sub(r"(sort\s*:\s*)(?!\[)\s*(TIME_DESC|TIME)\b", r"\1[\2]", q)
+
+    # 3) Normalise des variantes d'espaces (facultatif mais propre)
+    #    Pas de changement sémantique, juste clean
+    return q
+def filter_titles_for_quiz(
+    animes: list,
+    *,
+    min_year: int = 1986,
+    min_score: int = 50,          # 50 = 5/10 ; mets 40 pour 4/10
+    allowed_countries: set[str] = {"JP"},
+) -> list:
+    """
+    Garde uniquement les animés:
+      - countryOfOrigin ∈ allowed_countries (par défaut: Japon)
+      - start year >= min_year (fallback sur seasonYear)
+      - meanScore >= min_score (fallback averageScore)
+    """
+    if not animes:
+        return []
+
+    out = []
+    for a in animes:
+        try:
+            # pays
+            country = (a.get("countryOfOrigin") or "").upper()
+            if allowed_countries and country not in allowed_countries:
+                continue
+
+            # année
+            y = None
+            sd = a.get("startDate") or {}
+            if isinstance(sd, dict):
+                y = sd.get("year")
+            if not y:
+                y = a.get("seasonYear")
+            if not y:
+                # parfois AniList met l'info dans 'year' plat
+                y = a.get("year")
+            try:
+                y = int(y)
+            except Exception:
+                y = None
+            if y is None or y < min_year:
+                continue
+
+            # score
+            score = a.get("meanScore")
+            if score is None:
+                score = a.get("averageScore")  # certains dumps utilisent averageScore
+            try:
+                score = int(score)
+            except Exception:
+                score = None
+            if score is None or score < min_score:
+                continue
+
+            out.append(a)
+        except Exception:
+            # on skippe silencieusement les entrées bizarres
+            continue
+
+    return out
+
+def _synthesize_profile_from_list(username: str) -> dict | None:
+    """
+    Construit un 'profil' (count, minutesWatched, meanScore, favoriteGenre)
+    à partir de la MediaListCollection (entries) quand User.statistics.anime est indisponible.
+    """
+    q = """
+    query ($name: String) {
+      MediaListCollection(userName: $name, type: ANIME) {
+        lists {
+          entries {
+            status
+            score
+            progress
+            media {
+              id
+              duration
+              episodes
+              genres
+            }
+          }
+        }
+      }
+    }"""
+    data = query_anilist(q, {"name": username})
+    coll = data and data.get("data", {}).get("MediaListCollection")
+    if not coll:
+        return None
+
+    total_count = 0
+    minutes = 0
+    scores = []
+    genre_counts = {}
+
+    def clamp_int(x, default=0):
+        try:
+            return int(x)
+        except Exception:
+            return default
+
+    for lst in coll.get("lists") or []:
+        for e in lst.get("entries") or []:
+            status = (e.get("status") or "").upper()
+            score = e.get("score")
+            progress = clamp_int(e.get("progress"))
+            media = e.get("media") or {}
+            duration = clamp_int(media.get("duration"))      # minutes/épisode
+            episodes = clamp_int(media.get("episodes"))
+            genres = media.get("genres") or []
+
+            # count: on compte completed comme "vu" (tu peux inclure REPEATING si tu veux)
+            if status in {"COMPLETED"}:
+                total_count += 1
+                # genres favoris: compter surtout sur ce qui est complété
+                for g in genres:
+                    genre_counts[g] = genre_counts.get(g, 0) + 1
+
+            # temps total (approx): min(progress, episodes) * duration
+            if duration > 0:
+                seen_eps = progress if episodes <= 0 else min(progress, episodes)
+                if seen_eps > 0:
+                    minutes += seen_eps * duration
+
+            # moyenne des scores non nuls
+            try:
+                s = float(score or 0)
+                if s > 0:
+                    scores.append(s)
+            except Exception:
+                pass
+
+    mean = round(sum(scores) / len(scores), 1) if scores else 0.0
+    favorite_genre = max(genre_counts, key=genre_counts.get) if genre_counts else None
+
+    return {
+        "count": total_count,
+        "minutesWatched": minutes,
+        "meanScore": mean,
+        "favoriteGenre": favorite_genre,
+        "_approx": True,  # drapeau pour l’UI
+    }
+
+def get_profile_stats(username: str, *, force: bool = False) -> dict:
+    """
+    Retourne le dict AniList statistics.anime si dispo,
+    sinon un profil approximé synthétisé depuis la liste (_approx=True).
+    Ne lève pas d'exception ; retourne {} en dernier recours.
+    """
+    # (Si tu as un cache maison, place ton check ici et ton set en bas)
+    q = """
+    query ($name: String) {
+      User(name: $name) {
+        statistics {
+          anime {
+            count
+            minutesWatched
+            meanScore
+            genres { genre count }
+          }
+        }
+      }
+    }"""
+    stats = {}
+    try:
+        data = query_anilist(q, {"name": username})
+        user = data and data.get("data", {}).get("User")
+        if user and user.get("statistics") and user["statistics"].get("anime"):
+            stats = dict(user["statistics"]["anime"])
+            stats["_approx"] = False
+            genres = stats.get("genres")
+            if not stats.get("favoriteGenre") and isinstance(genres, list) and genres:
+                try:
+                    top = max(genres, key=lambda g: int(g.get("count") or 0))
+                    if top and top.get("genre"):
+                        stats["favoriteGenre"] = top["genre"]
+                except Exception:
+                    pass
+    except Exception:
+        stats = {}
+
+    # fallback si vide / 0 partout
+    try:
+        if (not stats) or (
+            int(stats.get("count") or 0) == 0
+            and int(stats.get("minutesWatched") or 0) == 0
+            and float(stats.get("meanScore") or 0.0) == 0.0
+        ):
+            synth = _synthesize_profile_from_list(username)
+            if synth:
+                stats = synth
+    except Exception:
+        pass
+
+    # (Si tu as un cache maison, pose-le ici)
+    return stats or {}
+
+def get_list_total_entries(username: str, *, force: bool = False) -> int:
+    """
+    Nombre total d'entrées dans la MediaListCollection (tous statuts confondus).
+    Ne lève pas ; 0 si erreur.
+    """
+    q = """
+    query ($name: String) {
+      MediaListCollection(userName: $name, type: ANIME) {
+        lists { entries { id } }
+      }
+    }"""
+    total = 0
+    try:
+        data = query_anilist(q, {"name": username})
+        coll = data and data.get("data", {}).get("MediaListCollection")
+        if coll:
+            for lst in coll.get("lists") or []:
+                total += len(lst.get("entries") or [])
+    except Exception:
+        total = 0
+    return int(total)
+    
+def _db_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS anilist_links (
+        discord_id INTEGER PRIMARY KEY,
+        username   TEXT NOT NULL,
+        linked_at  INTEGER DEFAULT (strftime('%s','now'))
+    )
+    """)
+    return conn
+    
+def _coerce_anilist_username(v) -> str | None:
+    """Essaie d’extraire un pseudo à partir d’un str ou d’un dict historique."""
+    if isinstance(v, str):
+        s = v.strip()
+        if s.startswith("@"):
+            s = s[1:]
+        return s or None
+    if isinstance(v, dict):
+        # Ancien format possible: {"username": "foo"} / {"anilist": "foo"} / {"name": "foo"}
+        for k in ("anilist", "username", "name"):
+            val = v.get(k)
+            if isinstance(val, str) and val.strip():
+                s = val.strip()
+                if s.startswith("@"):
+                    s = s[1:]
+                return s
+    return None
+
+def is_plausible_anilist_username(s: str) -> bool:
+    """Filtre très permissif mais sans espaces/char exotiques."""
+    if not isinstance(s, str):
+        return False
+    return bool(_ANILIST_USERNAME_RE.fullmatch(s))
+
+def get_linked_anilist_usernames_bulk() -> list[str]:
+    """
+    Pseudos AniList liés (JSON + table SQLite), filtrés « plausibles ».
+    Évite de lancer des requêtes 404.
+    """
+    ok: set[str] = set()
+    try:
+        links = load_links()  # {discord_id: value}
+        for v in (links or {}).values():
+            s = _coerce_anilist_username(v)
+            if s and is_plausible_anilist_username(s):
+                ok.add(s)
+    except Exception:
+        pass
+    try:
+        with _db_conn() as con:
+            for (u,) in con.execute("SELECT username FROM anilist_links"):
+                if u and is_plausible_anilist_username(str(u)):
+                    ok.add(str(u))
+    except Exception:
+        pass
+    return sorted(ok)
+
+def get_upcoming_episodes_for_discord(discord_id: int) -> List[dict]:
+    username = get_linked_username(discord_id)
+    if not username:
+        return []
+    return get_upcoming_episodes(username)
+
+def _normalize_name(s: str) -> str:
+    s = (s or "").strip()
+    return unicodedata.normalize("NFKC", s)
+
+def query_anilist_user(input_str: str) -> dict | None:
+    """
+    Résout un utilisateur AniList à partir de :
+      - un ID numérique ("12345")
+      - une URL de profil ("https://anilist.co/user/Truc")
+      - un pseudo (insensible aux espaces/Unicode normalisé)
+    Retourne {'id': int, 'name': str} ou None.
+    """
+    raw = (input_str or "").strip()
+    if not raw:
+        return None
+
+    m = _USER_URL_RE.match(raw)
+    if m:
+        raw = m.group(2)
+
+    # ID numérique
+    if raw.isdigit():
+        q = "query ($id: Int){ User(id:$id){ id name } }"
+        try:
+            data = query_anilist(q, {"id": int(raw)})
+            u = data.get("data", {}).get("User")
+            return {"id": u["id"], "name": u["name"]} if u else None
+        except Exception:
+            return None
+
+    # Pseudo
+    name = _normalize_name(raw)
+    q = "query ($name: String){ User(name:$name){ id name } }"
+    try:
+        data = query_anilist(q, {"name": name})
+        u = data.get("data", {}).get("User")
+        return {"id": u["id"], "name": u["name"]} if u else None
+    except Exception:
+        return None
+
+# dans modules/core.py, remplace la fin de query_anilist par ça:
+def query_anilist(query: str, variables: dict = None) -> dict:
+    url = "https://graphql.anilist.co"
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+
+    query = _normalize_airing_sort(query)
+    payload = {"query": query, "variables": variables or {}}
+
+    # Simple retry/backoff sur 429/5xx
+    max_tries = 4
+    backoff = 0.8  # secondes
+
+    for attempt in range(1, max_tries + 1):
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=15)
+
+            # essaie de parser
+            try:
+                j = resp.json()
+            except Exception:
+                LOG.warning("[AniList] Non-JSON response (HTTP %s): %s", resp.status_code, resp.text[:300])
+                j = {}
+
+            # 429: respecte Retry-After si présent, puis retry
+            if resp.status_code == 429:
+                LOG.warning("[AniList] HTTP 429 – %s", str(j)[:300])
+                retry_after = 0.0
+                try:
+                    retry_after = float(resp.headers.get("Retry-After", "0"))
+                except Exception:
+                    retry_after = 0.0
+                if attempt < max_tries:
+                    time.sleep(retry_after if retry_after > 0 else backoff)
+                    backoff *= 1.8
+                    continue
+                return j or {}
+
+            # autres codes ≠ 200
+            if resp.status_code != 200:
+                if resp.status_code == 404:
+                    LOG.info("[AniList] 404 – Ressource non trouvée (souvent un pseudo AniList inconnu).")
+                else:
+                    LOG.warning("[AniList] HTTP %s – %s", resp.status_code, resp.text)
+                return None
+
+            # erreurs GraphQL
+            if "errors" in j and j["errors"]:
+                LOG.warning("[AniList] GraphQL errors: %s", str(j["errors"])[:300])
+                return j
+
+            # OK
+            return j
+
+        except Exception as e:
+            LOG.warning("[AniList] requête échouée (tentative %s/%s): %s", attempt, max_tries, e)
+            if attempt < max_tries:
+                time.sleep(backoff)
+                backoff *= 1.8
+                continue
+            return {}
+
+    # si on sort de la boucle sans avoir retourné
+    return {}
+
+def load_cached_titles() -> List[dict]:
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+def get_upcoming_episodes(username: str, *, force: bool = False) -> list[dict]:
+    key = username.lower()
+    if not force and _fresh("upcoming", key):
+        return _ANILIST_CACHE["upcoming"][key]["data"]
+
+    q = """
+    query ($name: String) {
+      MediaListCollection(userName: $name, type: ANIME, status_in: [CURRENT, REPEATING]) {
+        lists {
+          entries {
+            media {
+              id
+              title { romaji english native }
+              siteUrl
+              coverImage { large extraLarge }
+              genres
+              nextAiringEpisode { episode airingAt }
+            }
+          }
+        }
+      }
+    }"""
+    data = query_anilist(q, variables={"name": username})
+    coll = data and data.get("data", {}).get("MediaListCollection")
+    res = []
+    if coll:
+        for lst in coll.get("lists") or []:
+            for e in lst.get("entries") or []:
+                m = e.get("media") or {}
+                nae = m.get("nextAiringEpisode")
+                if nae:
+                    cover = (m.get("coverImage") or {})
+                    res.append({
+                        "id": m.get("id"),
+                        "title": m.get("title"),
+                        "siteUrl": m.get("siteUrl"),
+                        "cover": cover.get("extraLarge") or cover.get("large"),
+                        "genres": m.get("genres") or [],
+                        "episode": nae.get("episode"),
+                        "airingAt": nae.get("airingAt"),
+                    })
+    res.sort(key=lambda x: x["airingAt"])
+    _ANILIST_CACHE["upcoming"][key] = {"ts": time.time(), "data": res}
+    return res
+
+def get_anime_details(media_id: int) -> Optional[dict]:
+    query = '''
+    query ($id: Int) {
+      Media(id: $id) {
+        id
+        title { romaji english native }
+        description
+        coverImage { large }
+        bannerImage
+        format
+        episodes
+        duration
+        status
+        season
+        seasonYear
+        genres
+        tags { name }
+        averageScore
+        popularity
+        studios { nodes { name } }
+      }
+    }
+    '''
+    try:
+        data = query_anilist(query, {"id": media_id})
+        return data["data"]["Media"] if data and "data" in data else None
+    except Exception as e:
+        logger.error(f"Erreur récupération détails anime: {e}")
+        return None
+
+@lru_cache(maxsize=100)
+def get_character_details(char_id: int) -> Optional[dict]:
+    query = '''
+    query ($id: Int) {
+      Character(id: $id) {
+        name { full native }
+        image { large }
+        description
+        gender
+        dateOfBirth { month day }
+        age
+        media { nodes { title { romaji } type } }
+      }
+    }
+    '''
+    try:
+        data = query_anilist(query, {"id": char_id})
+        return data["data"]["Character"] if data and "data" in data else None
+    except Exception as e:
+        logger.error(f"Erreur récupération personnage: {e}")
+        return None
+
+def get_next_airing_one() -> Optional[Dict[str, Any]]:
+    query = """
+    query {
+      Page(perPage: 1){
+        airingSchedules(notYetAired:true, sort: TIME){
+          airingAt
+          episode
+          media{
+            id
+            title{ romaji english native }
+            coverImage{ extraLarge large }
+            genres
+          }
+        }
+      }
+    }
+    """
+    data = query_anilist(query, variables=None)
+    schedules = (data or {}).get("data", {}).get("Page", {}).get("airingSchedules", []) or []
+    if not schedules:
+        return None
+    s = schedules[0]
+    m = s.get("media") or {}
+    t = m.get("title") or {}
+    return {
+        "airingAt": s.get("airingAt"),
+        "episode": s.get("episode"),
+        "title_romaji": t.get("romaji"),
+        "title_english": t.get("english"),
+        "title_native": t.get("native"),
+        "cover": ((m.get("coverImage") or {}).get("extraLarge")
+                  or (m.get("coverImage") or {}).get("large")),
+        "genres": m.get("genres") or [],
+    }
+
+def get_next_airing_for_title(title: str):
+    query = '''
+    query ($search: String) {
+      Media(type: ANIME, search: $search) {
+        title { romaji english native }
+        nextAiringEpisode { episode airingAt }
+        coverImage { large extraLarge }
+        format
+        season
+        seasonYear
+      }
+    }
+    '''
+    try:
+        result = query_anilist(query, {"search": title}) or {}
+        data = result.get("data") or {}
+        media = data.get("Media")
+        if not media:
+            return None
+        nae = media.get("nextAiringEpisode")
+        if not nae:
+            return None
+        cover = (media.get("coverImage") or {})
+        return {
+            "title_romaji": (media.get("title") or {}).get("romaji"),
+            "title_english": (media.get("title") or {}).get("english"),
+            "title_native": (media.get("title") or {}).get("native"),
+            "episode": nae.get("episode"),
+            "airingAt": nae.get("airingAt"),
+            "cover": cover.get("extraLarge") or cover.get("large"),
+            "format": media.get("format"),
+            "season": media.get("season"),
+            "seasonYear": media.get("seasonYear")
+        }
+    except Exception as e:
+        LOG.error(f"Erreur get_next_airing_for_title({title}): {e}")
+        return None
+
+def get_my_next_airing_one() -> Optional[Dict[str, Any]]:
+    """Prochain épisode à sortir pour ANILIST_USERNAME (CURRENT)."""
+    username = os.getenv("ANILIST_USERNAME") or ANILIST_USERNAME
+    if not username:
+        return None
+    query = """
+    query ($userName:String, $page:Int, $perPage:Int){
+      Page(page:$page, perPage:$perPage){
+        pageInfo{ hasNextPage }
+        mediaList(userName:$userName, status:CURRENT, type:ANIME){
+          media{
+            id
+            title{ romaji english native }
+            coverImage{ extraLarge large }
+            genres
+            nextAiringEpisode{ airingAt episode }
+          }
+        }
+      }
+    }
+    """
+    page = 1
+    per_page = 50
+    now = int(datetime.now(timezone.utc).timestamp())
+    best: Optional[Dict[str, Any]] = None
+    while True:
+        data = query_anilist(query, variables={"userName": username, "page": page, "perPage": per_page})
+        page_data = (data or {}).get("data", {}).get("Page", {}) or {}
+        entries = page_data.get("mediaList", []) or []
+        for e in entries:
+            m = e.get("media") or {}
+            nae = m.get("nextAiringEpisode") or {}
+            airing = nae.get("airingAt")
+            if not airing or airing < now:
+                continue
+            t = m.get("title") or {}
+            item = {
+                "airingAt": airing,
+                "episode": nae.get("episode"),
+                "title_romaji": t.get("romaji"),
+                "title_english": t.get("english"),
+                "title_native": t.get("native"),
+                "cover": ((m.get("coverImage") or {}).get("extraLarge")
+                          or (m.get("coverImage") or {}).get("large")),
+                "genres": m.get("genres") or [],
+            }
+            if best is None or airing < best["airingAt"]:
+                best = item
+        if not (page_data.get("pageInfo") or {}).get("hasNextPage"):
+            break
+        page += 1
+    return best
+
+def get_user_next_airing_one(username: str):
+    """Prochain épisode à venir pour un utilisateur AniList (dans CURRENT)."""
+    query = """
+    query ($userName: String) {
+      MediaListCollection(userName: $userName, type: ANIME, status_in: [CURRENT]) {
+        lists {
+          entries {
+            media {
+              title { romaji english native }
+              coverImage { large }
+              genres
+              nextAiringEpisode { episode airingAt }
+            }
+          }
+        }
+      }
+    }
+    """
+    data = query_anilist(query, {"userName": username}) or {}
+    coll = (data.get("data") or {}).get("MediaListCollection", {}) or {}
+    entries = []
+    for lst in coll.get("lists", []) or []:
+        for entry in lst.get("entries", []) or []:
+            media = entry.get("media") or {}
+            if media.get("nextAiringEpisode"):
+                entries.append(media)
+    if not entries:
+        return None
+    entries.sort(key=lambda m: m["nextAiringEpisode"]["airingAt"])
+    m = entries[0]
+    return {
+        "title_romaji": (m.get("title") or {}).get("romaji"),
+        "title_english": (m.get("title") or {}).get("english"),
+        "title_native": (m.get("title") or {}).get("native"),
+        "cover": (m.get("coverImage") or {}).get("large"),
+        "episode": (m.get("nextAiringEpisode") or {}).get("episode"),
+        "airingAt": (m.get("nextAiringEpisode") or {}).get("airingAt"),
+        "genres": m.get("genres", [])
+    }
+
+# --- Helpers reset mensuel quiz ---
+
+def _month_key(dt: datetime | None = None, tz_name: str = "Europe/Paris") -> str:
+    tz = ZoneInfo(tz_name)
+    d = dt.astimezone(tz) if isinstance(dt, datetime) else datetime.now(tz)
+    return f"{d.year:04d}-{d.month:02d}"
+
+def _prev_month_key(dt: datetime | None = None, tz_name: str = "Europe/Paris") -> str:
+    tz = ZoneInfo(tz_name)
+    d = dt.astimezone(tz) if isinstance(dt, datetime) else datetime.now(tz)
+    year = d.year
+    month = d.month - 1
+    if month == 0:
+        month = 12
+        year -= 1
+    return f"{year:04d}-{month:02d}"
+
+def human_month_fr(year_month: str) -> str:
+    """
+    '2025-09' -> 'septembre 2025'
+    """
+    months = ["janvier","février","mars","avril","mai","juin",
+              "juillet","août","septembre","octobre","novembre","décembre"]
+    y, m = year_month.split("-")
+    m_idx = max(1, min(12, int(m)))
+    return f"{months[m_idx-1]} {y}"
+
+def load_winner() -> dict:
+    return load_json(FileConfig.WINNER, {})
+
+def save_winner(data: dict) -> None:
+    save_json(FileConfig.WINNER, data or {})
+
+def compute_quiz_top(scores: dict, n: int = 10) -> list[tuple[str,int]]:
+    """
+    Retourne top n sous forme [(user_id_str, score_int), ...] trié desc.
+    """
+    items = []
+    for uid, val in (scores or {}).items():
+        try:
+            items.append((str(uid), int(val)))
+        except Exception:
+            continue
+    items.sort(key=lambda x: x[1], reverse=True)
+    return items[:n]
+
+def record_month_winner_and_reset(now: datetime | None = None, tz_name: str = "Europe/Paris") -> dict:
+    """
+    Fige le vainqueur du mois précédent dans FileConfig.WINNER puis remet les scores à zéro.
+    Retourne le dict gagnant sauvegardé (ou {} si pas de scores).
+    """
+    scores = load_scores()
+    if not scores:
+        # même si 0, on vide quand même pour éviter les "fuites" de vieux scores
+        save_scores({})
+        data = {
+            "month": _prev_month_key(now, tz_name),
+            "winner_user_id": None,
+            "winner_score": 0,
+            "saved_at": int(time.time()),
+        }
+        save_winner(data)
+        return data
+
+    top = compute_quiz_top(scores, n=1)
+    best_uid, best_score = top[0]
+    data = {
+        "month": _prev_month_key(now, tz_name),
+        "winner_user_id": best_uid,
+        "winner_score": int(best_score),
+        "saved_at": int(time.time()),
+    }
+    save_winner(data)
+
+    # reset scores
+    save_scores({})
+    return data
+
+# ---- Stats profil (User.statistics) ----
+def get_anilist_stats(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Stats de profil AniList (User.statistics.anime):
+    Retourne {count, minutesWatched, meanScore, favoriteGenre}
+    """
+    query = """
+    query ($name: String) {
+      User(name: $name) {
+        statistics {
+          anime {
+            count
+            minutesWatched
+            meanScore
+            genres { genre count }
+          }
+        }
+      }
+    }
+    """
+    data = query_anilist(query, {"name": username}) or {}
+    user = (data.get("data") or {}).get("User") or None
+    if not user:
+        return None
+    anim = (user.get("statistics") or {}).get("anime") or {}
+    genres = anim.get("genres") or []
+    fav_genre = None
+    if genres:
+        fav_genre = max(genres, key=lambda g: g.get("count", 0)).get("genre")
+    return {
+        "count": anim.get("count", 0),
+        "minutesWatched": anim.get("minutesWatched", 0),
+        "meanScore": anim.get("meanScore", 0),
+        "favoriteGenre": fav_genre or "—",
+    }
+
+# ---- Stats liste (totaux completed/current/total) ----
+def fetch_anilist_list_stats(username: str) -> dict:
+    """
+    Via MediaListCollection: {total_entries, completed, current}
+    """
+    query = """
+    query($userName:String){
+      MediaListCollection(userName:$userName, type: ANIME){
+        lists { entries { status } }
+      }
+    }
+    """
+    try:
+        data = query_anilist(query, {"userName": username}) or {}
+        lists = (data.get("data") or {}).get("MediaListCollection", {}).get("lists", []) or []
+        total_entries = sum(len(l.get("entries", [])) for l in lists)
+        completed = sum(
+            1 for l in lists for e in l.get("entries", [])
+            if str(e.get("status","")).upper() == "COMPLETED"
+        )
+        current = sum(
+            1 for l in lists for e in l.get("entries", [])
+            if str(e.get("status","")).upper() == "CURRENT"
+        )
+        return {"total_entries": total_entries, "completed": completed, "current": current}
+    except Exception:
+        return {}
+
+# ---- Shims pour compat avec les cogs "sync" / "mystats" récents ----
+def get_or_refresh_anilist_stats(username: str, ttl_hours: int = 12) -> dict:
+    # Pas de cache “ancien” -> on renvoie direct la valeur live
+    return fetch_anilist_list_stats(username)
+
+def force_refresh_anilist_stats(username: str) -> dict:
+    return fetch_anilist_list_stats(username)
+
+def get_or_refresh_anilist_profile(username: str, ttl_hours: int = 12) -> dict:
+    return get_anilist_stats(username) or {}
+
+def force_refresh_anilist_profile(username: str) -> dict:
+    return get_anilist_stats(username) or {}
+
+# ================= MINI-JEUX =================
+def load_mini_scores() -> dict:
+    return load_json(FileConfig.MINI_SCORES, {})
+
+def save_mini_scores(data: dict) -> None:
+    save_json(FileConfig.MINI_SCORES, data)
+
+def add_mini_score(user_id: int, game: str, amount: int = 1) -> None:
+    data = load_mini_scores()
+    uid = str(user_id)
+    data.setdefault(uid, {})
+    data[uid][game] = data[uid].get(game, 0) + amount
+    save_mini_scores(data)
+
+def get_mini_scores(user_id: int) -> dict:
+    data = load_mini_scores()
+    return data.get(str(user_id), {})
+
+# ================= LIENS / PREFS / TRACKER =================
+def load_links() -> dict:
+    return load_json(FileConfig.LINKED_USERS, {})
+
+def save_links(data: dict) -> None:
+    save_json(FileConfig.LINKED_USERS, data)
+
+def get_user_anilist(user_id: int) -> Optional[str]:
+    links = load_links()
+    return links.get(str(user_id))
+    
+    # --- Résolution du pseudo AniList lié à un user Discord --- 
+def set_linked_username(user_id: int, username: str) -> None:
+    with _db_conn() as con:
+        con.execute(
+            "INSERT OR REPLACE INTO anilist_links (discord_id, username, linked_at) "
+            "VALUES (?, ?, strftime('%s','now'))",
+            (int(user_id), username)
+        )
+
+def get_linked_username(user_id: int) -> str | None:
+    with _db_conn() as con:
+        row = con.execute(
+            "SELECT username FROM anilist_links WHERE discord_id = ?",
+            (int(user_id),)
+        ).fetchone()
+        return row[0] if row else None
+
+# --- LINKS ---
+def link_anilist(user_id: int, username: str, anilist_id: int) -> None:
+    conn = _db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS anilist_links (
+            user_id     INTEGER PRIMARY KEY,
+            anilist_id  INTEGER NOT NULL,
+            username    TEXT    NOT NULL
+        )
+    """)
+    conn.execute("INSERT OR REPLACE INTO anilist_links (user_id, anilist_id, username) VALUES (?,?,?)",
+                 (user_id, anilist_id, username))
+    conn.commit()
+
+def get_linked_anilist(user_id: int) -> dict | None:
+    conn = _db()
+    row = conn.execute("SELECT anilist_id, username FROM anilist_links WHERE user_id=?", (user_id,)).fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "name": row[1]}
+
+# --- STATS CACHE ---
+def _ensure_stats_table():
+    conn = _db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS anilist_stats (
+            user_id        INTEGER PRIMARY KEY,
+            completed      INTEGER,
+            current        INTEGER,
+            total_entries  INTEGER,
+            watched_count  INTEGER,
+            avg_score      REAL,
+            top_genre      TEXT,
+            updated_at     INTEGER
+        )
+    """)
+    conn.commit()
+
+def save_stats_cache(user_id: int, stats: dict) -> None:
+    import time
+    _ensure_stats_table()
+    conn = _db()
+    conn.execute("""
+        INSERT OR REPLACE INTO anilist_stats
+        (user_id, completed, current, total_entries, watched_count, avg_score, top_genre, updated_at)
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (
+        user_id,
+        stats.get("completed", 0),
+        stats.get("current", 0),
+        stats.get("total_entries", 0),
+        stats.get("watched_count", 0),
+        stats.get("avg_score", 0.0),
+        stats.get("top_genre") or None,
+        int(time.time()),
+    ))
+    conn.commit()
+
+def get_stats_cache(user_id: int) -> dict | None:
+    _ensure_stats_table()
+    conn = _db()
+    row = conn.execute("SELECT completed,current,total_entries,watched_count,avg_score,top_genre,updated_at FROM anilist_stats WHERE user_id=?", (user_id,)).fetchone()
+    if not row: return None
+    return {
+        "completed": row[0], "current": row[1], "total_entries": row[2],
+        "watched_count": row[3], "avg_score": row[4], "top_genre": row[5],
+        "updated_at": row[6],
+    }
+
+def get_user_stats(user_id: int):
+    return get_game_stats(user_id)
+
+def load_preferences() -> dict:
+    return load_json(FileConfig.PREFERENCES, {})
+
+def save_preferences(data: dict) -> None:
+    save_json(FileConfig.PREFERENCES, data)
+
+def load_user_settings() -> dict:
+    return load_json(FileConfig.USER_SETTINGS, {})
+
+def save_user_settings(settings: dict) -> None:
+    save_json(FileConfig.USER_SETTINGS, settings)
+
+def load_tracker() -> dict:
+    return load_json(FileConfig.TRACKER, {})
+
+def save_tracker(data: dict) -> None:
+    save_json(FileConfig.TRACKER, data)
+
+# ================= TITRES / SIMILARITÉ =================
+def normalize(text: str | None) -> str:
+    if not text:
+        return ""
+    text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+    return ''.join(e for e in text.lower() if e.isalnum() or e.isspace()).strip()
+
+def normalize_title(title: str) -> str:
+    title = normalize(title)
+    stop_words = {"the", "a", "an", "season", "part", "episode", "movie", "saison"}
+    words = [w for w in title.split() if w not in stop_words]
+    clean = re.sub(r"(s\d|season \d|part \d|[^\w\s])", "", " ".join(words), flags=re.IGNORECASE)
+    return clean.strip()
+
+def find_similar_titles(query: str, threshold: float = 0.85) -> List[str]:
+    query = normalize_title(query)
+    cache = load_json(FileConfig.TITLE_CACHE, [])
+    matches: List[str] = []
+    for title in cache:
+        if not title:
+            continue
+        if query == title or (query in title or title in query):
+            matches.append(title)
+            continue
+        if difflib.SequenceMatcher(None, query, title).ratio() >= threshold:
+            matches.append(title)
+    return matches
+
+# Petit utilitaire: maj du cache de titres (async pour être "awaitable")
+async def update_title_cache() -> int:
+    """
+    Met à jour FileConfig.TITLE_CACHE avec une liste de titres normalisés.
+    Ici on se contente d’un no-op doux si rien n’est branché.
+    Retourne le nombre de titres enregistrés.
+    """
+    # Si tu as un collecteur réel, plug ici. On garde la compat avec bot.update_title_cache().
+    existing = load_json(FileConfig.TITLE_CACHE, [])
+    save_json(FileConfig.TITLE_CACHE, existing)
+    return len(existing)
+
+# ================= IMAGES =================
+def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
+    font_paths = [
+        f"/usr/share/fonts/truetype/dejavu/DejaVuSans-{name}.ttf",
+        f"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        f"/usr/share/fonts/truetype/liberation2/LiberationSans-{name}.ttf",
+        os.path.join(ASSETS_DIR, "fonts", f"DejaVuSans-{name}.ttf"),
+    ]
+    for path in font_paths:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+def generate_stats_card(
+    user_name: str,
+    avatar_url: str | None,
+    anime_count: int,
+    days_watched: float,
+    mean_score: float,
+    fav_genre: str,
+) -> io.BytesIO:
+    width, height = 900, 500
+    card = Image.new("RGB", (width, height), color=(25, 25, 35))
+    draw = ImageDraw.Draw(card)
+
+    font_title = load_font("Bold", 40)
+    font_stats = load_font("Regular", 30)
+
+    if avatar_url:
+        try:
+            response = requests.get(avatar_url, timeout=10)
+            avatar = Image.open(io.BytesIO(response.content)).convert("RGBA")
+            size = 150
+            mask = Image.new("L", (size, size), 0)
+            ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
+            avatar = avatar.resize((size, size))
+            card.paste(avatar, (50, 50), mask)
+        except Exception as e:
+            logger.error(f"Erreur chargement avatar: {e}")
+
+    title_x = 250
+    stats_y = 150
+
+    draw.text((title_x, 50), f"Statistiques de {user_name}", font=font_title, fill=(255, 255, 255))
+    stats = [
+        (f"🎬 Animés vus : {anime_count}", (255, 200, 100)),
+        (f"🕒 Temps total : {days_watched:.1f} jours", (100, 200, 255)),
+        (f"⭐ Score moyen : {mean_score:.1f}", (255, 100, 100)),
+        (f"🎭 Genre favori : {fav_genre}", (200, 255, 100))
+    ]
+    for i, (text, color) in enumerate(stats):
+        draw.text((title_x, stats_y + i * 60), text, font=font_stats, fill=color)
+
+    buf = io.BytesIO()
+    card.save(buf, format="JPEG", quality=95)
+    buf.seek(0)
+    return buf
+
+def format_date_fr(dt: datetime, pattern: str = "EEEE d MMMM") -> str:
+    return format_datetime(dt, pattern, locale='fr_FR').capitalize()
+
+# --- remplace ENTIEREMENT ta fonction par ceci ---
+def generate_next_image(ep: dict, dt: datetime, tagline: str = "Prochain épisode") -> io.BytesIO:
+    """
+    Crée une carte type "annonce" :
+    - fond : cover floutée
+    - bandeau sombre arrondi avec gradient
+    - vignette cover
+    - titre / épisode / genres / date
+    ep attendu: { title, episode, genres(list[str])?, image(url)?, cover(url)? }
+    """
+    from PIL import ImageFilter, ImageOps
+
+    # ---------- helpers mesures ----------
+    def text_w(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont) -> int:
+        try:
+            return int(draw.textlength(text, font=font))
+        except Exception:
+            try:
+                x0, y0, x1, y1 = draw.textbbox((0, 0), text, font=font)
+                return int(x1 - x0)
+            except Exception:
+                return int(len(text) * font.size * 0.6)
+
+    def wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+        words = (text or "").split()
+        if not words:
+            return [""]
+        lines, cur = [], ""
+        for w in words:
+            t = (cur + " " + w).strip()
+            if text_w(draw, t, font) <= max_width:
+                cur = t
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
+        return lines
+
+    def round_rect(im: Image.Image, xy: tuple[int,int,int,int], r: int, fill: tuple[int,int,int,int]):
+        x0, y0, x1, y1 = xy
+        w, h = x1 - x0, y1 - y0
+        box = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        mask = Image.new("L", (w, h), 0)
+        mdraw = ImageDraw.Draw(mask)
+        mdraw.rounded_rectangle((0, 0, w, h), radius=r, fill=255)
+        layer = Image.new("RGBA", (w, h), fill)
+        box.paste(layer, (0, 0), mask)
+        im.paste(box, (x0, y0), mask)
+
+    # ---------- canvas ----------
+    W, H = 1024, 420
+    card = Image.new("RGBA", (W, H), (20, 18, 24, 255))
+    draw = ImageDraw.Draw(card)
+
+    # ---------- fonds / cover ----------
+    cover_url = ep.get("image") or ep.get("cover")
+    bg = None
+    if cover_url:
+        try:
+            resp = requests.get(cover_url, timeout=10)
+            img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
+            # plein écran + crop
+            ratio = img.width / img.height
+            target_ratio = W / H
+            if ratio > target_ratio:
+                nh = H
+                nw = int(nh * ratio)
+                img = img.resize((nw, nh), Image.LANCZOS)
+                left = (nw - W) // 2
+                img = img.crop((left, 0, left + W, H))
+            else:
+                nw = W
+                nh = int(nw / ratio)
+                img = img.resize((nw, nh), Image.LANCZOS)
+                top = (nh - H) // 2
+                img = img.crop((0, top, W, top + H))
+
+            # blur + assombrir légèrement
+            bg = img.filter(ImageFilter.GaussianBlur(12))
+            dim = Image.new("RGBA", (W, H), (0, 0, 0, 110))
+            bg = Image.alpha_composite(bg, dim)
+        except Exception:
+            bg = None
+
+    if bg is None:
+        bg = Image.new("RGBA", (W, H), (25, 22, 30, 255))
+    card = Image.alpha_composite(bg, card)
+
+    # ---------- bandeau arrondi ----------
+    pad = 28
+    band_h = H - pad * 2
+    band = (pad, pad, W - pad, H - pad)
+    round_rect(card, band, r=24, fill=(0, 0, 0, 145))
+
+    # gradient léger à droite
+    grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gdraw = ImageDraw.Draw(grad)
+    for i in range(0, 520):
+        a = int(160 * (1 - i / 520))
+        gdraw.rectangle((W - i - pad, pad, W - pad, H - pad), fill=(0, 0, 0, max(0, a)))
+    card = Image.alpha_composite(card, grad)
+    draw = ImageDraw.Draw(card)
+
+    # ---------- mini-cover ----------
+    thumb_size = band_h - 24
+    x_thumb = pad + 16
+    y_thumb = pad + 12
+    if cover_url:
+        try:
+            resp = requests.get(cover_url, timeout=10)
+            thumb = Image.open(io.BytesIO(resp.content)).convert("RGBA").resize((thumb_size, thumb_size), Image.LANCZOS)
+            # masque arrondi
+            mask = Image.new("L", (thumb_size, thumb_size), 0)
+            ImageDraw.Draw(mask).rounded_rectangle((0, 0, thumb_size, thumb_size), radius=22, fill=255)
+            box = Image.new("RGBA", (thumb_size, thumb_size), (0, 0, 0, 0))
+            box.paste(thumb, (0, 0), mask)
+            card.paste(box, (x_thumb, y_thumb), mask)
+        except Exception:
+            pass
+
+    # ---------- textes ----------
+    # polices
+    def load_font_safe(name: str, size: int):
+        try:
+            return ImageFont.truetype(f"/usr/share/fonts/truetype/dejavu/DejaVuSans-{name}.ttf", size)
+        except Exception:
+            try:
+                return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+            except Exception:
+                return ImageFont.load_default()
+
+    f_title = load_font_safe("Bold", 36)
+    f_meta  = load_font_safe("Regular", 22)
+    f_tag   = load_font_safe("Regular", 20)
+
+    # zones
+    x0 = x_thumb + thumb_size + 22
+    y0 = pad + 20
+    maxw = W - pad - x0 - 16
+
+    title = ep.get("title") or "Anime"
+    lines = wrap(draw, title, f_title, maxw)
+    y = y0
+    for i, l in enumerate(lines[:2]):  # 2 lignes max pour le titre
+        draw.text((x0, y), l, font=f_title, fill=(255, 255, 255, 235))
+        y += 40
+
+    # épisode
+    epnum = ep.get("episode") or "?"
+    draw.text((x0, y), f"Épisode {epnum}", font=f_meta, fill=(255, 215, 130, 255))
+    y += 34
+
+    # genres
+    genres = ep.get("genres") or []
+    if genres:
+        g = " • ".join(genres[:4])
+        draw.text((x0, y), g, font=f_tag, fill=(220, 220, 220, 210))
+        y += 30
+
+    # date
+    when = format_date_fr(dt, "EEE d MMM. HH:mm")
+    draw.text((x0, y), when, font=f_meta, fill=(220, 220, 220, 235))
+
+    # tag en haut à gauche
+    draw.text((pad + 6, pad - 4), tagline, font=f_tag, fill=(130, 235, 160, 240))
+
+    # sortie
+    out = io.BytesIO()
+    card = card.convert("RGB")
+    card.save(out, format="JPEG", quality=92)
+    out.seek(0)
+    return out
+
+
+def generate_profile_card(user_name, avatar_url, level, xp, next_xp, quiz_score, mini_scores):
+    width, height = 800, 400
+    bg = Image.new("RGBA", (width, height), (25, 25, 30))
+    draw = ImageDraw.Draw(bg)
+
+    avatar_size = 150
+    try:
+        response = requests.get(avatar_url, timeout=5)
+        avatar = Image.open(BytesIO(response.content)).convert("RGBA").resize((avatar_size, avatar_size))
+    except Exception:
+        avatar = Image.new("RGBA", (avatar_size, avatar_size), (80, 80, 255))
+
+    mask = Image.new("L", (avatar_size, avatar_size), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, avatar_size, avatar_size), fill=255)
+    avatar.putalpha(mask)
+    bg.paste(avatar, (40, 40), avatar)
+
+    try:
+        font_title = ImageFont.truetype("arialbd.ttf", 32)
+        font_text  = ImageFont.truetype("arial.ttf", 20)
+    except IOError:
+        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
+        font_text  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+
+    draw.text((220, 40), f"{user_name}", font=font_title, fill=(255, 255, 255))
+    draw.text((220, 90), f"Niveau {level} – {xp}/{next_xp} XP", font=font_text, fill=(200, 200, 200))
+    draw.text((220, 120), f"🏆 Score Quiz : {quiz_score}", font=font_text, fill=(230, 230, 230))
+    draw.text((220, 160), "🎮 Mini-jeux :", font=font_text, fill=(255, 255, 255))
+
+    y = 190
+    mapping = {
+        "animequiz": "Quiz",
+        "higherlower": "Higher/Lower",
+        "highermean": "Higher/Mean",
+        "guessyear": "Guess Year",
+        "guessepisodes": "Guess Episodes",
+        "guessgenre": "Guess Genre",
+        "guessop": "Guess Opening",
+        "guesschar": "Guess Character",
+        "duel": "Duel",
+    }
+    for key, val in (mini_scores or {}).items():
+        name = mapping.get(key, key.replace("_", " ").capitalize())
+        draw.text((240, y), f"- {name} : {val}", font=font_text, fill=(180, 180, 180))
+        y += 28
+
+    buffer = BytesIO()
+    bg.save(buffer, format="JPEG")
+    buffer.seek(0)
+    return buffer
+
+# ================= FORMAT / DIVERS =================
+def genre_emoji(genres: List[str]) -> str:
+    if not genres:
+        return "🎬"
+    for genre in genres:
+        if emoji := GENRE_EMOJIS.get(genre):
+            return emoji
+    return "🎬"
+
+def get_xp_bar(xp: int, next_xp: int, length: int = 20) -> str:
+    next_xp = max(1, int(next_xp))
+    filled = int((xp / next_xp) * length)
+    filled = max(0, min(length, filled))
+    return "▰" * filled + "▱" * (length - filled)
+
+# --- ANTI-DUPLICATE POSTING ---
+def _db():
+    import sqlite3, os
+    os.makedirs("data", exist_ok=True)
+    conn = sqlite3.connect("data/animabot.db")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS posted_events (
+            media_id    INTEGER NOT NULL,
+            episode     INTEGER NOT NULL,
+            channel_id  INTEGER NOT NULL,
+            kind        TEXT    NOT NULL, -- "now" | "alert30" | "new"
+            posted_at   INTEGER NOT NULL,
+            PRIMARY KEY (media_id, episode, channel_id, kind)
+        )
+    """)
+    return conn
+
+def has_been_posted(media_id: int, ep: int, channel_id: int, kind: str) -> bool:
+    conn = _db()
+    cur = conn.execute(
+        "SELECT 1 FROM posted_events WHERE media_id=? AND episode=? AND channel_id=? AND kind=?",
+        (media_id, ep, channel_id, kind)
+    )
+    return cur.fetchone() is not None
+
+def mark_posted(media_id: int, ep: int, channel_id: int, kind: str) -> None:
+    import time
+    conn = _db()
+    conn.execute(
+        "INSERT OR IGNORE INTO posted_events (media_id, episode, channel_id, kind, posted_at) VALUES (?,?,?,?,?)",
+        (media_id, ep, channel_id, kind, int(time.time()))
+    )
+    conn.commit()
+
+# ================= CONFIG BOT / NOTIFS =================
+def get_config() -> dict:
+    config = load_json(FileConfig.CONFIG, {})
+    if not config:
+        config.update({
+            "channel_id": None,
+            "notification_delay": 10,  # minutes
+            "daily_summary": True,
+            "default_alert_time": "08:00"
+        })
+        save_config(config)
+    return config
+
+def save_config(config: dict) -> None:
+    save_json(FileConfig.CONFIG, config)
+
+def should_notify(ep: dict) -> bool:
+    if not ep.get("airingAt"):
+        return False
+    now = datetime.now(timezone.utc).timestamp()
+    delay = get_config().get("notification_delay", 10) * 60
+    return abs(ep["airingAt"] - now) <= delay
+
+# ================= GAME STATS (PROFILE) =================
+def get_game_stats(user_id: int) -> dict:
+    levels = load_levels()
+    scores = load_scores()
+    mini_scores = get_mini_scores(user_id)
+
+    user_data = levels.get(str(user_id), {"xp": 0, "level": 0})
+    quiz_score = scores.get(str(user_id), 0)
+
+    return {
+        "xp": user_data["xp"],
+        "level": user_data["level"],
+        "next_xp": (user_data["level"] + 1) * 100,
+        "quiz_score": quiz_score,
+        "mini_scores": mini_scores,
+        "title": get_title_for_global_level(user_data["level"]),
+        "quiz_title": get_title_for_quiz_score(quiz_score),
+    }
+
+def format_mini_game_name(game: str) -> str:
+    mapping = {
+        "animequiz": "Quiz",
+        "higherlower": "Higher/Lower",
+        "highermean": "Higher/Mean",
+        "guessyear": "Guess Year",
+        "guessepisodes": "Guess Episodes",
+        "guessgenre": "Guess Genre",
+        "guessop": "Guess Opening",
+        "guesschar": "Guess Character",
+        "duel": "Duel"
+    }
+    return mapping.get(game, game.replace("_", " ").title())
+
+def get_anilist_stats_for_discord(discord_id: int, fallback_env: bool = True) -> Optional[Dict[str, Any]]:
+    username = get_linked_username(discord_id)
+    if not username and fallback_env:
+        username = ANILIST_USERNAME
+    if not username:
+        return None
+    return get_anilist_stats(username)
+
+def humanize_minutes(total_minutes: int) -> str:
+    m = int(total_minutes or 0)
+    days = m // (60*24)
+    hours = (m % (60*24)) // 60
+    minutes = m % 60
+    parts = []
+    if days: parts.append(f"{days}j")
+    if hours: parts.append(f"{hours}h")
+    if minutes or not parts: parts.append(f"{minutes}m")
+    return " ".join(parts)
+
+# ================= INIT / CHECK =================
+def check_files() -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(os.path.join(ASSETS_DIR, "fonts"), exist_ok=True)
+    os.makedirs(os.path.join(ASSETS_DIR, "audio", "openings"), exist_ok=True)
+
+    for path in vars(FileConfig).values():
+        if isinstance(path, str) and not os.path.exists(path):
+            save_json(path, {})
+
+def setup_bot() -> None:
+    try:
+        check_files()
+
+        if not DISCORD_BOT_TOKEN:
+            raise ValueError("Token Discord non configuré")
+
+        # Vérif polices
+        _ = load_font("Regular", 12)  # si fallback -> OK
+
+        for pkg in ["requests", "pillow", "babel"]:
+            try:
+                __import__(pkg)
+            except ImportError:
+                logger.warning(f"Package {pkg} non installé")
+
+        logger.info("Bot initialisé avec succès")
+    except Exception as e:
+        logger.error(f"Erreur lors de l'initialisation : {e}")
+        raise
