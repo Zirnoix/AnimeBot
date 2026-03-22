@@ -10,3 +10,9 @@ wheels/
 .venv
 modules/user_links.db
 
+# Binaires lourds (à installer sur la machine / le serveur, pas dans le repo)
+bin/ffmpeg
+bin/ffmpeg.exe
+bin/ffprobe
+bin/ffprobe.exe
+
