@@ -64,18 +64,18 @@ class BotInfo(commands.Cog):
         anilist_ok = getattr(self.bot, "anilist_online", None)
         if anilist_ok is not None:
             embed.add_field(
-                name="AniList",
-                value="`OK`" if anilist_ok else "`indisponible`",
+                name="API AniList",
+                value="`joignable`" if anilist_ok else "`dégradée / hors ligne`",
                 inline=True,
             )
 
         embed.add_field(
-            name="Slash",
-            value="Après ajout du bot, les commandes `/` peuvent mettre **1–2 min** à apparaître.",
+            name="Commandes /",
+            value="Les slash peuvent mettre **1–2 min** à apparaître après l’invitation du bot.",
             inline=False,
         )
 
-        embed.set_footer(text="Utilise /help pour tout découvrir")
+        embed.set_footer(text="/help · liste du serveur = /airings")
         try:
             if self.bot.user and self.bot.user.display_avatar:
                 embed.set_thumbnail(url=self.bot.user.display_avatar.url)

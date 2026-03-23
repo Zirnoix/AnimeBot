@@ -11,19 +11,19 @@ SUPPORT_ID = "180389173985804288"
 INTRO_TITLE = "👋 Merci d’avoir ajouté AnimeBot !"
 INTRO_DESC = (
     "Voici l’essentiel pour démarrer en **moins de 60 secondes**.\n\n"
-    "1) **Choisir le salon des notifications**\n"
-    "→ `/setchannel #votre-salon`\n\n"
-    "2) **Sélectionner les animés à suivre (sorties AniList actuelles)**\n"
-    "→ `/airings all`\n"
-    "   • cochez ceux à suivre, puis **Enregistrer**\n\n"
-    "C’est tout ! Le bot annoncera les sorties dans le salon choisi ✅"
+    "1) **Salon des annonces**\n"
+    "→ `/setchannel` dans le salon voulu\n\n"
+    "2) **Liste du serveur** (ce que suivent `/next` et `/planning` en mode serveur)\n"
+    "→ `/airings all` — ajoute les titres à suivre\n\n"
+    "Les **alertes image** (−30 min / à l’heure) utilisent le compte du bot + comptes liés, pas cette liste."
 )
 
 INTRO_MINIGAMES = (
     "**🎮 Mini-jeux populaires (essayez-les !)**\n"
     "• **/animequiz** — Quiz solo rapide (images/indices)\n"
     "• **/duel** — Affronte un ami en 1v1\n"
-    "• **/guess op** — Devine l’**opening** à l’oreille\n"
+    "• **/guessop** — Devine l’**opening** à l’oreille (vocal)\n"
+    "• **/minijeux** — Menu avec toutes les idées + commandes\n"
     "• Autres: `/guess year`, `/guess episodes`, `/higherlower`"
 )
 
@@ -100,13 +100,11 @@ class Onboarding(commands.Cog):
                 title="⚙️ Mise en route — pas à pas",
                 color=discord.Color.blurple(),
                 description=(
-                    "**1) Choisir le salon des notifications**\n"
-                    "→ `/setchannel #votre-salon`\n"
-                    "_Toutes les annonces de sorties iront dans ce salon._\n\n"
-                    "**2) Choisir les animés à suivre**\n"
-                    "→ `/airings all`\n"
-                    "• cochez les titres à suivre, puis **Enregistrer**.\n"
-                    "_Le récap des sorties utilise cette sélection serveur._"
+                    "**1) Salon des annonces**\n"
+                    "→ `/setchannel` dans ce salon\n\n"
+                    "**2) Liste du serveur** (`/next` / `/planning` mode serveur)\n"
+                    "→ `/airings all` pour choisir les titres.\n\n"
+                    "_Les alertes image automatiques (−30 min) viennent du compte du bot + comptes liés, pas de cette liste._"
                 ),
             )
 
@@ -116,7 +114,8 @@ class Onboarding(commands.Cog):
                 description=(
                     "• **/animequiz** — Quiz solo (rapide, fun)\n"
                     "• **/duel** — 1v1 quiz entre amis\n"
-                    "• **/guess op** — Devine l’**opening** 🎧\n"
+                    "• **/guessop** — Devine l’**opening** 🎧 (vocal)\n"
+                    "• **/minijeux** — Liste des jeux + quelle commande lancer\n"
                     "• Plus: `/guess year`, `/guess episodes`, `/guess character`, `/higherlower`\n\n"
                     "Astuce: lancez ces jeux dans un salon dédié pour éviter de flood."
                 ),
@@ -138,10 +137,9 @@ class Onboarding(commands.Cog):
                 title="🛎️ Rappels & récap quotidiens",
                 color=discord.Color.gold(),
                 description=(
-                    "• Activer/désactiver : `/reminder on|off`\n"
-                    "• Heure du récap quotidien : `/setalert HH:MM`\n\n"
-                    "➡️ Le **récap serveur** s’appuie sur vos **/airings**.\n"
-                    "➡️ Les **commandes perso** (`/monnext`, `/monplanning`) utilisent votre **AniList lié**."
+                    "• `/reminder on|off` et `/setalert HH:MM` — récap **personnel** en MP (AniList lié ou global).\n\n"
+                    "➡️ **`/next` / `/planning` (serveur)** = **liste du serveur** (`/airings`).\n"
+                    "➡️ **`/monnext` / `/monplanning`** = **votre** AniList lié."
                 ),
             )
 

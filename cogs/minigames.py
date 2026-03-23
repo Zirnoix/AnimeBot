@@ -1,12 +1,9 @@
 """
 Mini-games commands.
 
-This cog regroupe plusieurs petits jeux pour divertir les utilisateurs :
-* Higher/Lower
-* Guess Year
-* Guess Episodes
-* Guess Genre
-* Guess Character
+* `/guess` — groupe (year, episodes, genre, character)
+* `/higherlower` — popularité
+* `/minijeux` — menu avec rappel des commandes
 """
 
 from __future__ import annotations
@@ -17,7 +14,7 @@ import random
 import asyncio
 import discord
 from discord.ext import commands
-from discord.ui import View, Button
+from discord.ui import View, Button, Select
 from modules import core
 
 
@@ -65,13 +62,143 @@ class HigherLowerView(View):
         self.stop()
 
 
+_MINIJEUX_LINES = {
+    "higherlower": (
+        "**Higher / Lower** — Tu vois 2 animes ; choisis le plus populaire (boutons).\n"
+        "→ `/higherlower` · `!higherlower`"
+    ),
+    "guess_year": (
+        "**Guess année** — Image + devine l’année de diffusion.\n"
+        "→ `/guess year` · `!guess year`"
+    ),
+    "guess_episodes": (
+        "**Guess épisodes** — Devine combien d’épisodes.\n"
+        "→ `/guess episodes` · `!guess episodes`"
+    ),
+    "guess_genre": (
+        "**Guess genre** — Trouve un des genres de l’anime.\n"
+        "→ `/guess genre` · `!guess genre`"
+    ),
+    "guess_character": (
+        "**Guess personnage** — 4 noms en boutons.\n"
+        "→ `/guess character` · `!guess character`"
+    ),
+    "guessop": (
+        "**Guess OP** — Écoute un opening (salon vocal obligatoire).\n"
+        "→ `/guessop` · `!guessop`"
+    ),
+    "animequiz": (
+        "**Anime quiz** — Questions solo avec image.\n"
+        "→ `/animequiz` · `!animequiz`"
+    ),
+    "animequizmulti": (
+        "**Anime quiz multi** — Enchaînement de questions.\n"
+        "→ `/animequizmulti` · `!animequizmulti`"
+    ),
+    "duel": (
+        "**Duel** — Défie quelqu’un en quiz.\n"
+        "→ `/duel` · `!duel`"
+    ),
+}
+
+
+class MinijeuxHubSelect(Select):
+    def __init__(self) -> None:
+        super().__init__(
+            custom_id="minijeux_pick",
+            placeholder="Choisis un mini-jeu…",
+            options=[
+                discord.SelectOption(
+                    label="Higher / Lower",
+                    value="higherlower",
+                    description="Quel anime est le plus populaire ?",
+                ),
+                discord.SelectOption(
+                    label="Guess — année",
+                    value="guess_year",
+                    description="Devine l’année de diffusion",
+                ),
+                discord.SelectOption(
+                    label="Guess — épisodes",
+                    value="guess_episodes",
+                    description="Devine le nombre d’épisodes",
+                ),
+                discord.SelectOption(
+                    label="Guess — genre",
+                    value="guess_genre",
+                    description="Devine un genre",
+                ),
+                discord.SelectOption(
+                    label="Guess — personnage",
+                    value="guess_character",
+                    description="4 boutons, bon personnage",
+                ),
+                discord.SelectOption(
+                    label="Guess OP (vocal)",
+                    value="guessop",
+                    description="Extraits audio — salon vocal requis",
+                ),
+                discord.SelectOption(
+                    label="Anime quiz (solo)",
+                    value="animequiz",
+                    description="Quiz image / indices",
+                ),
+                discord.SelectOption(
+                    label="Anime quiz multi",
+                    value="animequizmulti",
+                    description="Plusieurs questions d’affilée",
+                ),
+                discord.SelectOption(
+                    label="Duel",
+                    value="duel",
+                    description="1v1 quiz contre un membre",
+                ),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        sel = self.values[0] if self.values else ""
+        text = _MINIJEUX_LINES.get(sel, "Commande inconnue.")
+        await interaction.response.send_message(text, ephemeral=True)
+
+
+class MinijeuxHubView(View):
+    """Menu : rappelle la commande slash (et préfixe) à lancer."""
+
+    def __init__(self) -> None:
+        super().__init__(timeout=180)
+        self.add_item(MinijeuxHubSelect())
+
+
 class MiniGames(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
     # --------------------------------------
-    # Higher / Lower
+    # /guess (year, episodes, genre, character)
     # --------------------------------------
+    @commands.hybrid_group(
+        name="guess",
+        invoke_without_command=True,
+        description="Mini-jeux « devine » : année, épisodes, genre, personnage.",
+    )
+    async def guess_cmd(self, ctx: commands.Context) -> None:
+        if ctx.invoked_subcommand is not None:
+            return
+        em = discord.Embed(
+            title="🎯 /guess — choisis une variante",
+            description=(
+                "• **`/guess year`** — année de première diffusion\n"
+                "• **`/guess episodes`** — nombre d’épisodes\n"
+                "• **`/guess genre`** — un des genres de l’anime\n"
+                "• **`/guess character`** — personnage (4 boutons)\n\n"
+                "En préfixe : `!guess year`, `!guess episodes`, etc.\n"
+                "Pour tout voir : **`/minijeux`**"
+            ),
+            color=discord.Color.purple(),
+        )
+        await ctx.send(embed=em, ephemeral=bool(ctx.interaction))
+
     @commands.hybrid_command(name="higherlower", description="Quel anime est le plus populaire ?")
     async def higher_lower(self, ctx: commands.Context):
         # Appelée en slash ? On évite le timeout 3s
@@ -153,7 +280,11 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     # Guess Year
     # --------------------------------------
-    @commands.hybrid_command(name="guessyear", description="Devine l'année de diffusion d'un anime.")
+    @guess_cmd.command(
+        name="year",
+        aliases=["guessyear"],
+        description="Devine l'année de diffusion d'un anime.",
+    )
     async def guess_year(self, ctx: commands.Context) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
@@ -213,7 +344,11 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     # Guess Episodes
     # --------------------------------------
-    @commands.hybrid_command(name="guessepisodes", description="Devine le nombre d'épisodes d'un anime.")
+    @guess_cmd.command(
+        name="episodes",
+        aliases=["guessepisodes"],
+        description="Devine le nombre d'épisodes d'un anime.",
+    )
     async def guess_episodes(self, ctx: commands.Context) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
@@ -283,7 +418,11 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     # Guess Genre
     # --------------------------------------
-    @commands.hybrid_command(name="guessgenre", description="Devine un des genres d'un anime.")
+    @guess_cmd.command(
+        name="genre",
+        aliases=["guessgenre"],
+        description="Devine un des genres d'un anime.",
+    )
     async def guess_genre(self, ctx: commands.Context) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
@@ -349,8 +488,12 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     # Guess Character (boutons)
     # --------------------------------------
-    @commands.hybrid_command(name="guesscharacter", description="Devine le personnage d'anime (avec boutons).")
-    async def guesscharacter(self, ctx: commands.Context) -> None:
+    @guess_cmd.command(
+        name="character",
+        aliases=["guesscharacter"],
+        description="Devine le personnage d'anime (avec boutons).",
+    )
+    async def guess_character(self, ctx: commands.Context) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
 
@@ -462,6 +605,26 @@ class MiniGames(commands.Cog):
 
         sent = await ctx.send(embed=embed, view=view)
         view.message = sent
+
+    @commands.hybrid_command(
+        name="minijeux",
+        description="Menu des mini-jeux : choisis dans la liste pour voir la commande à lancer.",
+    )
+    async def minijeux(self, ctx: commands.Context) -> None:
+        em = discord.Embed(
+            title="🎮 Mini-jeux",
+            description=(
+                "Utilise le menu ci-dessous pour lire **ce que fait chaque jeu** et **quelle commande lancer** "
+                "(le bot ne peut pas lancer un slash à ta place).\n\n"
+                "• **Guess** — `/guess` puis `year`, `episodes`, `genre` ou `character`\n"
+                "• **Higher / Lower** — `/higherlower`\n"
+                "• **Guess OP** — `/guessop` (vocal)\n"
+                "• **Quiz** — `/animequiz`, `/animequizmulti`\n"
+                "• **Duel** — `/duel`"
+            ),
+            color=discord.Color.blurple(),
+        )
+        await ctx.send(embed=em, view=MinijeuxHubView())
 
 
 async def setup(bot: commands.Bot) -> None:

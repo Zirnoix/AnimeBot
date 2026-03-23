@@ -1,6 +1,6 @@
 # cogs/reminder_digest.py
 from __future__ import annotations
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta, timezone
 import os, json, logging, asyncio
 
@@ -121,10 +121,8 @@ class ReminderDigest(commands.Cog):
 
     # ---------- commandes ----------
     @staticmethod
-    def _reminder_on(state: Union[app_commands.Choice[str], str]) -> bool:
-        if isinstance(state, str):
-            return state.strip().lower() == "on"
-        return getattr(state, "value", None) == "on"
+    def _reminder_on(state: str) -> bool:
+        return (state or "").strip().lower() == "on"
 
     @commands.hybrid_command(name="reminder", description="Active/Désactive le récap quotidien en MP.")
     @app_commands.describe(
@@ -137,7 +135,7 @@ class ReminderDigest(commands.Cog):
     async def reminder(
         self,
         ctx: commands.Context,
-        state: Union[app_commands.Choice[str], str],
+        state: str,
         heure: Optional[str] = None,
     ):
         on = self._reminder_on(state)
@@ -154,7 +152,7 @@ class ReminderDigest(commands.Cog):
                 em = discord.Embed(
                     title="🔔 Rappel activé — aucun compte AniList lié",
                     description=(
-                        "Tu recevras un **récap global** (sorties AniList du jour, pas la whitelist du serveur).\n"
+                        "Tu recevras un **récap global** (sorties du jour sur AniList, pas la **liste du serveur** `/airings`).\n"
                         "Pour un récap basé sur **ta liste** AniList : `/linkanilist <pseudo>`."
                     ),
                     color=COLOR_WARN
@@ -279,13 +277,13 @@ class ReminderDigest(commands.Cog):
 
         if not today_eps:
             em.add_field(name="Aujourd’hui", value="Rien de prévu ✅", inline=False)
-            em.set_footer(text="Astuce: /monplanning • /next global")
+            em.set_footer(text="Astuce : /monplanning · /next (mode global)")
             return em
 
         today_eps.sort(key=lambda e: e.get("airingAt", 0))
         for name, value in _fmt_list(today_eps, limit=25):
             em.add_field(name=name, value=value, inline=False)
-        em.set_footer(text="Astuce: /monnext • /planning")
+        em.set_footer(text="Astuce : /monnext · /planning")
         return em
 
 async def setup(bot: commands.Bot):

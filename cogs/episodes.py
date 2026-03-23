@@ -185,7 +185,7 @@ def _cover_from_anilist_id(media_id: int | None) -> str | None:
 
 # =============== COG ===============
 class Episodes(commands.Cog):
-    """Affichage des prochains épisodes & planning (whitelist serveur) + vues perso."""
+    """Prochains épisodes & planning (liste du serveur ou global) + commandes perso AniList."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -193,11 +193,11 @@ class Episodes(commands.Cog):
     # ---------- /planning (server/global via choix) ----------
     @commands.hybrid_command(
         name="planning",
-        description="Planning hebdo. Par défaut: whitelist du serveur. Envoi en MP."
+        description="Planning hebdo. Par défaut : liste du serveur (`/airings`). Envoi en MP."
     )
     @app_commands.choices(scope=[
-        app_commands.Choice(name="🛡️ Serveur — Whitelist du serveur", value="server"),
-        app_commands.Choice(name="🌐 Global — Toutes les sorties", value="global"),
+        app_commands.Choice(name="🛡️ Serveur — liste /airings", value="server"),
+        app_commands.Choice(name="🌐 Global — toutes les sorties", value="global"),
     ])
     async def planning(self, ctx: commands.Context, scope: app_commands.Choice[str] = None) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
@@ -216,7 +216,7 @@ class Episodes(commands.Cog):
             items = core.filter_airings_for_guild(ctx.guild.id, all_items)
 
         if not items:
-            human = "du serveur" if scope_val == "server" else "global"
+            human = "liste du serveur" if scope_val == "server" else "global"
             await _send_dm(ctx, content=f"📭 Aucun épisode prévu ({human}) cette semaine.")
             return
 
@@ -230,7 +230,7 @@ class Episodes(commands.Cog):
                 continue
             episodes_jour = sorted(planning[jour], key=lambda x: x[1])[:10]
             e = discord.Embed(
-                title=f"📅 Planning {jour} ({'serveur' if scope_val=='server' else 'global'})",
+                title=f"📅 Planning {jour} ({'liste du serveur' if scope_val=='server' else 'global'})",
                 color=COLOR_PRIMARY
             )
             for ep, dt in episodes_jour:
@@ -252,11 +252,11 @@ class Episodes(commands.Cog):
     # ---------- /next (serveur/global) avec IMAGE ----------
     @commands.hybrid_command(
         name="next",
-        description="Prochain épisode. Par défaut: whitelist du serveur. Envoi en MP avec une carte image."
+        description="Prochain épisode. Par défaut : liste du serveur. Envoi en MP (carte image)."
     )
     @app_commands.choices(scope=[
-        app_commands.Choice(name="🛡️ Serveur — Whitelist du serveur", value="server"),
-        app_commands.Choice(name="🌐 Global — Toutes les sorties", value="global"),
+        app_commands.Choice(name="🛡️ Serveur — liste /airings", value="server"),
+        app_commands.Choice(name="🌐 Global — toutes les sorties", value="global"),
     ])
     async def next_cmd(self, ctx: commands.Context, scope: app_commands.Choice[str] = None) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
@@ -278,7 +278,7 @@ class Episodes(commands.Cog):
         item = next((it for it in items if (it.get("airingAt") or 0) > now), items[0] if items else None)
 
         if not item:
-            human = "du serveur" if scope_val == "server" else "global"
+            human = "liste du serveur" if scope_val == "server" else "global"
             await _send_dm(ctx, content=f"📭 Aucun épisode à venir ({human}) trouvé cette semaine.")
             return
 

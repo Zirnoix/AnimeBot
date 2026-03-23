@@ -15,8 +15,8 @@ SUMMARY_MAX_CHARS = 140
 # ===== Résumés 1-ligne par défaut (fallbacks FR) =====
 DESC_OVERRIDE: Dict[str, str] = {
     # Episodes
-    "next": "Affiche le prochain épisode à venir — portée ‘serveur’ (whitelist) par défaut, ou ‘global’.",
-    "planning": "Planning hebdomadaire des sorties — portée ‘serveur’ (whitelist) par défaut, ou ‘global’.",
+    "next": "Prochain épisode — mode **serveur** = ta liste du serveur (`/airings`) ; mode **global** = toutes les sorties.",
+    "planning": "Planning de la semaine — mode **serveur** = liste du serveur ; **global** = toutes les sorties.",
     "prochains": "Liste des prochains épisodes (avec filtres/limites optionnels).",
     "decouverte": "Découvre un anime (suggestion ou fiche).",
     "monnext": "Ton prochain épisode (compte AniList lié requis).",
@@ -26,7 +26,9 @@ DESC_OVERRIDE: Dict[str, str] = {
     "animequiz": "Quiz anime (solo).",
     "animequizmulti": "Quiz anime multi-joueurs.",
     "duel": "Duel de quiz entre 2 joueurs.",
-    "guess": "Jeu ‘devine’ (year, character, episodes, genre, op).",
+    "guess": "Mini-jeux « devine » : année, épisodes, genre, personnage.",
+    "guessop": "Devine l’opening à l’oreille (salon vocal requis).",
+    "minijeux": "Menu des mini-jeux : choix + explication + commande à lancer.",
     "higherlower": "Jeu Higher/Lower version anime.",
     "year": "Guess : deviner l’année.",
     "character": "Guess : deviner le personnage.",
@@ -35,7 +37,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "op": "Guess : deviner l’opening.",
 
     # Link / extra
-    "linkanilist": "Lie ton compte AniList : /linkanilist <pseudo>.",
+    "linkanilist": "Lie ton compte AniList : /linkanilist <pseudo> (pour changer : /unlink puis relier).",
     "unlink": "Délie ton compte AniList.",
     "checkin": "Fais ton check-in quotidien (streak) et gagne de l’XP.",
     "streak": "Affiche ta série quotidienne (streak) et ton record.",
@@ -61,25 +63,34 @@ DESC_OVERRIDE: Dict[str, str] = {
     # Utils
     "botinfo": "Infos sur le bot (versions, créateur, etc.).",
     "ping": "Latence du bot.",
-    "reminder": "Récap quotidien en MP (on/off) ; optionnellement l’heure HH:MM (sinon /setalert).",
+    "reminder": "Récap quotidien en MP (/reminder + /setalert), basé sur ton AniList si lié. Indépendant du récap « préférences ».",
     "setalert": "Régler l’heure du rappel quotidien (HH:MM).",
     "source": "Lien vers le dépôt GitHub du bot.",
     "uptime": "Depuis combien de temps le bot tourne.",
 
     # Admin / Owner (groupe airings)
-    "airings": "Gestion des animés suivis pour le serveur (admin).",
-    "all": "Parcourir TOUTES les sorties en cours et sélectionner celles à suivre (admin).",
-    "airings_list": "Lister les sorties à venir avec statut whitelist (admin).",
+    "airings": "Liste du serveur : choisir les animés suivis pour /next et /planning (admin).",
+    "all": "Parcourir les sorties AniList et remplir la liste du serveur (admin).",
+    "airings_list": "Afficher la liste du serveur (admin).",
     "airings_search": "Rechercher un anime sur AniList (admin).",
-    "airings_add": "Ajouter un anime à la whitelist du serveur (admin).",
-    "airings_remove": "Retirer un anime de la whitelist du serveur (admin).",
-    "airings add": "Ajouter un anime à la whitelist (admin).",
-    "airings remove": "Retirer un anime de la whitelist (admin).",
-    "airings list": "Voir la whitelist actuelle du serveur (admin).",
-    "airings clear": "Vider entièrement la whitelist du serveur (admin).",
+    "airings_add": "Ajouter un anime à la liste du serveur (admin).",
+    "airings_remove": "Retirer un anime de la liste du serveur (admin).",
+    "airings add": "Ajouter à la liste du serveur (admin).",
+    "airings remove": "Retirer de la liste du serveur (admin).",
+    "airings list": "Voir la liste du serveur (admin).",
+    "airings clear": "Vider la liste du serveur (admin).",
 
     # Help
     "help": "Aide du bot. /help [commande] pour le détail.",
+
+    # Owner — /admin (bot.py)
+    "admin": "Owner uniquement : debug slash, sync globale, cogs, test d’alerte, salon /setchannel.",
+    "admin debug_tree": "Liste les commandes slash du tree local.",
+    "admin debug_pub": "Compare commandes publiées GLOBAL vs GUILD.",
+    "admin publish_global": "Sync globale (rarement ; risque 429).",
+    "admin cogs": "Liste des extensions chargées.",
+    "admin test_alert": "Envoie une carte d’alerte test dans le salon courant.",
+    "admin show_channel": "Affiche le salon enregistré pour les alertes (/setchannel).",
 }
 
 # ===== Sections curatées (ordre d’affichage) =====
@@ -89,8 +100,8 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
     ]),
     ("🎯 Pages MiniGames", [
         "animequiz", "animequizmulti", "duel",
-        "guess", "guess year", "guess character", "guess episodes", "guess genre", "guess op",
-        "higherlower",
+        "guess", "guess year", "guess character", "guess episodes", "guess genre", "guessop",
+        "higherlower", "minijeux",
     ]),
     ("🔗 Pages Link", [
         "linkanilist", "unlink"
@@ -479,10 +490,9 @@ class Help(commands.Cog):
         em = discord.Embed(
             title="📖 Aide — Essentiel",
             description=(
-                "Voici les commandes principales pour bien démarrer.\n"
-                "• Les **slash** `/…` sont la méthode recommandée ; le préfixe **`!`** fonctionne aussi sur les commandes hybrid.\n"
-                "• Tape `/help <commande>` pour le **détail** d’une commande.\n"
-                "• Clique **Voir tout (MP)** pour la liste complète (sections curatées)."
+                "Commandes principales.\n"
+                "• **Slash** `/…` recommandé ; **`!`** marche aussi sur les commandes hybrid.\n"
+                "• `/help <commande>` : détail · bouton **Voir tout** : liste complète en MP (depuis un serveur)."
             ),
             color=discord.Color.blurple()
         )
@@ -498,9 +508,17 @@ class Help(commands.Cog):
         ]
         for name, desc in picks:
             em.add_field(name=name, value=_compact_one_line(desc), inline=False)
-        em.set_footer(
-            text="Slash /… ou ! sur les hybrid — /help <commande> pour le détail — ‘Voir tout (MP)’ pour tout explorer."
-        )
+        em.set_footer(text="/help <commande> · slash ou ! sur les hybrid")
+
+        # En MP avec préfixe, les vues (boutons) ont parfois un comportement capricieux selon le client.
+        if ctx.guild is None and not is_slash:
+            em.add_field(
+                name="ℹ️ MP",
+                value="Pour le bouton **Voir tout**, utilise `/help` dans un serveur.",
+                inline=False,
+            )
+            await ctx.send(embed=em)
+            return
 
         view = CoreHelpView(self._build_curated_pages, ephemeral=ephemeral_ok)
         await self._send_embed_ctx_or_itx(target, embed=em, view=view, ephemeral=ephemeral_ok)

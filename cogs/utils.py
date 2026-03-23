@@ -1,19 +1,16 @@
 """
 Utility commands for configuration and bot status.
 
-This cog provides utility commands such as uptime check, alert configuration,
-reminder settings, and notification channel setup.
+This cog provides utility commands such as uptime, ping, source, and /setchannel.
+Owner debug commands (test alerte, salon notifications) are under `/admin`.
 """
 
 from __future__ import annotations
 
-import os
-import tempfile
 import time
 
 import discord
 from discord.ext import commands
-from modules.image import generate_next_card
 from modules import core
 
 
@@ -45,62 +42,6 @@ class Utils(commands.Cog):
         """Affiche le lien vers le code source du bot."""
         await ctx.send("📦 Code source du bot : https://github.com/Zirnoix/AnimeBot")
 
-
-    @commands.hybrid_command(name="testalert")
-    @commands.is_owner()
-    async def testalert(self, ctx):
-        ch = ctx.channel
-        try:
-            item = core.get_my_next_airing_one()
-            if not item:
-                return await ctx.send("Aucun prochain épisode (ANILIST_USERNAME ?)")
-            item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
-            img_path = generate_next_card(
-                item,
-                out_path=os.path.join(tempfile.gettempdir(), "test_alert.png"),
-                scale=1.2,
-                padding=40,
-            )
-            await ch.send("🧪 Test alerte (carte) :", file=discord.File(img_path, filename="test_alert.png"))
-        except Exception as e:
-            await ctx.send(f"Erreur test: `{type(e).__name__}: {e}`")
-
-    
-    @commands.hybrid_command(name="showchannel")
-    @commands.is_owner()
-    async def showchannel(self, ctx: commands.Context) -> None:
-        """Affiche le salon configuré pour les alertes (!setchannel)."""
-        try:
-            cfg = core.get_config() or {}
-            cid = int(cfg.get("channel_id", 0)) if cfg.get("channel_id") else 0
-            if not cid:
-                await ctx.send("ℹ️ Aucun salon n'est configuré. Utilise `!setchannel` ici pour l'enregistrer.")
-                return
-
-            ch = self.bot.get_channel(cid)
-            # Fallback si pas en cache
-            if ch is None:
-                try:
-                    ch = await self.bot.fetch_channel(cid)
-                except Exception:
-                    ch = None
-
-            if isinstance(ch, discord.TextChannel):
-                # petit check permission d'envoi
-                perms = ch.permissions_for(ch.guild.me) if ch.guild and ch.guild.me else None
-                can_send = perms.send_messages if perms else False
-                await ctx.send(
-                    f"✅ Salon configuré : {ch.mention} (`{cid}`)\n"
-                    f"Permissions d'envoi ici : **{'OK' if can_send else 'NON'}**"
-                )
-            else:
-                await ctx.send(
-                    f"⚠️ Un ID de salon est configuré (`{cid}`) mais introuvable/invalide.\n"
-                    "Fais `!setchannel` dans le bon salon pour le réenregistrer."
-                )
-        except Exception:
-            await ctx.send("❌ Impossible de lire la config. Réessaie ou refais `!setchannel`.")
-
     @commands.hybrid_command(name="setchannel")
     @commands.has_permissions(administrator=True)
     async def setchannel(self, ctx: commands.Context) -> None:
@@ -109,7 +50,10 @@ class Utils(commands.Cog):
             config = core.get_config()
             config["channel_id"] = ctx.channel.id
             core.save_config(config)
-            await ctx.send("✅ Ce salon a été défini pour les notifications.")
+            await ctx.send(
+                "✅ Ce salon est enregistré pour les **notifications** (alertes, etc.). "
+                "La **liste du serveur** pour `/next` se gère avec **`/airings`**."
+            )
         except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
 

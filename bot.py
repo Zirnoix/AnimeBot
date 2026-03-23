@@ -5,6 +5,7 @@ import os
 import sys
 import asyncio
 import logging
+import tempfile
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -13,6 +14,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 
 from modules import core
+from modules.image import generate_next_card
 
 # ========= LOGGING (unique) =========
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -61,7 +63,6 @@ class AnimeBot(commands.Bot):
             case_insensitive=True,
         )
         self.uptime_start = datetime.now(timezone.utc)
-        self.last_episodes: dict[str, list[int]] = {}
         self.anilist_online = True
         self._anilist_ok_streak = 0
         self._anilist_fail_streak = 0
@@ -75,7 +76,10 @@ class AnimeBot(commands.Bot):
         self.AUTO_GLOBAL_SYNC = False
 
         # Groupe /admin
-        self.admin_group = app_commands.Group(name="admin", description="Commandes owner (maintenance)")
+        self.admin_group = app_commands.Group(
+            name="admin",
+            description="Owner : debug slash, sync globale, cogs, test alerte, salon notifications.",
+        )
         self._register_admin_commands()
 
     # ---------- Setup ----------
@@ -323,33 +327,12 @@ class AnimeBot(commands.Bot):
                 description="\n".join(lines),
                 color=discord.Color.blurple(),
             )
+            em.set_footer(
+                text="Récap auto (préférences) — le récap /reminder est séparé ; voir /help."
+            )
             await user.send(embed=em)
         except Exception as e:
             LOG.error("_send_summary_message: %s", e)
-
-    # ---------- Episodes (anti-doublon mémoire vive) ----------
-    def _is_already_notified(self, episode: dict) -> bool:
-        anime_id = str(episode.get("mediaId", ""))
-        epnum = int(episode.get("episode", 0))
-        return epnum in self.last_episodes.get(anime_id, [])
-
-    def _mark_as_notified(self, episode: dict) -> None:
-        anime_id = str(episode.get("mediaId", ""))
-        epnum = int(episode.get("episode", 0))
-        lst = self.last_episodes.setdefault(anime_id, [])
-        if epnum not in lst:
-            lst.append(epnum)
-        self.last_episodes[anime_id] = lst[-10:]
-
-    async def _send_episode_notification(self, channel: discord.TextChannel, episode: dict) -> None:
-        em = discord.Embed(
-            title="🆕 Nouvel épisode disponible !",
-            description=f"**{episode.get('title','?')}** — Épisode {episode.get('episode','?')}",
-            color=discord.Color.green(),
-        )
-        if "image" in episode:
-            em.set_thumbnail(url=episode["image"])
-        await channel.send(embed=em)
 
     async def _announce_monthly_winner(self, user_id: str) -> None:
         try:
@@ -438,6 +421,81 @@ class AnimeBot(commands.Bot):
             names = sorted(self._loaded_cogs or [])
             txt = "Aucun." if not names else "\n".join(names)
             await itx.response.send_message(f"```\n{txt}\n```", ephemeral=True)
+
+        @self.admin_group.command(
+            name="test_alert",
+            description="(Owner) Envoie une carte d’alerte test dans ce salon (comme les alertes auto).",
+        )
+        @app_commands.check(_owner_only)
+        async def admin_test_alert(itx: discord.Interaction):
+            if not isinstance(itx.channel, discord.TextChannel):
+                await itx.response.send_message("❌ Utilise cette commande dans un salon texte.", ephemeral=True)
+                return
+            await itx.response.defer(ephemeral=True)
+            try:
+                item = core.get_my_next_airing_one()
+                if not item:
+                    await itx.followup.send(
+                        "Aucun prochain épisode à afficher (vérifie `ANILIST_USERNAME` / API AniList).",
+                        ephemeral=True,
+                    )
+                    return
+                item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
+                img_path = generate_next_card(
+                    item,
+                    out_path=os.path.join(tempfile.gettempdir(), "test_alert.png"),
+                    scale=1.2,
+                    padding=40,
+                )
+                await itx.channel.send(
+                    "🧪 Test alerte (carte) :",
+                    file=discord.File(img_path, filename="test_alert.png"),
+                )
+                await itx.followup.send("✅ Carte envoyée dans ce salon.", ephemeral=True)
+            except Exception as e:
+                await itx.followup.send(f"❌ Erreur : `{type(e).__name__}: {e}`", ephemeral=True)
+
+        @self.admin_group.command(
+            name="show_channel",
+            description="(Owner) Affiche le salon enregistré pour les alertes (via /setchannel).",
+        )
+        @app_commands.check(_owner_only)
+        async def admin_show_channel(itx: discord.Interaction):
+            await itx.response.defer(ephemeral=True)
+            try:
+                cfg = core.get_config() or {}
+                cid = int(cfg.get("channel_id", 0)) if cfg.get("channel_id") else 0
+                if not cid:
+                    await itx.followup.send(
+                        "ℹ️ Aucun salon configuré. Utilise **`/setchannel`** dans le salon voulu.",
+                        ephemeral=True,
+                    )
+                    return
+                ch = self.get_channel(cid)
+                if ch is None:
+                    try:
+                        ch = await self.fetch_channel(cid)
+                    except Exception:
+                        ch = None
+                if isinstance(ch, discord.TextChannel):
+                    perms = ch.permissions_for(ch.guild.me) if ch.guild and ch.guild.me else None
+                    can_send = perms.send_messages if perms else False
+                    await itx.followup.send(
+                        f"✅ Salon configuré : {ch.mention} (`{cid}`)\n"
+                        f"Permissions d’envoi : **{'OK' if can_send else 'NON'}**",
+                        ephemeral=True,
+                    )
+                else:
+                    await itx.followup.send(
+                        f"⚠️ ID `{cid}` enregistré mais salon introuvable ou invalide.\n"
+                        "Refais **`/setchannel`** dans le bon salon.",
+                        ephemeral=True,
+                    )
+            except Exception:
+                await itx.followup.send(
+                    "❌ Impossible de lire la config. Réessaie ou refais **`/setchannel`**.",
+                    ephemeral=True,
+                )
 
 
 # ========= INSTANCE =========

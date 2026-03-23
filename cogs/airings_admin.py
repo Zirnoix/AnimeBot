@@ -20,6 +20,29 @@ def _pick_title_obj(t: dict | None) -> str:
     return t.get("english") or t.get("romaji") or t.get("native") or "—"
 
 
+def _dedupe_airings_by_media_id(items: List[dict]) -> List[dict]:
+    """
+    Discord interdit deux options StringSelect avec la même `value` (même media_id).
+    AniList peut renvoyer plusieurs créneaux pour le même anime : on garde la 1re occurrence.
+    """
+    seen: set[int] = set()
+    out: List[dict] = []
+    for it in items or []:
+        m = it.get("media") or {}
+        mid = m.get("id")
+        if mid is None:
+            continue
+        try:
+            k = int(mid)
+        except (TypeError, ValueError):
+            continue
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(it)
+    return out
+
+
 class SelectModal(discord.ui.Modal, title="Sélection manuelle"):
     def __init__(self, view: "AllView", mode: str):
         super().__init__(timeout=180)
@@ -73,8 +96,16 @@ class SelectModal(discord.ui.Modal, title="Sélection manuelle"):
 
         self.view.refresh_whitelist()
         nv = _build_airings_view(self.view.guild_id, self.view.items, self.view.days, self.view.page)
-        await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
         n = added if self.mode == "add" else removed
+        try:
+            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
+        except discord.HTTPException:
+            await interaction.response.send_message(
+                f"{'✅ Ajouté' if self.mode == 'add' else '🗑️ Retiré'} : **{n}** élément(s). "
+                "Rouvre `/airings all` pour rafraîchir la liste.",
+                ephemeral=True,
+            )
+            return
         await interaction.followup.send(
             f"{'✅ Ajouté' if self.mode == 'add' else '🗑️ Retiré'} : **{n}** élément(s).",
             ephemeral=True,
@@ -82,12 +113,12 @@ class SelectModal(discord.ui.Modal, title="Sélection manuelle"):
 
 
 def _build_airings_view(guild_id: int, items: List[dict], days: int, page: int) -> "AllView":
-    """Recrée la vue (menus Select inclus) après changement de page ou de whitelist."""
+    """Recrée la vue (menus Select inclus) après changement de page ou de la liste du serveur."""
     return AllView(guild_id, items, days, page=page)
 
 
 class PageAddSelect(discord.ui.Select):
-    """Multi-sélection : ajouter des animés de la page courante à la veille du serveur."""
+    """Multi-sélection : ajouter des animés de la page à la liste du serveur."""
 
     def __init__(self, parent: "AllView"):
         page_items = parent.current_page_items()
@@ -110,16 +141,19 @@ class PageAddSelect(discord.ui.Select):
         if not opts:
             opts = [discord.SelectOption(label="(rien sur cette page)", value="0")]
         super().__init__(
-            placeholder="➕ Choisir des animés à ajouter à la veille…",
+            placeholder="➕ Ajouter à la liste du serveur…",
             min_values=0,
             max_values=len(opts),
             options=opts,
-            row=3,
+            row=2,
         )
         # discord.ui.Item a une propriété `parent` en lecture seule — ne pas l'écraser.
         self.airings_view = parent
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild_id:
+            await interaction.response.send_message("❌ Utilisable seulement sur un serveur.", ephemeral=True)
+            return
         vals = [v for v in self.values if v != "0"]
         if not vals:
             await interaction.response.send_message("Aucun animé sélectionné.", ephemeral=True)
@@ -130,12 +164,19 @@ class PageAddSelect(discord.ui.Select):
                 added += 1
         self.airings_view.refresh_whitelist()
         nv = _build_airings_view(self.airings_view.guild_id, self.airings_view.items, self.airings_view.days, self.airings_view.page)
-        await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
-        await interaction.followup.send(f"✅ **{added}** animé(s) ajouté(s) à la veille du serveur.", ephemeral=True)
+        try:
+            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
+        except discord.HTTPException as e:
+            await interaction.response.send_message(
+                f"✅ **{added}** ajout(s). Impossible de rafraîchir la vue (`{e}`). Rouvre `/airings all`.",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(f"✅ **{added}** animé(s) ajouté(s) à la **liste du serveur**.", ephemeral=True)
 
 
 class PageRemoveSelect(discord.ui.Select):
-    """Multi-sélection : retirer de la veille les animés déjà suivis sur cette page."""
+    """Multi-sélection : retirer de la liste du serveur les titres suivis sur cette page."""
 
     def __init__(self, parent: "AllView"):
         page_items = parent.current_page_items()
@@ -150,15 +191,18 @@ class PageRemoveSelect(discord.ui.Select):
         if not opts:
             opts = [discord.SelectOption(label="(aucun suivi sur cette page)", value="0")]
         super().__init__(
-            placeholder="🗑️ Choisir des animés à retirer de la veille…",
+            placeholder="🗑️ Retirer de la liste du serveur…",
             min_values=0,
             max_values=len(opts),
             options=opts,
-            row=4,
+            row=3,
         )
         self.airings_view = parent
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild_id:
+            await interaction.response.send_message("❌ Utilisable seulement sur un serveur.", ephemeral=True)
+            return
         vals = [v for v in self.values if v != "0"]
         if not vals:
             await interaction.response.send_message("Aucune sélection.", ephemeral=True)
@@ -169,18 +213,26 @@ class PageRemoveSelect(discord.ui.Select):
                 removed += 1
         self.airings_view.refresh_whitelist()
         nv = _build_airings_view(self.airings_view.guild_id, self.airings_view.items, self.airings_view.days, self.airings_view.page)
-        await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
-        await interaction.followup.send(f"🗑️ **{removed}** animé(s) retiré(s) de la veille.", ephemeral=True)
+        try:
+            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
+        except discord.HTTPException as e:
+            await interaction.response.send_message(
+                f"🗑️ **{removed}** retrait(s). Impossible de rafraîchir la vue (`{e}`). Rouvre `/airings all`.",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(f"🗑️ **{removed}** animé(s) retiré(s) de la **liste du serveur**.", ephemeral=True)
 
 
 class AllView(discord.ui.View):
     def __init__(self, guild_id: int, items: List[dict], days: int, page: int = 0, timeout: int = 300):
         super().__init__(timeout=timeout)
-        self.items = items
+        self.items = _dedupe_airings_by_media_id(items)
         self.days = days
         self.guild_id = guild_id
         self.per_page = 25
-        self.page = page
+        pc = max(1, (len(self.items) + self.per_page - 1) // self.per_page)
+        self.page = max(0, min(page, pc - 1))
         self.refresh_whitelist()
         self.add_item(PageAddSelect(self))
         self.add_item(PageRemoveSelect(self))
@@ -203,9 +255,8 @@ class AllView(discord.ui.View):
             title=f"🎛️ Sorties à venir ({self.days} jours)",
             description=(
                 "Liste **AniList** des prochains épisodes (non adulte). "
-                "**✅** = déjà dans **ta veille serveur** (annonces / récap).\n"
-                "Utilise les **menus déroulants** pour ajouter ou retirer sans taper d’ID. "
-                "Les boutons **toute la page** et la **saisie manuelle** restent disponibles."
+                "**✅** = déjà dans la **liste du serveur** (utilisée par `/next` et `/planning` en mode serveur).\n"
+                "Menus pour ajouter ou retirer ; boutons **toute la page** ou **IDs manuels**."
             ),
             color=discord.Color.blurple(),
         )
@@ -228,7 +279,7 @@ class AllView(discord.ui.View):
             value=body,
             inline=False,
         )
-        e.set_footer(text="Menus ➕ / 🗑️ · max 25 titres par page · tronqué si trop long")
+        e.set_footer(text="Liste du serveur · max 25 titres/page · tronqué si trop long")
         return e
 
     # --- buttons ---
@@ -244,8 +295,11 @@ class AllView(discord.ui.View):
         nv = _build_airings_view(self.guild_id, self.items, self.days, self.page)
         await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
 
-    @discord.ui.button(label="Toute la page → veille", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="Toute la page → liste", style=discord.ButtonStyle.success, row=1)
     async def add_page_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not interaction.guild_id:
+            await interaction.response.send_message("❌ Commande utilisable seulement sur un serveur.", ephemeral=True)
+            return
         count = 0
         for it in self.current_page_items():
             m = it.get("media") or {}
@@ -254,11 +308,21 @@ class AllView(discord.ui.View):
                 count += 1
         self.refresh_whitelist()
         nv = _build_airings_view(self.guild_id, self.items, self.days, self.page)
-        await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
+        try:
+            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
+        except discord.HTTPException as e:
+            await interaction.response.send_message(
+                f"✅ **{count}** ajout(s), mais mise à jour de la vue impossible (`{e}`). Rouvre `/airings all`.",
+                ephemeral=True,
+            )
+            return
         await interaction.followup.send(f"✅ **{count}** animé(s) ajouté(s) (page entière).", ephemeral=True)
 
     @discord.ui.button(label="Toute la page → retirer", style=discord.ButtonStyle.danger, row=1)
     async def remove_page_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not interaction.guild_id:
+            await interaction.response.send_message("❌ Commande utilisable seulement sur un serveur.", ephemeral=True)
+            return
         count = 0
         for it in self.current_page_items():
             m = it.get("media") or {}
@@ -267,18 +331,25 @@ class AllView(discord.ui.View):
                 count += 1
         self.refresh_whitelist()
         nv = _build_airings_view(self.guild_id, self.items, self.days, self.page)
-        await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
+        try:
+            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
+        except discord.HTTPException as e:
+            await interaction.response.send_message(
+                f"🗑️ **{count}** retrait(s), mais mise à jour de la vue impossible (`{e}`). Rouvre `/airings all`.",
+                ephemeral=True,
+            )
+            return
         await interaction.followup.send(f"🗑️ **{count}** animé(s) retiré(s) (page entière).", ephemeral=True)
 
-    @discord.ui.button(label="IDs manuels (ajout)", style=discord.ButtonStyle.primary, row=2)
+    @discord.ui.button(label="IDs manuels (ajout)", style=discord.ButtonStyle.primary, row=1)
     async def add_select_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.send_modal(SelectModal(self, mode="add"))
 
-    @discord.ui.button(label="IDs manuels (retrait)", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="IDs manuels (retrait)", style=discord.ButtonStyle.secondary, row=1)
     async def remove_select_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.send_modal(SelectModal(self, mode="remove"))
 
-    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.secondary, row=1)
     async def close_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         for child in self.children:
             child.disabled = True
@@ -290,14 +361,17 @@ class AiringsAdmin(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    group = app_commands.Group(name="airings", description="Gestion du planning d’animés (admin)")
+    group = app_commands.Group(
+        name="airings",
+        description="Liste du serveur : quels animés suivre pour /next et /planning (admin).",
+    )
 
     # ========= /airings all (remplace 'pick') =========
     # cogs/airings_admin.py (remplace uniquement la méthode all_)
 
     @group.command(
         name="all",
-        description="Sorties AniList à venir : menus pour ajouter/retirer (sans ID), ou page entière / saisie manuelle.",
+        description="Remplir la liste du serveur : menus, page entière ou IDs (admin).",
     )
     @app_commands.describe(jours="Fenêtre (1–14, défaut 7)")
     async def all_(self, interaction: discord.Interaction, jours: Optional[int] = 7):
@@ -309,19 +383,24 @@ class AiringsAdmin(commands.Cog):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)
 
+        gid = interaction.guild_id
+        if not gid:
+            await interaction.followup.send("❌ Cette commande doit être utilisée dans un serveur.", ephemeral=True)
+            return
+
         jours = max(1, min(14, int(jours or 7)))
-        items = core.get_airings_global(days=jours, limit=200)
+        items = _dedupe_airings_by_media_id(core.get_airings_global(days=jours, limit=200))
         if not items:
             await interaction.followup.send(f"📭 Aucun épisode global sur {jours} jours.", ephemeral=True)
             return
 
-        view = AllView(interaction.guild_id, items, days=jours)
+        view = AllView(int(gid), items, days=jours)
 
         # après un defer, on doit utiliser followup
         await interaction.followup.send(embed=view.build_embed(), view=view, ephemeral=True)
 
     # ========= /airings list =========
-    @group.command(name="list", description="Voir la whitelist actuelle du serveur.")
+    @group.command(name="list", description="Voir la liste du serveur (sélection /airings).")
     async def list_(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Admin requis.", ephemeral=True)
@@ -332,10 +411,10 @@ class AiringsAdmin(commands.Cog):
             return
 
         e = discord.Embed(
-            title="✅ Veille du serveur (annonces / récap)",
+            title="✅ Liste du serveur (/next, /planning « serveur »)",
             description=(
-                "Ce sont **uniquement** les animés que des admins ont ajoutés via `/airings` "
-                "(menus, page entière ou ID). Ce n’est **pas** la liste globale des sorties."
+                "Animés ajoutés par les admins via `/airings` (menus, page entière ou ID). "
+                "Ce n’est **pas** toutes les sorties AniList — seulement ce que le serveur suit."
             ),
             color=discord.Color.green(),
         )
@@ -352,7 +431,7 @@ class AiringsAdmin(commands.Cog):
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     # ========= /airings add =========
-    @group.command(name="add", description="Ajouter un animé à la whitelist du serveur (URL AniList ou ID).")
+    @group.command(name="add", description="Ajouter un animé à la liste du serveur (URL AniList ou ID).")
     @app_commands.describe(anime="URL AniList (https://anilist.co/anime/12345) ou ID numérique")
     async def add(self, interaction: discord.Interaction, anime: str):
         if not is_admin(interaction.user):
@@ -378,7 +457,7 @@ class AiringsAdmin(commands.Cog):
         await interaction.response.send_message(f"✅ Ajouté **{name}** (`{mid}`)", ephemeral=True)
 
     # ========= /airings remove =========
-    @group.command(name="remove", description="Retirer un animé de la whitelist du serveur.")
+    @group.command(name="remove", description="Retirer un animé de la liste du serveur.")
     @app_commands.describe(media_id="ID AniList à retirer")
     async def remove(self, interaction: discord.Interaction, media_id: int):
         if not is_admin(interaction.user):
@@ -388,10 +467,10 @@ class AiringsAdmin(commands.Cog):
         if ok:
             await interaction.response.send_message(f"🗑️ Retiré id `{media_id}`.", ephemeral=True)
         else:
-            await interaction.response.send_message("Cet id n’était pas dans la whitelist.", ephemeral=True)
+            await interaction.response.send_message("Cet id n’était pas dans la liste du serveur.", ephemeral=True)
 
     # ========= /airings clear =========
-    @group.command(name="clear", description="Vider la whitelist du serveur.")
+    @group.command(name="clear", description="Vider la liste du serveur.")
     async def clear(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Admin requis.", ephemeral=True)

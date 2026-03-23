@@ -57,11 +57,31 @@ class Link(commands.Cog):
                 await ctx.reply(msg, mention_author=False)
             return
 
+        resolved = user["name"]
+        existing = core.get_linked_username(ctx.author.id)
+        if existing:
+            if existing.lower() == resolved.lower():
+                msg = f"ℹ️ Ton compte est déjà lié à **{existing}**."
+                if ctx.interaction:
+                    await ctx.interaction.followup.send(msg, ephemeral=True)
+                else:
+                    await ctx.reply(msg, mention_author=False)
+                return
+            msg = (
+                f"Tu es déjà lié à **{existing}**.\n"
+                "Utilise **`/unlink`**, puis refais **`/linkanilist`** pour changer de pseudo AniList."
+            )
+            if ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.reply(msg, mention_author=False)
+            return
+
         # 2) Écrire le lien en DB (source unique)
-        core.set_linked_username(ctx.author.id, user["name"])
+        core.set_linked_username(ctx.author.id, resolved)
 
         # 3) Confirmer
-        ok = f"✅ Ton compte AniList **{user['name']}** est maintenant lié."
+        ok = f"✅ Ton compte AniList **{resolved}** est maintenant lié."
         if ctx.interaction:
             await ctx.interaction.followup.send(ok, ephemeral=True)
         else:

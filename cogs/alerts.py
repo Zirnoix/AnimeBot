@@ -64,7 +64,7 @@ def _late_airing_should_fire(anime: Dict[str, Any], grace: int = 600) -> bool:
 
 
 class Alerts(commands.Cog):
-    """Alertes épisodes AniList — image à -30 min et image à l’heure, dans le salon configuré via !setchannel."""
+    """Alertes image (−30 min / à l’heure) dans le salon `/setchannel`. Basées sur le compte bot + comptes liés — pas sur la liste /airings."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -81,7 +81,7 @@ class Alerts(commands.Cog):
             cfg = core.get_config() or {}
             cid = int(cfg.get("channel_id", 0)) if cfg.get("channel_id") else 0
             if not cid:
-                LOG.warning("Aucun channel configuré (utilise !setchannel).")
+                LOG.warning("Aucun salon configuré (/setchannel).")
                 return None
             ch = self.bot.get_channel(cid)
             if ch is None:
