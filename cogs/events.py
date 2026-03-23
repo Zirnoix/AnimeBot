@@ -91,7 +91,8 @@ class Onboarding(commands.Cog):
                 else:
                     await interaction.followup.send("📬 Je t’envoie le guide en **MP**.", ephemeral=True)
             else:
-                await interaction.response.defer(ephemeral=True)
+                # En MP, les réponses « éphémères » ne sont pas supportées comme en salon.
+                await interaction.response.defer(ephemeral=False)
 
             user = interaction.user
 
@@ -168,18 +169,24 @@ class Onboarding(commands.Cog):
             await user.send(embeds=[e1, eMini, e2, e3, e4, e5])
 
             if not interaction.guild:
-                await interaction.followup.send("✅ Guide envoyé ci-dessus.", ephemeral=True)
+                await interaction.followup.send("✅ Guide envoyé ci-dessus.", ephemeral=False)
 
         except discord.Forbidden:
             if interaction.response.is_done():
-                await interaction.followup.send("❌ Impossible d’envoyer un MP (paramètres privés).", ephemeral=True)
+                await interaction.followup.send(
+                    "❌ Impossible d’envoyer un MP (paramètres privés).",
+                    ephemeral=bool(interaction.guild),
+                )
             else:
-                await interaction.response.send_message("❌ Impossible d’envoyer un MP (paramètres privés).", ephemeral=True)
+                await interaction.response.send_message(
+                    "❌ Impossible d’envoyer un MP (paramètres privés).",
+                    ephemeral=bool(interaction.guild),
+                )
         except Exception as e:
             if interaction.response.is_done():
-                await interaction.followup.send(f"❌ Erreur: {type(e).__name__}", ephemeral=True)
+                await interaction.followup.send(f"❌ Erreur: {type(e).__name__}", ephemeral=bool(interaction.guild))
             else:
-                await interaction.response.send_message(f"❌ Erreur: {type(e).__name__}", ephemeral=True)
+                await interaction.response.send_message(f"❌ Erreur: {type(e).__name__}", ephemeral=bool(interaction.guild))
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Onboarding(bot))

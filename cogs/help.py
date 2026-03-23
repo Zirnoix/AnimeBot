@@ -61,7 +61,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     # Utils
     "botinfo": "Infos sur le bot (versions, créateur, etc.).",
     "ping": "Latence du bot.",
-    "reminder": "Activer/Désactiver les rappels d’épisodes (on/off).",
+    "reminder": "Récap quotidien en MP (on/off) ; optionnellement l’heure HH:MM (sinon /setalert).",
     "setalert": "Régler l’heure du rappel quotidien (HH:MM).",
     "source": "Lien vers le dépôt GitHub du bot.",
     "uptime": "Depuis combien de temps le bot tourne.",
@@ -469,9 +469,11 @@ class Help(commands.Cog):
     async def help(self, ctx: commands.Context, commande: Optional[str] = None):
         is_slash = bool(getattr(ctx, "interaction", None))
         target = ctx.interaction if is_slash else ctx
+        # En MP, l’éphémère slash peut provoquer une erreur API ; on le réserve aux salons.
+        ephemeral_ok = is_slash and ctx.guild is not None
 
         if commande:
-            await self._send_command_help(target, commande, ephemeral=is_slash)
+            await self._send_command_help(target, commande, ephemeral=ephemeral_ok)
             return
 
         em = discord.Embed(
@@ -500,8 +502,8 @@ class Help(commands.Cog):
             text="Slash /… ou ! sur les hybrid — /help <commande> pour le détail — ‘Voir tout (MP)’ pour tout explorer."
         )
 
-        view = CoreHelpView(self._build_curated_pages, ephemeral=is_slash)
-        await self._send_embed_ctx_or_itx(target, embed=em, view=view, ephemeral=is_slash)
+        view = CoreHelpView(self._build_curated_pages, ephemeral=ephemeral_ok)
+        await self._send_embed_ctx_or_itx(target, embed=em, view=view, ephemeral=ephemeral_ok)
 
     @commands.hybrid_command(name="helpowner", description="(Owner/Admin) Aide restreinte en MP (commandes limitées).")
     @commands.is_owner()

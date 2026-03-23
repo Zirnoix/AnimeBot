@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import discord
-from discord.client import Client
 from discord.ext import commands, tasks
 from discord import app_commands
 
@@ -64,6 +63,8 @@ class AnimeBot(commands.Bot):
         self.uptime_start = datetime.now(timezone.utc)
         self.last_episodes: dict[str, list[int]] = {}
         self.anilist_online = True
+        self._anilist_ok_streak = 0
+        self._anilist_fail_streak = 0
 
         self._synced_once = False
         self._template_commands: list[app_commands.Command | app_commands.Group] = []
@@ -117,20 +118,6 @@ class AnimeBot(commands.Bot):
             LOG.info("[slash] Sync auto sur join OK: %s (%s)", guild.name, guild.id)
         except Exception as e:
             LOG.warning("[slash] Auto-sync join échouée pour %s: %s", guild.id, e)
-
-    # (Optionnel) voir si Discord nous envoie des interactions
-    async def on_interaction(self, interaction: discord.Interaction) -> None:
-        try:
-            LOG.debug(
-                "on_interaction: type=%s user=%s guild=%s",
-                interaction.type,
-                getattr(interaction.user, "id", None),
-                getattr(interaction.guild, "id", None),
-            )
-        except Exception:
-            pass
-        # commands.Bot n'expose pas toujours on_interaction via super() selon la version.
-        await Client.on_interaction(self, interaction)
 
     # ---------- Chargement des cogs ----------
     async def _load_extensions(self) -> None:
@@ -218,16 +205,30 @@ class AnimeBot(commands.Bot):
             test_query = "query { Media(id: 1, type: ANIME) { id } }"
             ok = bool(core.query_anilist(test_query))
             chan = self._get_notification_channel_sync()
-            if ok and not self.anilist_online:
-                self.anilist_online = True
-                LOG.info("✅ AniList de retour.")
-                if chan:
-                    asyncio.create_task(chan.send("✅ AniList est de nouveau en ligne."))
-            elif not ok and self.anilist_online:
-                self.anilist_online = False
-                LOG.warning("⚠️ AniList semble hors ligne.")
-                if chan:
-                    asyncio.create_task(chan.send("⚠️ AniList indisponible — certaines commandes peuvent échouer."))
+            if ok:
+                self._anilist_fail_streak = 0
+                if not self.anilist_online:
+                    self._anilist_ok_streak += 1
+                    if self._anilist_ok_streak >= 2:
+                        self.anilist_online = True
+                        self._anilist_ok_streak = 0
+                        LOG.info("✅ AniList de retour.")
+                        if chan:
+                            asyncio.create_task(chan.send("✅ AniList est de nouveau en ligne."))
+                else:
+                    self._anilist_ok_streak = 0
+            else:
+                self._anilist_ok_streak = 0
+                if self.anilist_online:
+                    self._anilist_fail_streak += 1
+                    if self._anilist_fail_streak >= 2:
+                        self.anilist_online = False
+                        self._anilist_fail_streak = 0
+                        LOG.warning("⚠️ AniList semble hors ligne.")
+                        if chan:
+                            asyncio.create_task(chan.send("⚠️ AniList indisponible — certaines commandes peuvent échouer."))
+                else:
+                    self._anilist_fail_streak = 0
         except Exception as e:
             LOG.warning("check_anilist_status: %s", e)
 
@@ -304,12 +305,22 @@ class AnimeBot(commands.Bot):
             user = await self.fetch_user(int(user_id))
             if not user:
                 return
+            day_fr = {
+                "Monday": "lundi",
+                "Tuesday": "mardi",
+                "Wednesday": "mercredi",
+                "Thursday": "jeudi",
+                "Friday": "vendredi",
+                "Saturday": "samedi",
+                "Sunday": "dimanche",
+            }.get(day_name, day_name)
+            lines = []
+            for ep in episodes[:10]:
+                t = core.format_anilist_title_obj(ep.get("title"))
+                lines.append(f"• **{t}** — Épisode {ep.get('episode', '?')}")
             em = discord.Embed(
-                title=f"🗓️ Sorties du {day_name}",
-                description="\n".join(
-                    f"• **{ep.get('title','?')}** — Épisode {ep.get('episode','?')}"
-                    for ep in episodes[:10]
-                ),
+                title=f"🗓️ Sorties du {day_fr}",
+                description="\n".join(lines),
                 color=discord.Color.blurple(),
             )
             await user.send(embed=em)

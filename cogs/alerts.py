@@ -104,10 +104,10 @@ class Alerts(commands.Cog):
         """Optionnel : alerter aussi les comptes AniList liés."""
         out: List[Dict[str, Any]] = []
         try:
-            links = core.load_links()  # {discord_id_str: username}
+            links = core.iter_discord_anilist_links()
         except Exception:
-            links = {}
-        for _uid, username in (links or {}).items():
+            links = []
+        for _uid, username in links:
             try:
                 item = core.get_user_next_airing_one(username)
                 if item:

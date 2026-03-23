@@ -923,7 +923,7 @@ def query_anilist(query: str, variables: dict = None) -> dict:
             # autres codes ≠ 200
             if resp.status_code != 200:
                 if resp.status_code == 404:
-                    LOG.info("[AniList] 404 – Ressource non trouvée (souvent un pseudo AniList inconnu).")
+                    LOG.debug("[AniList] 404 – ressource introuvable (souvent pseudo AniList inconnu).")
                 else:
                     LOG.warning("[AniList] HTTP %s – %s", resp.status_code, resp.text)
                 return None
@@ -1398,10 +1398,14 @@ def save_links(data: dict) -> None:
     save_json(FileConfig.LINKED_USERS, data)
 
 def get_user_anilist(user_id: int) -> Optional[str]:
-    links = load_links()
-    return links.get(str(user_id))
-    
-    # --- Résolution du pseudo AniList lié à un user Discord --- 
+    """Pseudo AniList lié (SQLite d’abord, puis JSON legacy)."""
+    u = get_linked_username(user_id)
+    if u:
+        return u
+    v = (load_links() or {}).get(str(user_id))
+    return _coerce_anilist_username(v) if v else None
+
+
 def set_linked_username(user_id: int, username: str) -> None:
     with _db_conn() as con:
         con.execute(
@@ -1417,6 +1421,62 @@ def get_linked_username(user_id: int) -> str | None:
             (int(user_id),)
         ).fetchone()
         return row[0] if row else None
+
+
+def iter_discord_anilist_links() -> List[Tuple[int, str]]:
+    """Couples (discord_id, pseudo AniList) : SQLite + JSON legacy (SQLite écrase le JSON si même id)."""
+    merged: dict[int, str] = {}
+    try:
+        for uid_str, v in (load_links() or {}).items():
+            try:
+                uid = int(uid_str)
+                u = _coerce_anilist_username(v)
+                if u:
+                    merged[uid] = u
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        with _db_conn() as con:
+            for row in con.execute("SELECT discord_id, username FROM anilist_links"):
+                merged[int(row[0])] = str(row[1])
+    except Exception:
+        pass
+    return list(merged.items())
+
+
+def unlink_linked_username(user_id: int) -> bool:
+    """Supprime le lien AniList (SQLite + fichier JSON legacy). Retourne True si quelque chose a été retiré."""
+    uid = int(user_id)
+    removed = False
+    with _db_conn() as con:
+        cur = con.execute("DELETE FROM anilist_links WHERE discord_id = ?", (uid,))
+        if cur.rowcount and cur.rowcount > 0:
+            removed = True
+    try:
+        data = load_links()
+        key = str(uid)
+        if key in data:
+            del data[key]
+            save_links(data)
+            removed = True
+    except Exception:
+        pass
+    return removed
+
+
+def format_anilist_title_obj(title: Any) -> str:
+    """Affiche un titre AniList (dict {romaji, english, native} ou str)."""
+    if isinstance(title, dict):
+        return (
+            title.get("romaji")
+            or title.get("english")
+            or title.get("native")
+            or "Titre inconnu"
+        )
+    return str(title or "Titre inconnu")
+
 
 # --- LINKS ---
 def link_anilist(user_id: int, username: str, anilist_id: int) -> None:

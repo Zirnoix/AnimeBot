@@ -1,6 +1,6 @@
 # cogs/reminder_digest.py
 from __future__ import annotations
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime, timedelta, timezone
 import os, json, logging, asyncio
 
@@ -120,34 +120,57 @@ class ReminderDigest(commands.Cog):
             pass
 
     # ---------- commandes ----------
+    @staticmethod
+    def _reminder_on(state: Union[app_commands.Choice[str], str]) -> bool:
+        if isinstance(state, str):
+            return state.strip().lower() == "on"
+        return getattr(state, "value", None) == "on"
+
     @commands.hybrid_command(name="reminder", description="Active/Désactive le récap quotidien en MP.")
-    @app_commands.describe(state="Choisis on ou off")
+    @app_commands.describe(
+        state="Choisis on ou off",
+        heure="Optionnel — heure du récap en MP (HH:MM). Sinon utilise /setalert ou la valeur déjà enregistrée.",
+    )
     @app_commands.choices(
         state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")]
     )
-    async def reminder(self, ctx: commands.Context, state: app_commands.Choice[str]):
-        on = (state.value == "on")
-        _set_user_pref(ctx.author.id, reminder_on=on)
+    async def reminder(
+        self,
+        ctx: commands.Context,
+        state: Union[app_commands.Choice[str], str],
+        heure: Optional[str] = None,
+    ):
+        on = self._reminder_on(state)
+        pref_updates: Dict[str, Any] = {"reminder_on": on}
+        if heure is not None and str(heure).strip():
+            hh = str(heure).strip()
+            if not _hhmm_valid(hh):
+                return await ctx.reply("❌ Heure invalide. Exemple : `08:00`", ephemeral=True)
+            pref_updates["alert_time"] = hh
+        _set_user_pref(ctx.author.id, **pref_updates)
         if on:
             linked = core.get_linked_username(ctx.author.id)
             if not linked:
                 em = discord.Embed(
                     title="🔔 Rappel activé — aucun compte AniList lié",
                     description=(
-                        "Tu recevras un **récap global** des sorties.\n"
-                        "Pour un récap **personnalisé** : `/linkanilist <pseudo>`."
+                        "Tu recevras un **récap global** (sorties AniList du jour, pas la whitelist du serveur).\n"
+                        "Pour un récap basé sur **ta liste** AniList : `/linkanilist <pseudo>`."
                     ),
                     color=COLOR_WARN
                 )
             else:
                 em = discord.Embed(
                     title="🔔 Rappel activé",
-                    description=f"Récap **personnalisé** avec AniList (**{linked}**).",
+                    description=(
+                        f"Récap **personnalisé** : épisodes à venir liés à **ton** compte AniList (**{linked}**), "
+                        "pas celui du serveur."
+                    ),
                     color=COLOR_OK
                 )
             pref = _get_user_pref(ctx.author.id)
             hhmm = pref.get("alert_time", core.get_config().get("default_alert_time", "08:00"))
-            em.add_field(name="Heure d’envoi", value=f"`{hhmm}` (timezone bot)", inline=False)
+            em.add_field(name="Heure d’envoi", value=f"`{hhmm}` (fuseau du bot)", inline=False)
             await ctx.reply(embed=em, ephemeral=True)
         else:
             await ctx.reply("⏹️ Rappel **désactivé**.", ephemeral=True)

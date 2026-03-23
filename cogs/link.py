@@ -23,9 +23,9 @@ class Link(commands.Cog):
     """Cog gérant la liaison des comptes et les comparaisons de statistiques.
 
     Ce cog fournit trois commandes principales :
-    - !linkanilist : Pour lier un compte AniList
-    - !unlink : Pour supprimer la liaison
-    - !duelstats : Pour comparer ses stats avec un autre utilisateur
+    - /linkanilist : lier un compte AniList
+    - /unlink : supprimer la liaison
+    - /duelstats : comparer ses stats avec un autre utilisateur
 
     Attributes:
         bot: L'instance du bot Discord
@@ -79,11 +79,7 @@ class Link(commands.Cog):
         Args:
             ctx: Le contexte de la commande
         """
-        data = core.load_links()
-        uid = str(ctx.author.id)
-        if uid in data:
-            del data[uid]
-            core.save_links(data)
+        if core.unlink_linked_username(ctx.author.id):
             await ctx.send("🔗 Ton lien AniList a bien été supprimé.")
         else:
             await ctx.send("❌ Aucun compte AniList n'était lié à ce profil.")
@@ -107,17 +103,16 @@ class Link(commands.Cog):
 
         Note:
             Les deux utilisateurs doivent avoir lié leur compte AniList
-            via la commande !linkanilist au préalable.
+            via `/linkanilist` au préalable.
         """
         if opponent is None:
-            await ctx.send("❌ Utilise : `!duelstats @ami` pour comparer tes stats avec quelqu'un.")
+            await ctx.send("❌ Utilise : `/duelstats @ami` pour comparer tes stats avec quelqu'un.")
             return
-        links = core.load_links()
-        uid1, uid2 = str(ctx.author.id), str(opponent.id)
-        if uid1 not in links or uid2 not in links:
-            await ctx.send("❗ Les deux joueurs doivent avoir lié leur compte avec `!linkanilist`." )
+        user1 = core.get_linked_username(ctx.author.id)
+        user2 = core.get_linked_username(opponent.id)
+        if not user1 or not user2:
+            await ctx.send("❗ Les deux joueurs doivent avoir lié leur compte avec `/linkanilist`.")
             return
-        user1, user2 = links[uid1], links[uid2]
         query = '''
         query ($name: String) {
           User(name: $name) {

@@ -401,7 +401,8 @@ class Quiz(commands.Cog):
                             combo = 0
                         else:
                             if self.title_matcher.find_matches(guess, correct_titles):
-                                await ctx.send("✅ Bonne réponse !")
+                                tshow = core.format_anilist_title_obj(anime.get("title"))
+                                await ctx.send(f"✅ Bonne réponse ! — **{tshow}**")
                                 score += 1
                                 xp_gain = 5 if difficulty == "easy" else 10 if difficulty == "medium" else 15
                                 total_xp += xp_gain
