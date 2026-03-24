@@ -203,11 +203,6 @@ class AnimeBot(commands.Bot):
             except Exception:
                 pass
 
-    @check_anilist_status.before_loop
-    async def _check_anilist_status_before(self) -> None:
-        # Décalle le 1er ping par rapport au ping boot (on_ready) pour limiter les 429 AniList
-        await asyncio.sleep(45)
-
     @tasks.loop(minutes=5)
     async def check_anilist_status(self) -> None:
         try:
@@ -240,6 +235,11 @@ class AnimeBot(commands.Bot):
                     self._anilist_fail_streak = 0
         except Exception as e:
             LOG.warning("check_anilist_status: %s", e)
+
+    @check_anilist_status.before_loop
+    async def _check_anilist_status_before(self) -> None:
+        # Évite le 1er ping en même temps que le ping boot (on_ready) ; limite les 429 AniList
+        await asyncio.sleep(45)
 
     async def _check_anilist_status_once(self) -> None:
         try:
