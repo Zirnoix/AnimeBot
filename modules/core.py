@@ -104,6 +104,7 @@ class FileConfig:
     CONFIG        = os.path.join(DATA_DIR, "config.json")
     GUESSOP_SCORES  = os.path.join(DATA_DIR, "guessop_scores.json")
     GUESSCHAR_SCORES = os.path.join(DATA_DIR, "guesschar_scores.json")
+    GUESS_GENRE_SANCTIONS = os.path.join(DATA_DIR, "guess_genre_sanctions.json")
 
 _AIRING_SORT_FIX = {
     "AIRING_AT": "TIME",
@@ -1432,6 +1433,24 @@ def add_mini_score(user_id: int, game: str, amount: int = 1) -> None:
 def get_mini_scores(user_id: int) -> dict:
     data = load_mini_scores()
     return data.get(str(user_id), {})
+
+
+def get_guess_genre_penalty_count(user_id: int) -> int:
+    """Nombre de pénalités anti-spam /guess genre enregistrées (affichage mycard)."""
+    data = load_json(FileConfig.GUESS_GENRE_SANCTIONS, {})
+    return int(data.get(str(user_id), {}).get("penalties", 0))
+
+
+def inc_guess_genre_penalty_count(user_id: int) -> int:
+    """Incrémente le compteur persistant de pénalités guess-genre."""
+    data = load_json(FileConfig.GUESS_GENRE_SANCTIONS, {})
+    uid = str(user_id)
+    ent = data.get(uid, {"penalties": 0})
+    ent["penalties"] = int(ent.get("penalties", 0)) + 1
+    data[uid] = ent
+    save_json(FileConfig.GUESS_GENRE_SANCTIONS, data)
+    return int(ent["penalties"])
+
 
 # ================= LIENS / PREFS / TRACKER =================
 def load_links() -> dict:

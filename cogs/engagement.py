@@ -108,6 +108,19 @@ REWARD_TABLE = {
 }
 DEFAULT_REWARD_FALLBACK = 20
 
+# Aide courte affichée par /mission (clé = mission["key"])
+MISSION_HINTS: Dict[str, str] = {
+    "use_next": "Lance **`/next`** ou **`/monnext`** une fois dans ce serveur.",
+    "use_planning": "Ouvre **`/planning`** ou **`/monplanning`** pour consulter les sorties.",
+    "use_3_tracking": "Combien **3** commandes différentes parmi : `/next`, `/planning`, `/monplanning`, `/monnext`.",
+    "duel_initiate": "Lance un duel avec **`/duel @quelqu’un`** (la partie doit démarrer).",
+    "duel_win": "Remporte **au moins une manche** d’un duel aujourd’hui (événement en arrière-plan).",
+    "quiz_play": "Joue **`/animequiz`** (ou une variante) puis termine une réponse.",
+    "quiz_win": "Réponds correctement à un quiz (solo ou manche) **aujourd’hui**.",
+    "level_up": "Passe **un niveau** global (XP) dans la journée — continue à jouer / quiz.",
+    "react_quiz": "Réagis avec un emoji à un **message de quiz** du bot (embed « quiz »).",
+}
+
 def _roll_reward(difficulty: str) -> int:
     lo, hi = REWARD_TABLE.get(difficulty, (DEFAULT_REWARD_FALLBACK, DEFAULT_REWARD_FALLBACK))
     return random.randint(lo, hi)
@@ -265,8 +278,12 @@ class Engagement(commands.Cog):
         if isinstance(action, app_commands.Choice):
             action = action.value
 
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=False)
+
         uid = str(ctx.author.id)
         m = self._get_or_create_today_mission(uid)
+        just_rerolled = False
 
         # -------- reroll weekly --------
         if action and action.lower() in {"reroll", "re", "r"}:
@@ -283,10 +300,12 @@ class Engagement(commands.Cog):
             if last_rr and _same_iso_week(last_rr, today):
                 nxt = _next_monday(last_rr)
                 wait_days = _days_until(nxt)
-                return await ctx.send(
+                msg = (
                     f"♻️ Tu as **déjà utilisé** ton reroll cette semaine.\n"
                     f"🔒 Prochain reroll dispo **lundi {nxt.strftime('%d/%m')}** (dans **{wait_days}** jour{'s' if wait_days>1 else ''})."
                 )
+                send = ctx.send if not ctx.interaction else ctx.interaction.followup.send
+                return await send(msg)
 
             # autorisé → regénère
             key, label, cmds, base_goal, diff = self._pick_template()
@@ -303,7 +322,7 @@ class Engagement(commands.Cog):
             })
             self.missions[uid] = m
             _save_json(MISSIONS_PATH, self.missions)
-            await ctx.send("🔁 Mission rerollée !")
+            just_rerolled = True
 
         # -------- affichage --------
         progress = int(m.get("progress", 0))
@@ -311,9 +330,14 @@ class Engagement(commands.Cog):
         status   = "✅ **Terminée**" if m.get("completed") else "⏳ En cours"
         diff     = m.get("difficulty", "EASY")
         xp       = int(m.get("reward_xp", DEFAULT_REWARD_FALLBACK))
-        diff_badge = {"EASY":"🟢 EASY", "MEDIUM":"🟡 MEDIUM", "HARD":"🔴 HARD"}.get(diff, "EASY")
+        diff_badge = {"EASY":"🟢 Facile", "MEDIUM":"🟡 Moyen", "HARD":"🔴 Difficile"}.get(diff, diff)
+        color = {"EASY": discord.Color.green(), "MEDIUM": discord.Color.gold(), "HARD": discord.Color.red()}.get(
+            diff, discord.Color.blurple()
+        )
+        mkey = str(m.get("key", ""))
+        hint = MISSION_HINTS.get(mkey, "Réalise l’objectif décrit ci-dessus ; la progression se met à jour automatiquement.")
 
-        # info reroll (quand re-dispo)
+        # Pied d’embed : rappel reroll uniquement si déjà utilisé cette semaine (sinon la commande suffit)
         rr_line = ""
         last_rr_iso = m.get("last_reroll")
         if last_rr_iso:
@@ -322,24 +346,42 @@ class Engagement(commands.Cog):
                 if _same_iso_week(last_rr, _today_date()):
                     nxt = _next_monday(last_rr)
                     wait_days = _days_until(nxt)
-                    rr_line = f"\n♻️ Reroll dispo **le {nxt.strftime('%d/%m')}** (dans **{wait_days}** j)."
+                    rr_line = f"🔒 Reroll déjà pris — prochain **lundi {nxt.strftime('%d/%m')}** (dans **{wait_days}** j.)"
             except Exception:
                 pass
 
         embed = discord.Embed(
-            title="🗒️ Mission du jour",
+            title="📋 Mission du jour",
             description=(
-                f"**{m['label']}**\n"
+                f"**{m['label']}**\n\n"
                 f"{self._mission_bar_line(progress, goal)}\n"
-                f"🏷️ **Difficulté :** {diff_badge}\n"
-                f"🎁 **Récompense :** +{_fmt(xp)} XP\n"
-                f"📌 **État :** {status}\n"
-                "_(La barre montre l’avancement vers l’objectif du jour.)_"
-                f"{rr_line}"
+                f"📌 {status}"
             ),
-            color=discord.Color.blurple(),
+            color=color,
         )
-        await ctx.send(embed=embed)
+        embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
+        embed.add_field(name="Enjeu", value=f"**+{_fmt(xp)} XP** · {diff_badge}", inline=False)
+        embed.add_field(name="Comment faire", value=hint, inline=False)
+        if m.get("completed"):
+            embed.add_field(
+                name="Demain",
+                value="Une **nouvelle mission** sera tirée après minuit (fuseau du bot). Pense à **`/checkin`** pour la série !",
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Astuce",
+                value="**`/checkin`** augmente ta série de jours ; **/quiz** et **/minijeux** comptent souvent pour d’autres défis.",
+                inline=False,
+            )
+        foot: List[str] = []
+        if just_rerolled:
+            foot.append("Nouvelle mission tirée (reroll utilisé pour la semaine).")
+        if rr_line:
+            foot.append(rr_line)
+        embed.set_footer(text=" · ".join(foot) if foot else "Une mission différente chaque jour")
+        send = ctx.send if not ctx.interaction else ctx.interaction.followup.send
+        await send(embed=embed)
 
     # ------------- listeners de progression -------------
     @commands.Cog.listener()

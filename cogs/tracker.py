@@ -359,7 +359,7 @@ class Tracker(commands.Cog):
                 continue
 
             for title in animes:
-                anime = core.get_next_airing_for_title(title)
+                anime = await asyncio.to_thread(core.get_next_airing_for_title, title)
                 if not anime:
                     continue
 

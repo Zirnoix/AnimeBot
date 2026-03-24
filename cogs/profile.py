@@ -115,79 +115,160 @@ def _fmt_number(n: int) -> str:
     return f"{n:,}".replace(",", " ")
 
 
-def _mini_table(mini_scores: dict) -> str:
+_MINI_LABELS: Dict[str, str] = {
+    "animequiz": "Anime quiz (solo)",
+    "animequizmulti": "Anime quiz (multi)",
+    "higherlower": "Higher / Lower",
+    "guessyear": "Guess — année",
+    "guessepisodes": "Guess — épisodes",
+    "guessgenre": "Guess — genre",
+    "guesscharacter": "Guess — perso",
+    "guessop": "Guess OP",
+    "duel": "Duel lancés",
+    "duel_victory": "Duels gagnés",
+    "guesspop": "GuessPop",
+    "guesspo": "GuessPo",
+    "guessspo": "GuessSpo",
+    "guessopener": "OP Challenger",
+}
+
+
+def _mini_label(key: str) -> str:
+    return _MINI_LABELS.get(key, key.replace("_", " ").title())
+
+
+def _mini_bar_line(val: int, max_val: int, width: int = 8) -> str:
+    if max_val <= 0:
+        return "░" * width
+    p = max(0.0, min(1.0, val / max_val))
+    filled = int(round(p * width))
+    return "█" * filled + "░" * (width - filled)
+
+
+def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str, int]]]]:
+    """
+    Regroupe les stats par famille (Quiz / Devinettes / Duels / Autres), tri par score décroissant.
+    Retourne [(titre_emoji, titre_texte, [(label, count), ...]), ...]
+    """
     if not mini_scores:
-        return "—"
-    labels = {
-        "animequiz": "AnimeQuiz (Solo)",
-        "animequizmulti": "AnimeQuiz (Multi)",
-        "higherlower": "Higher/Lower",
-        "guessyear": "Guess Year",
-        "guessepisodes": "Guess Episodes",
-        "guessgenre": "Guess Genre",
-        "guesscharacter": "Guess Character",
-        "guessop": "Guess OP",
-        "duel": "Duel",
-        "duel_victory": "Duel victory",
-        "guesspop": "GuessPop",
-        "guesspo": "GuessPo",
-        "guessspo": "GuessSpo",
-        "guessopener": "OP Challenger",
-    }
-    lines = [
-        f"• **{labels.get(k, k.replace('_',' ').title())}** : {_fmt_number(v)}"
-        for k, v in sorted(mini_scores.items(), key=lambda x: x[0])
+        return []
+
+    groups: list[tuple[str, str, frozenset[str]]] = [
+        ("🎯", "Quiz", frozenset({"animequiz", "animequizmulti"})),
+        ("🎭", "Devinettes", frozenset({
+            "guessyear", "guessepisodes", "guessgenre", "guesscharacter", "guessop",
+            "guesspop", "guesspo", "guessspo", "guessopener",
+        })),
+        ("⚔️", "Duels", frozenset({"duel", "duel_victory"})),
     ]
-    return "\n".join(lines[:25])
+    used: set[str] = set()
+    out: list[tuple[str, str, list[tuple[str, int]]]] = []
+
+    for emoji, title, keys in groups:
+        rows: list[tuple[str, int]] = []
+        for k in keys:
+            if k in mini_scores:
+                v = int(mini_scores[k])
+                if v:
+                    rows.append((_mini_label(k), v))
+                    used.add(k)
+        rows.sort(key=lambda x: -x[1])
+        if rows:
+            out.append((emoji, title, rows))
+
+    rest: list[tuple[str, int]] = []
+    for k, v in mini_scores.items():
+        if k in used:
+            continue
+        iv = int(v)
+        if iv:
+            rest.append((_mini_label(k), iv))
+    rest.sort(key=lambda x: -x[1])
+    if rest:
+        out.append(("🎲", "Autres", rest))
+
+    return out
 
 
-def _build_badges(bot, counts: dict):
-    """Retourne (icons, upcoming, buttons_payload). Ici buttons_payload inutile mais conservé pour compat."""
-    icons = []
-    upcoming = []
-    buttons_payload = []  # non utilisé (on a retiré les boutons info)
+def _format_mini_group(emoji: str, title: str, rows: list[tuple[str, int]]) -> str:
+    if not rows:
+        return ""
+    max_v = max(c for _, c in rows) or 1
+    lines_out: list[str] = []
+    for label, val in rows[:12]:
+        bar = _mini_bar_line(val, max_v)
+        lines_out.append(f"`{bar}` · **{_fmt_number(val)}** — {label}")
+    return f"**{emoji} {title}**\n" + "\n".join(lines_out)
 
-    for bid, spec in BADGES.items():
+
+def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
+    """Résumé lisible pour l’onglet Trophées (pas la liste détaillée de /mybadges)."""
+    unlocked_lines: list[str] = []
+    next_rows: list[tuple[float, str, int, int]] = []  # ratio, name, count, need
+
+    unlocked_n = 0
+    visible_total = 0
+
+    for _bid, spec in BADGES.items():
         source = spec.get("source", "")
-
-        # lire compteur en fonction de la source
         if source.startswith("mini:"):
-            key = source.split(":", 1)[1]; count = int(counts.get(key, 0))
+            key = source.split(":", 1)[1]
+            count = int(counts.get(key, 0))
         elif source.startswith("streak:"):
-            key = source.split(":", 1)[1]; count = int(counts.get(f"streak_{key}", counts.get("streak_days", 0)))
+            key = source.split(":", 1)[1]
+            count = int(counts.get(f"streak_{key}", counts.get("streak_days", 0)))
         elif source.startswith("anilist:"):
-            key = source.split(":", 1)[1]; count = int(counts.get(f"anilist_{key}", 0))
+            key = source.split(":", 1)[1]
+            count = int(counts.get(f"anilist_{key}", 0))
         elif source.startswith("time:"):
-            key = source.split(":", 1)[1]; count = int(counts.get(f"time_{key}", 0))
+            key = source.split(":", 1)[1]
+            count = int(counts.get(f"time_{key}", 0))
         elif source.startswith("command:"):
-            key = source.split(":", 1)[1]; count = int(counts.get(f"command_{key}", 0))
+            key = source.split(":", 1)[1]
+            count = int(counts.get(f"command_{key}", 0))
         else:
             count = 0
 
         thresholds = spec["thresholds"]
         icon_list = spec["icons"]
         tier, next_th = evaluate_tier(count, thresholds)
+        hidden = spec.get("hidden", False)
 
-        # ignorer les hidden non débloqués (ils ne doivent pas apparaître dans mycard)
-        if spec.get("hidden", False) and (tier is None or tier < 0):
+        if hidden and (tier is None or tier < 0):
             continue
 
+        if not hidden:
+            visible_total += 1
+
         if tier is not None and tier >= 0:
+            unlocked_n += 1
             icon = icon_list[tier] if tier < len(icon_list) else "🎖️"
             custom = spec.get("icons_custom")
             if custom and tier < len(custom):
                 resolved = get_emoji(bot, custom[tier], fallback=None)
                 if resolved:
                     icon = resolved
-            icons.append(icon)
-        else:
-            # Non débloqué & visible → “À venir”
-            if not spec.get("hidden", False) and thresholds:
-                need = thresholds[0]
-                upcoming.append((spec["name"], count, need, max(0, need - count), spec.get("desc", "")))
+            paliers = len(thresholds)
+            unlocked_lines.append(f"{icon} **{spec['name']}** · palier **{tier + 1}/{paliers}**")
+        elif not hidden and thresholds:
+            need = int(thresholds[0])
+            ratio = (count / need) if need else 0.0
+            next_rows.append((ratio, spec["name"], count, need))
 
-    upcoming.sort(key=lambda x: x[3])
-    return icons, upcoming[:5], buttons_payload
+    next_rows.sort(key=lambda x: -x[0])
+    next_lines: list[str] = []
+    for ratio, name, c, need in next_rows[:4]:
+        pct = min(100, int(round(ratio * 100)))
+        rest = max(0, need - c)
+        next_lines.append(f"**{name}** — {c}/{need} ({pct}%) · reste **{rest}**")
+
+    return {
+        "unlocked_n": unlocked_n,
+        "visible_total": visible_total,
+        "unlocked_lines": unlocked_lines[:10],
+        "unlocked_extra": max(0, len(unlocked_lines) - 10),
+        "next_lines": next_lines,
+    }
 
 
 # ---------- VUE À ONGLETS ----------
@@ -200,7 +281,7 @@ class MyCardTabs(discord.ui.View):
         # Onglets
         self.add_item(discord.ui.Button(label="Aperçu", style=discord.ButtonStyle.primary, custom_id="tab:overview"))
         self.add_item(discord.ui.Button(label="Mini-jeux", style=discord.ButtonStyle.secondary, custom_id="tab:minis"))
-        self.add_item(discord.ui.Button(label="Badges", style=discord.ButtonStyle.secondary, custom_id="tab:badges"))
+        self.add_item(discord.ui.Button(label="Trophées", style=discord.ButtonStyle.secondary, custom_id="tab:badges"))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -235,25 +316,71 @@ def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days):
     if next_pal:
         streak_line += f" • Prochain palier : **{streak_days}/{next_pal}**"
     e.add_field(name="🔥 Streak", value=streak_line, inline=False)
+    gg_pen = core.get_guess_genre_penalty_count(ctx.author.id)
+    e.add_field(
+        name="⚠️ Sanctions /guess genre",
+        value=str(gg_pen) if gg_pen else "0",
+        inline=True,
+    )
     return e
 
 
 def _embed_minis(ctx, mini_scores):
-    e = discord.Embed(title="🎮 Mini-jeux", color=discord.Color.dark_theme())
+    e = discord.Embed(
+        title="🎮 Mini-jeux",
+        description=(
+            "Temps forts par **catégorie** (barres relatives à ton meilleur score dans ce bloc). "
+            "Le détail brut reste disponible côté serveur si besoin."
+        ),
+        color=discord.Color.dark_theme(),
+    )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
-    e.description = _mini_table(mini_scores)
+    blocks = _mini_group_blocks(mini_scores)
+    if not blocks:
+        e.add_field(name="Stats", value="— Aucune partie enregistrée pour l’instant.", inline=False)
+    else:
+        total = sum(int(v) for v in mini_scores.values())
+        for emoji, title, rows in blocks:
+            block_txt = _format_mini_group(emoji, title, rows)
+            if len(block_txt) < 1024:
+                e.add_field(name="\u200b", value=block_txt, inline=False)
+            else:
+                # Discord embed field limit
+                e.add_field(name="\u200b", value=block_txt[:1020] + "…", inline=False)
+        e.set_footer(text=f"Total parties / actions comptées : {_fmt_number(total)}")
     return e
 
 
-def _embed_badges(ctx, icons, upcoming):
-    e = discord.Embed(title="🎖️ Badges", color=discord.Color.gold())
+def _embed_badges(ctx, bot, counts):
+    s = _badge_mycard_summary(bot, counts)
+    e = discord.Embed(
+        title="🏅 Trophées",
+        description=(
+            f"**{s['unlocked_n']}** débloqué(s) "
+            + (f"sur **{s['visible_total']}** pistes suivies.\n" if s["visible_total"] else ".\n")
+            + "_Les paliers récompensent régulièrement les mêmes activités (mini-jeux, série, etc.)._"
+        ),
+        color=discord.Color.gold(),
+    )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
-    e.add_field(name="Débloqués", value=(" ".join(icons) if icons else "— Aucun"), inline=False)
-    if upcoming:
-        lines = []
-        for (n, c, need, _miss, desc) in upcoming:
-            lines.append(f"• **{n}** — {c}/{need} (reste {need - c})\n_{desc}_")
-        e.add_field(name="À venir", value="\n".join(lines), inline=False)
+    if s["unlocked_lines"]:
+        body = "\n".join(s["unlocked_lines"])
+        if s["unlocked_extra"] > 0:
+            body += f"\n_… et **{s['unlocked_extra']}** autre(s) — voir **`/mybadges`**._"
+        e.add_field(name="Obtenus", value=body[:1024], inline=False)
+    else:
+        e.add_field(name="Obtenus", value="— Aucun pour l’instant. Joue aux mini-jeux ou garde ta série !", inline=False)
+
+    if s["next_lines"]:
+        e.add_field(
+            name="Prochains paliers (les plus proches)",
+            value="\n".join(s["next_lines"])[:1024],
+            inline=False,
+        )
+    else:
+        e.add_field(name="Prochains paliers", value="— Tout est débloqué côté pistes visibles, ou rien à suivre.", inline=False)
+
+    e.set_footer(text="Liste complète, descriptions et secrets : /mybadges")
     return e
 
 
@@ -283,15 +410,12 @@ class Profile(commands.Cog):
         counts = _get_user_counts(user_id)
         streak_days = int(counts.get("streak_days", 0))
 
-        # Badges (sans hidden dans mycard)
-        icons, upcoming, _ = _build_badges(self.bot, counts)
-
         # Page 1 par défaut
         embed = _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days)
         view = MyCardTabs(ctx.author, {
             "overview": (level, xp, next_xp, title, quiz_score, streak_days),
             "minis": mini_scores,
-            "badges": (icons, upcoming)
+            "counts": counts,
         })
 
         # Routeur d’onglets
@@ -304,8 +428,7 @@ class Profile(commands.Cog):
                 e = _embed_minis(ctx, view.data["minis"])
                 await inter.response.edit_message(embed=e, view=view)
             elif cid == "tab:badges":
-                icons_, upcoming_ = view.data["badges"]
-                e = _embed_badges(ctx, icons_, upcoming_)
+                e = _embed_badges(ctx, self.bot, view.data["counts"])
                 await inter.response.edit_message(embed=e, view=view)
 
         for c in view.children:
