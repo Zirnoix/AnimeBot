@@ -1,0 +1,22 @@
+---
+description: Bump project VERSION (semver) when changing AnimeBot code
+alwaysApply: true
+---
+
+# Version (`VERSION` à la racine)
+
+La version affichée (`/botinfo`, `modules.core.__version__`) vient du fichier **`VERSION`**. À **chaque modification de code** qui part en prod ou qui mérite un suivi, **mettre à jour ce fichier** (pas seul le code).
+
+## Semver (jugement)
+
+| Changement | Bump | Exemples |
+|------------|------|----------|
+| **Patch** (Z) | +1 sur Z | bugfix, typo, petit réglage, log, config mineure |
+| **Minor** (Y) | Y+1, Z=0 | nouvelle commande / feature, refacto visible, nouveau comportement utilisateur |
+| **Major** (X) | X+1, Y=0, Z=0 | breaking API, gros redesign, changement incompatible pour les serveurs / données |
+
+Si plusieurs types dans le même lot : viser le **plus haut** niveau touché.
+
+## Après le bump
+
+- Ne pas dupliquer la version ailleurs sauf si le projet ajoute un second manifeste (pyproject, etc.) : **`VERSION` est la source**.
