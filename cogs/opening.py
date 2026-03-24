@@ -289,7 +289,8 @@ class Openings(commands.Cog):
         before = gopc.count()
         new_inserts = 0
         try:
-            page = random.randint(1, 1500)
+            max_page = await animethemes.anime_catalog_max_page(40)
+            page = random.randint(1, max_page) if max_page > 0 else 1
             items = await animethemes.harvest_openings_from_page(page, 40)
             for t, th, url in items:
                 if url.startswith(("http://", "https://")):
@@ -690,9 +691,12 @@ class Openings(commands.Cog):
             await ctx.interaction.response.defer(ephemeral=True)
         before = gopc.count()
         new_inserts = 0
-        # Pages : beaucoup d’URLs que `?random` ne renvoie presque jamais une fois la base énorme
+        max_page = await animethemes.anime_catalog_max_page(35)
+        if max_page <= 0:
+            max_page = 1
+        # Pages : URLs listées ; `?random` seul retombe souvent sur des doublons si la base est grosse
         for _ in range(15):
-            page = random.randint(1, 1500)
+            page = random.randint(1, max_page)
             try:
                 items = await animethemes.harvest_openings_from_page(page, 35)
                 for t, th, url in items:

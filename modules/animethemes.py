@@ -49,6 +49,56 @@ def _pick_video(entry: Dict[str, Any]) -> Optional[str]:
             return link
     return None
 
+
+# Dernière page valide pour GET /anime (au-delà → 0 anime). Ne pas tirer un max arbitraire (ex. 1500).
+_anime_catalog_max_page_cache: dict[int, int] = {}
+
+
+async def _anime_page_nonempty(page: int, page_size: int) -> bool:
+    url = (
+        f"{BASE}/anime"
+        f"?include=animethemes.animethemeentries.videos"
+        f"&fields[anime]=name,slug"
+        f"&page[number]={page}&page[size]={page_size}"
+    )
+    data = await _fetch_json(url)
+    if not data:
+        return False
+    return len(data.get("anime") or []) > 0
+
+
+async def anime_catalog_max_page(page_size: int = 35) -> int:
+    """
+    Dernière page listant au moins un anime (pour ce page[size]). Résultat mis en cache.
+    """
+    ps = max(1, min(100, page_size))
+    if ps in _anime_catalog_max_page_cache:
+        return _anime_catalog_max_page_cache[ps]
+    if not await _anime_page_nonempty(1, ps):
+        _anime_catalog_max_page_cache[ps] = 0
+        return 0
+    p = 1
+    while p < 10000:
+        if not await _anime_page_nonempty(p, ps):
+            break
+        p *= 2
+    if p == 1:
+        _anime_catalog_max_page_cache[ps] = 0
+        return 0
+    if p >= 10000:
+        _anime_catalog_max_page_cache[ps] = 10000
+        return 10000
+    lo, hi = p // 2, p - 1
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if await _anime_page_nonempty(mid, ps):
+            lo = mid
+        else:
+            hi = mid - 1
+    _anime_catalog_max_page_cache[ps] = lo
+    return lo
+
+
 # ---------- Stratégie A: /anime?random ----------
 async def _random_opening_via_anime_random() -> Optional[Tuple[str, str, str]]:
     url = (
