@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import unicodedata
 import random
@@ -35,6 +36,21 @@ from babel.dates import format_datetime
 from PIL import Image, ImageDraw, ImageFont
 import io
 from io import BytesIO  # utilisé par generate_profile_card
+
+
+def _load_bot_version() -> str:
+    """Lecture de `VERSION` à la racine du projet, sinon env `BOT_VERSION`, sinon `dev`."""
+    try:
+        root = Path(__file__).resolve().parent.parent
+        vf = root / "VERSION"
+        if vf.is_file():
+            return vf.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+    return (os.getenv("BOT_VERSION") or "dev").strip() or "dev"
+
+
+__version__ = _load_bot_version()
 
 # ================= LOGGING =================
 # Évite de dupliquer les handlers si bot.py a déjà appelé basicConfig.

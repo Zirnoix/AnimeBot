@@ -4,12 +4,14 @@ import asyncio
 import discord
 from discord.ext import commands, tasks
 
+from modules import core
+
 # —— CONFIG ——
 CYCLE_INTERVAL_HOURS = 6  # mets 12 pour un cycle 2x par jour
 PRESENCE_SCENES = [
-    "/help ✨",                   # → "Regarde /help ✨"
-    "les commandes sur /help 🎮", # → "Regarde les commandes sur /help 🎮"
-    "/help pour commencer 🚀",    # → "Regarde /help pour commencer 🚀"
+    "/help ✨",
+    "les commandes sur /help 🎮",
+    "/help pour commencer 🚀",
 ]
 
 class Presence(commands.Cog):
@@ -27,10 +29,12 @@ class Presence(commands.Cog):
 
     @tasks.loop(hours=CYCLE_INTERVAL_HOURS)
     async def rotate_presence(self):
-        if not self.bot.is_ready() or not PRESENCE_SCENES:
+        if not self.bot.is_ready():
             return
 
-        text = PRESENCE_SCENES[self._idx % len(PRESENCE_SCENES)]
+        v = getattr(core, "__version__", None) or "dev"
+        scenes = list(PRESENCE_SCENES) + [f"v{v} · AnimeBot"]
+        text = scenes[self._idx % len(scenes)]
         self._idx += 1
         text = text.strip()[:128]
 

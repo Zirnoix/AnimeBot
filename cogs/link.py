@@ -30,7 +30,13 @@ def _anime_status_count(statuses: List[Dict[str, Any]] | None, key: str) -> int:
     return 0
 
 
-def _duel_row(
+def _fmt_stat(x: float) -> str:
+    if abs(float(x) - round(float(x))) < 1e-6:
+        return str(int(round(x)))
+    return f"{float(x):.1f}"
+
+
+def _duel_compact(
     label: str,
     a: float,
     b: float,
@@ -39,16 +45,22 @@ def _duel_row(
     *,
     higher_wins: bool = True,
 ) -> Tuple[str, int, int]:
-    """Une ligne de comparaison + points (1,0) ou (0,1) ou (0,0)."""
+    """Une ligne courte + points (1,0) / (0,1) / (0,0)."""
+    fa, fb = _fmt_stat(a), _fmt_stat(b)
     if a == b:
-        return f"**{label}**\n`{a}` · `{b}`\n🟰 Égalité", 0, 0
+        return f"▸ **{label}**  `{fa}` vs `{fb}`  🟰", 0, 0
     if higher_wins:
         if a > b:
-            return f"**{label}**\n`{a}` · `{b}`\n🏆 **{name_a}**", 1, 0
-        return f"**{label}**\n`{a}` · `{b}`\n🏆 **{name_b}**", 0, 1
+            return f"▸ **{label}**  `{fa}` vs `{fb}`  🏆 {name_a}", 1, 0
+        return f"▸ **{label}**  `{fa}` vs `{fb}`  🏆 {name_b}", 0, 1
     if a < b:
-        return f"**{label}**\n`{a}` · `{b}`\n🏆 **{name_a}**", 1, 0
-    return f"**{label}**\n`{a}` · `{b}`\n🏆 **{name_b}**", 0, 1
+        return f"▸ **{label}**  `{fa}` vs `{fb}`  🏆 {name_a}", 1, 0
+    return f"▸ **{label}**  `{fa}` vs `{fb}`  🏆 {name_b}", 0, 1
+
+
+def _mean_bonus_ok(m1: float, m2: float) -> bool:
+    """Manche « note » seulement si les deux ont une moyenne entre 0 et 100 (exclu)."""
+    return 0 < float(m1) < 100 and 0 < float(m2) < 100
 
 
 class Link(commands.Cog):
@@ -178,7 +190,6 @@ class Link(commands.Cog):
                 a = res["data"]["User"]["statistics"]["anime"]
                 st = a.get("statuses") or []
                 stats[u] = {
-                    "total_list": int(a.get("count") or 0),
                     "completed": _anime_status_count(st, "COMPLETED"),
                     "watching": _anime_status_count(st, "CURRENT"),
                     "episodes": int(a.get("episodesWatched") or 0),
@@ -197,22 +208,20 @@ class Link(commands.Cog):
         pts_a = pts_b = 0
 
         for label, key in (
-            ("✅ Complétés (vraiment finis)", "completed"),
-            ("📡 En cours (suivis actifs)", "watching"),
-            ("📺 Épisodes vus (total)", "episodes"),
-            ("⏱️ Jours de visionnage", "days"),
+            ("Complétés", "completed"),
+            ("En cours", "watching"),
+            ("Épisodes vus", "episodes"),
+            ("Jours visionnés", "days"),
         ):
             va, vb = s1[key], s2[key]
-            text, pa, pb = _duel_row(label, float(va), float(vb), n_a, n_b, higher_wins=True)
+            text, pa, pb = _duel_compact(label, float(va), float(vb), n_a, n_b, higher_wins=True)
             lines.append(text)
             pts_a += pa
             pts_b += pb
 
-        # Bonus : score moyen seulement si les deux notent vraiment
-        mean_note = ""
-        if s1["mean"] > 0 and s2["mean"] > 0:
-            text, pa, pb = _duel_row(
-                "⭐ Note moyenne (bonus, les deux notent)",
+        if _mean_bonus_ok(s1["mean"], s2["mean"]):
+            text, pa, pb = _duel_compact(
+                "Note moy. (bonus)",
                 float(s1["mean"]),
                 float(s2["mean"]),
                 n_a,
@@ -222,41 +231,33 @@ class Link(commands.Cog):
             lines.append(text)
             pts_a += pa
             pts_b += pb
-            mean_note = " · bonus **note moyenne** (si les deux en ont une)"
 
         if pts_a > pts_b:
-            verdict = f"**{n_a}** mène **{pts_a}**–**{pts_b}**"
+            verdict = f"**{n_a}** gagne **{pts_a}**–**{pts_b}**"
             color = discord.Color.from_rgb(220, 90, 90)
         elif pts_b > pts_a:
-            verdict = f"**{n_b}** mène **{pts_b}**–**{pts_a}**"
+            verdict = f"**{n_b}** gagne **{pts_b}**–**{pts_a}**"
             color = discord.Color.from_rgb(90, 130, 220)
         else:
-            verdict = f"**Égalité** **{pts_a}**–**{pts_b}** — match nul"
+            verdict = f"**Match nul** · **{pts_a}**–**{pts_b}**"
             color = discord.Color.from_rgb(180, 140, 60)
 
+        board = "\n".join(lines)
+        if len(board) > 1000:
+            board = board[:997] + "…"
+
         embed = discord.Embed(
-            title="⚔️ Arène AniList",
+            title="⚔️ Duel AniList",
             description=(
-                f"*{n_a}* · `{user1}`\n"
-                f"*{n_b}* · `{user2}`\n\n"
-                "On compare **l’engagement** (titres complétés, ce que tu regardes, volume d’épisodes, temps).\n"
-                "Pas de « duel » sur un genre favori ni sur une moyenne vide."
-                f"{mean_note}"
+                f"**{n_a}** · `{user1}`  ×  **{n_b}** · `{user2}`\n"
+                "Engagement réel (pas genre / pas moyenne biaisée)."
             ),
             color=color,
         )
-        embed.add_field(
-            name="📊 Manches",
-            value="\n\n".join(lines),
-            inline=False,
-        )
-        embed.add_field(
-            name="🏁 Verdict",
-            value=verdict,
-            inline=False,
-        )
-        embed.set_footer(text="AniList · /linkanilist requis des deux côtés")
-        embed.set_author(name="Duel de profils", icon_url=ctx.author.display_avatar.url)
+        embed.add_field(name="🎮 Tableau", value=board, inline=False)
+        embed.add_field(name="🏆 Verdict", value=verdict, inline=False)
+        embed.set_footer(text="AniList · /linkanilist · note bonus si 0 < moy. < 100 pour les deux")
+        embed.set_author(name="Arène stats", icon_url=ctx.author.display_avatar.url)
         embed.set_thumbnail(url=opponent.display_avatar.url)
 
         await ctx.send(embed=embed)

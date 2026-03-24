@@ -100,8 +100,8 @@ class HigherLowerView(View):
 class GuessHubSelect(Select):
     """Sous-menu /guess : lance directement le mode choisi."""
 
-    def __init__(self, parent: "GuessHubView"):
-        self._parent = parent
+    def __init__(self) -> None:
+        # Ne pas utiliser self._parent : réservé par discord.ui.Item (écrasé par super().__init__).
         super().__init__(
             custom_id="guess_hub_pick",
             placeholder="Choisis un mode Guess…",
@@ -130,11 +130,15 @@ class GuessHubSelect(Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self._parent.invoker_id:
+        hub = self.view
+        if not isinstance(hub, GuessHubView):
+            LOG.error("GuessHubSelect: view inattendue %r", type(hub))
+            return
+        if interaction.user.id != hub.invoker_id:
             await interaction.response.send_message("❌ Ce menu n’est pas pour toi.", ephemeral=True)
             return
         key = self.values[0] if self.values else ""
-        await self._parent.cog._run_minigame_choice(interaction, key)
+        await hub.cog._run_minigame_choice(interaction, key)
 
 
 class GuessHubView(View):
@@ -142,12 +146,11 @@ class GuessHubView(View):
         super().__init__(timeout=180)
         self.cog = cog
         self.invoker_id = invoker_id
-        self.add_item(GuessHubSelect(self))
+        self.add_item(GuessHubSelect())
 
 
 class MinijeuxHubSelect(Select):
-    def __init__(self, parent: "MinijeuxHubView"):
-        self._parent = parent
+    def __init__(self) -> None:
         super().__init__(
             custom_id="minijeux_pick",
             placeholder="Choisis un mini-jeu…",
@@ -201,11 +204,15 @@ class MinijeuxHubSelect(Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self._parent.invoker_id:
+        hub = self.view
+        if not isinstance(hub, MinijeuxHubView):
+            LOG.error("MinijeuxHubSelect: view inattendue %r", type(hub))
+            return
+        if interaction.user.id != hub.invoker_id:
             await interaction.response.send_message("❌ Ce menu n’est pas pour toi.", ephemeral=True)
             return
         key = self.values[0] if self.values else ""
-        await self._parent.cog._run_minigame_choice(interaction, key)
+        await hub.cog._run_minigame_choice(interaction, key)
 
 
 class MinijeuxHubView(View):
@@ -215,7 +222,7 @@ class MinijeuxHubView(View):
         super().__init__(timeout=180)
         self.cog = cog
         self.invoker_id = invoker_id
-        self.add_item(MinijeuxHubSelect(self))
+        self.add_item(MinijeuxHubSelect())
 
 
 class MiniGames(commands.Cog):
