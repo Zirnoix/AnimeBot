@@ -5,6 +5,7 @@ Quiz and duel commands (AniList live).
 - /animequizmulti
 - /duel       (choices manches + difficulté)
 - /quiztop
+- /quizlevels
 - /myrank
 
 Tirage d'anime en direct depuis AniList avec filtres:
@@ -714,25 +715,58 @@ class Quiz(commands.Cog):
                     lines.append(f"{badge} **{display}** — {sc} pts")
                 em.add_field(name="Top 10", value="\n".join(lines)[:1024], inline=False)
 
-            # Vainqueur du mois dernier (écrit par quiz_reset)
-            w = core.load_winner()  # {"month":"YYYY-MM","winner_user_id": "...", "winner_score": int}
+            # Mois dernier (écrit par quiz_reset) : podium + récompenses XP/badges envoyées en MP
+            w = core.load_winner()
             if w and w.get("month"):
                 label = core.human_month_fr(w["month"])
-                wid = w.get("winner_user_id")
-                wsc = int(w.get("winner_score") or 0)
-                if wid:
-                    wname = f"<@{wid}>"
-                    try:
-                        member = ctx.guild.get_member(int(wid)) if ctx.guild else None
-                        if not member:
-                            member = await self.bot.fetch_user(int(wid))
-                        if member:
-                            wname = member.display_name
-                    except Exception:
-                        pass
-                    em.add_field(name=f"🏅 Vainqueur {label}", value=f"**{wname}** — {wsc} pts", inline=False)
+                podium = w.get("podium")
+                if isinstance(podium, list) and podium:
+                    lines_p: List[str] = []
+                    medals = ["🥇", "🥈", "🥉"]
+                    for row in sorted(podium, key=lambda r: int(r.get("rank") or 99))[:3]:
+                        rk = int(row.get("rank") or 0)
+                        uid = row.get("user_id")
+                        sc = int(row.get("score") or 0)
+                        if not uid:
+                            continue
+                        md = medals[rk - 1] if 1 <= rk <= 3 else f"#{rk}"
+                        disp = f"<@{uid}>"
+                        try:
+                            mem = ctx.guild.get_member(int(uid)) if ctx.guild else None
+                            if not mem:
+                                mem = await self.bot.fetch_user(int(uid))
+                            if mem:
+                                disp = mem.display_name
+                        except Exception:
+                            pass
+                        lines_p.append(f"{md} **{disp}** — {sc} pts")
+                    if lines_p:
+                        em.add_field(
+                            name=f"🏅 Podium {label}",
+                            value="\n".join(lines_p)[:1024],
+                            inline=False,
+                        )
+                        em.add_field(
+                            name="🎁 Récompenses",
+                            value="**1ʳᵉ** +600 XP · **2ᵉ** +350 XP · **3ᵉ** +200 XP (MP + trophées).",
+                            inline=False,
+                        )
                 else:
-                    em.add_field(name=f"🏅 Vainqueur {label}", value="Aucun vainqueur (pas de scores).", inline=False)
+                    wid = w.get("winner_user_id")
+                    wsc = int(w.get("winner_score") or 0)
+                    if wid:
+                        wname = f"<@{wid}>"
+                        try:
+                            member = ctx.guild.get_member(int(wid)) if ctx.guild else None
+                            if not member:
+                                member = await self.bot.fetch_user(int(wid))
+                            if member:
+                                wname = member.display_name
+                        except Exception:
+                            pass
+                        em.add_field(name=f"🏅 Vainqueur {label}", value=f"**{wname}** — {wsc} pts", inline=False)
+                    else:
+                        em.add_field(name=f"🏅 Vainqueur {label}", value="Aucun vainqueur (pas de scores).", inline=False)
 
             # Compte à rebours vers le prochain reset (1er du mois 00:00)
             tz = getattr(core, "TIMEZONE", timezone.utc)
@@ -744,6 +778,39 @@ class Quiz(commands.Cog):
 
         except Exception as e:
             logger.error(f"Erreur dans quiztop: {e}")
+            await ctx.send("❌ Une erreur s'est produite.")
+
+    @commands.hybrid_command(
+        name="quizlevels",
+        description="Titres du quiz (score du mois) et rangs XP globaux (/mycard, /myrank).",
+    )
+    async def quizlevels(self, ctx: commands.Context) -> None:
+        try:
+            await _maybe_defer(ctx, ephemeral=False)
+            q_lines = [f"**{score}+** pts → {title}" for score, title in core.LEVEL_TITLES_QUIZ]
+            g_lines = [f"**Niveau {lvl}+** → {title}" for lvl, title in core.LEVEL_TITLES_GLOBAL]
+            em = discord.Embed(
+                title="📚 Niveaux et titres",
+                description=(
+                    "Deux systèmes : le **score quiz** (classement du mois, reset le 1ᵉʳ) "
+                    "et le **niveau XP** (progression globale sur ta carte et /myrank)."
+                ),
+                color=discord.Color.gold(),
+            )
+            em.add_field(
+                name="🎯 Titres quiz (score du mois en cours)",
+                value="\n".join(q_lines)[:1024],
+                inline=False,
+            )
+            em.add_field(
+                name="🌟 Rangs XP (carte /mycard, /myrank)",
+                value="\n".join(g_lines)[:1024],
+                inline=False,
+            )
+            em.set_footer(text="Podium mensuel : +600 / +350 / +200 XP + trophées — /quiztop")
+            await ctx.send(embed=em)
+        except Exception as e:
+            logger.error(f"Erreur dans quizlevels: {e}")
             await ctx.send("❌ Une erreur s'est produite.")
 
     @commands.hybrid_command(name="myrank", description="Affiche ton rang, ton XP et ton titre.")

@@ -55,6 +55,10 @@ class QuizMonthlyReset(commands.Cog):
                 if now.day == 1 and last_done_for != current_month:
                     data = core.record_month_winner_and_reset(now=now)
                     LOG.info("[quiz_reset] Reset mensuel effectué — winner: %s", data)
+                    try:
+                        await core.grant_quiz_monthly_podium_rewards(self.bot, data)
+                    except Exception as e:
+                        LOG.exception("[quiz_reset] grant podium: %s", e)
                     _save_state({"last_done_for": current_month})
             except Exception as e:
                 LOG.exception("[quiz_reset] Erreur: %s", e)

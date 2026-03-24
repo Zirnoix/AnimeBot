@@ -70,6 +70,27 @@ BADGES: Dict[str, Dict] = {
         "icons": ["⚔️", "⚔️⭐", "⚔️💠", "⚔️👑"],
         "source": "mini:duel",
     },
+    "quizmonthgold": {
+        "name": "Champion du mois",
+        "desc": "Podiums en 1ʳᵉ place du classement mensuel du quiz.",
+        "thresholds": [1, 2, 4, 8],
+        "icons": ["🥇", "🥇⭐", "🥇💠", "🥇👑"],
+        "source": "mini:quiz_month_1st",
+    },
+    "quizmonthsilver": {
+        "name": "Dauphin du mois",
+        "desc": "Podiums en 2ᵉ place du classement mensuel du quiz.",
+        "thresholds": [1, 2, 4, 8],
+        "icons": ["🥈", "🥈⭐", "🥈💠", "🥈👑"],
+        "source": "mini:quiz_month_2nd",
+    },
+    "quizmonthbronze": {
+        "name": "Podium du mois",
+        "desc": "Podiums en 3ᵉ place du classement mensuel du quiz.",
+        "thresholds": [1, 2, 4, 8],
+        "icons": ["🥉", "🥉⭐", "🥉💠", "🥉👑"],
+        "source": "mini:quiz_month_3rd",
+    },
 
     # === AniList et commandes ===
     "planningaddict": {

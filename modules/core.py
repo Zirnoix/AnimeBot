@@ -1310,37 +1310,102 @@ def compute_quiz_top(scores: dict, n: int = 10) -> list[tuple[str,int]]:
     items.sort(key=lambda x: x[1], reverse=True)
     return items[:n]
 
+# Récompenses podium mensuel (classement quiz) : XP global + compteurs badges (mini:quiz_month_*)
+QUIZ_MONTHLY_XP_BY_RANK = {1: 600, 2: 350, 3: 200}
+
+
 def record_month_winner_and_reset(now: datetime | None = None, tz_name: str = "Europe/Paris") -> dict:
     """
-    Fige le vainqueur du mois précédent dans FileConfig.WINNER puis remet les scores à zéro.
-    Retourne le dict gagnant sauvegardé (ou {} si pas de scores).
+    Fige le top 3 du mois précédent dans FileConfig.WINNER puis remet les scores à zéro.
+    Retourne le dict sauvegardé (récompenses XP/badges via grant_quiz_monthly_podium_rewards).
     """
     scores = load_scores()
+    prev_m = _prev_month_key(now, tz_name)
+    ts = int(time.time())
+
     if not scores:
-        # même si 0, on vide quand même pour éviter les "fuites" de vieux scores
         save_scores({})
         data = {
-            "month": _prev_month_key(now, tz_name),
+            "month": prev_m,
             "winner_user_id": None,
             "winner_score": 0,
-            "saved_at": int(time.time()),
+            "podium": [],
+            "saved_at": ts,
         }
         save_winner(data)
         return data
 
-    top = compute_quiz_top(scores, n=1)
-    best_uid, best_score = top[0]
+    top3 = compute_quiz_top(scores, n=3)
+    podium = [{"rank": i, "user_id": uid, "score": int(sc)} for i, (uid, sc) in enumerate(top3, start=1)]
+    best_uid = top3[0][0] if top3 else None
+    best_score = int(top3[0][1]) if top3 else 0
+
     data = {
-        "month": _prev_month_key(now, tz_name),
+        "month": prev_m,
         "winner_user_id": best_uid,
-        "winner_score": int(best_score),
-        "saved_at": int(time.time()),
+        "winner_score": best_score,
+        "podium": podium,
+        "saved_at": ts,
     }
     save_winner(data)
-
-    # reset scores
     save_scores({})
     return data
+
+
+async def grant_quiz_monthly_podium_rewards(bot, data: dict | None) -> None:
+    """
+    Après record_month_winner_and_reset : XP global + progression trophées podium.
+    Envoie un MP si possible (MP fermés ignorés).
+    """
+    if not data:
+        return
+    podium = data.get("podium") or []
+    month_key = data.get("month") or "?"
+    month_fr = human_month_fr(month_key) if month_key and month_key != "?" else month_key
+    mini_keys = {1: "quiz_month_1st", 2: "quiz_month_2nd", 3: "quiz_month_3rd"}
+
+    for row in podium:
+        try:
+            rank = int(row.get("rank") or 0)
+            uid_s = row.get("user_id")
+            sc = int(row.get("score") or 0)
+            if not uid_s or rank not in (1, 2, 3):
+                continue
+            uid_int = int(uid_s)
+        except Exception:
+            continue
+
+        xp_amt = int(QUIZ_MONTHLY_XP_BY_RANK.get(rank, 0))
+        if xp_amt > 0:
+            try:
+                await add_xp(bot, None, uid_int, xp_amt, announce=False)
+            except Exception as e:
+                LOG.warning("grant_quiz_monthly_podium_rewards add_xp uid=%s: %s", uid_int, e)
+
+        mk = mini_keys.get(rank)
+        if mk:
+            try:
+                add_mini_score(uid_int, mk, 1)
+            except Exception as e:
+                LOG.warning("grant_quiz_monthly_podium_rewards mini uid=%s: %s", uid_int, e)
+
+        medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, "🏅")
+        try:
+            u = await bot.fetch_user(uid_int)
+            await u.send(
+                f"{medal} **Classement quiz — {month_fr}**\n"
+                f"Tu es **{rank}ᵉ** avec **{sc}** pts ce mois-là.\n"
+                f"**+{xp_amt} XP** (rang global / **/mycard**) et progression trophée **/mybadges**."
+            )
+        except Exception:
+            pass
+
+    if podium:
+        LOG.info(
+            "Quiz mensuel %s : récompenses podium envoyées (%d joueur(s)).",
+            month_key,
+            len(podium),
+        )
 
 # ---- Stats profil (User.statistics) ----
 def get_anilist_stats(username: str) -> Optional[Dict[str, Any]]:

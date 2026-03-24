@@ -48,7 +48,8 @@ DESC_OVERRIDE: Dict[str, str] = {
     "mystats": "Stats AniList (vus, jours, score moyen, genre favori).",
     "mybadges": "Liste tes badges et ta progression.",
     "duelstats": "Duel d’engagement AniList : complétés, en cours, épisodes, temps (+ note si les deux notent).",
-    "quiztop": "Top du classement quiz.",
+    "quiztop": "Top du classement quiz + podium du mois dernier et récompenses.",
+    "quizlevels": "Liste des titres quiz (score du mois) et des rangs XP globaux (/mycard).",
     "myrank": "Ton rang, ton XP et ton titre.",
     "mychart": "Histogramme de tes genres les plus regardés.",
     "stats": "Stats AniList d’un utilisateur spécifié.",
@@ -107,7 +108,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "linkanilist", "unlink"
     ]),
     ("📊 Pages Statistiques", [
-        "mycard", "mystats", "mybadges", "duelstats", "quiztop", "myrank", "mychart", "stats"
+        "mycard", "mystats", "mybadges", "duelstats", "quiztop", "quizlevels", "myrank", "mychart", "stats"
     ]),
     ("🧭 Pages Tracker", [
         "track", "track add", "track list", "track remove", "track clear"
