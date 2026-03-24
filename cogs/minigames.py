@@ -1,12 +1,15 @@
 """
 Mini-games commands.
 
-* `/guess` — groupe (year, episodes, genre, character)
+* `/guess` — menu ou sous-commandes (year, episodes, genre, character) ; le menu lance le jeu
 * `/higherlower` — popularité
-* `/minijeux` — menu avec rappel des commandes
+* `/minijeux` — menu : sélection = lance le jeu (sauf duel → besoin d’un adversaire)
 """
 
 from __future__ import annotations
+import logging
+import time
+from collections import deque
 import aiohttp
 from PIL import Image
 from io import BytesIO
@@ -16,6 +19,38 @@ import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select
 from modules import core
+
+LOG = logging.getLogger(__name__)
+
+# --- Anti-spam /guess genre (réponses « faciles » trop souvent gagnantes) ---
+_SPAM_GENRE_NAMES = frozenset({
+    "action", "adventure", "comedy", "drama", "fantasy", "romance",
+    "sci-fi", "sci fi", "slice of life", "mystery", "supernatural", "thriller",
+    "horror", "psychological", "school", "sports", "music", "mecha",
+    "ecchi", "shounen", "shoujo", "seinen", "josei",
+})
+_GUESS_GENRE_SPAM_STREAK: dict[int, int] = {}
+_GUESS_GENRE_SPAM_TIMES: dict[int, deque[float]] = {}
+_GUESS_GENRE_COOLDOWN_UNTIL: dict[int, float] = {}
+_GUESS_GENRE_COOLDOWN_SEC = 120.0
+_SPAM_WINDOW_SEC = 300.0
+_SPAM_MAX_STREAK = 3  # au-delà : 4e victoire « facile » d’affilée → pénalité
+_SPAM_MAX_IN_WINDOW = 3  # au-delà : 4e en 5 min → pénalité
+
+
+def _guess_genre_is_spam_candidate(guess: str) -> bool:
+    g = (guess or "").strip().lower()
+    if g in _SPAM_GENRE_NAMES:
+        return True
+    g2 = g.replace("-", " ").strip()
+    return g2 in _SPAM_GENRE_NAMES
+
+
+def _guess_genre_prune_times(uid: int, now: float) -> deque[float]:
+    dq = _GUESS_GENRE_SPAM_TIMES.setdefault(uid, deque(maxlen=32))
+    while dq and now - dq[0] > _SPAM_WINDOW_SEC:
+        dq.popleft()
+    return dq
 
 
 class HigherLowerView(View):
@@ -62,48 +97,57 @@ class HigherLowerView(View):
         self.stop()
 
 
-_MINIJEUX_LINES = {
-    "higherlower": (
-        "**Higher / Lower** — Tu vois 2 animes ; choisis le plus populaire (boutons).\n"
-        "→ `/higherlower` · `!higherlower`"
-    ),
-    "guess_year": (
-        "**Guess année** — Image + devine l’année de diffusion.\n"
-        "→ `/guess year` · `!guess year`"
-    ),
-    "guess_episodes": (
-        "**Guess épisodes** — Devine combien d’épisodes.\n"
-        "→ `/guess episodes` · `!guess episodes`"
-    ),
-    "guess_genre": (
-        "**Guess genre** — Trouve un des genres de l’anime.\n"
-        "→ `/guess genre` · `!guess genre`"
-    ),
-    "guess_character": (
-        "**Guess personnage** — 4 noms en boutons.\n"
-        "→ `/guess character` · `!guess character`"
-    ),
-    "guessop": (
-        "**Guess OP** — Écoute un opening (salon vocal obligatoire).\n"
-        "→ `/guessop` · `!guessop`"
-    ),
-    "animequiz": (
-        "**Anime quiz** — Questions solo avec image.\n"
-        "→ `/animequiz` · `!animequiz`"
-    ),
-    "animequizmulti": (
-        "**Anime quiz multi** — Enchaînement de questions.\n"
-        "→ `/animequizmulti` · `!animequizmulti`"
-    ),
-    "duel": (
-        "**Duel** — Défie quelqu’un en quiz.\n"
-        "→ `/duel` · `!duel`"
-    ),
-}
+class GuessHubSelect(Select):
+    """Sous-menu /guess : lance directement le mode choisi."""
+
+    def __init__(self, parent: "GuessHubView"):
+        self._parent = parent
+        super().__init__(
+            custom_id="guess_hub_pick",
+            placeholder="Choisis un mode Guess…",
+            options=[
+                discord.SelectOption(
+                    label="📅 Année",
+                    value="guess_year",
+                    description="Devine l’année de diffusion",
+                ),
+                discord.SelectOption(
+                    label="🎞️ Épisodes",
+                    value="guess_episodes",
+                    description="Devine le nombre d’épisodes",
+                ),
+                discord.SelectOption(
+                    label="🎭 Genre",
+                    value="guess_genre",
+                    description="Trouve un des genres",
+                ),
+                discord.SelectOption(
+                    label="👤 Personnage",
+                    value="guess_character",
+                    description="4 boutons — bon personnage",
+                ),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self._parent.invoker_id:
+            await interaction.response.send_message("❌ Ce menu n’est pas pour toi.", ephemeral=True)
+            return
+        key = self.values[0] if self.values else ""
+        await self._parent.cog._run_minigame_choice(interaction, key)
+
+
+class GuessHubView(View):
+    def __init__(self, cog: "MiniGames", invoker_id: int):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.invoker_id = invoker_id
+        self.add_item(GuessHubSelect(self))
 
 
 class MinijeuxHubSelect(Select):
-    def __init__(self) -> None:
+    def __init__(self, parent: "MinijeuxHubView"):
+        self._parent = parent
         super().__init__(
             custom_id="minijeux_pick",
             placeholder="Choisis un mini-jeu…",
@@ -157,22 +201,78 @@ class MinijeuxHubSelect(Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        sel = self.values[0] if self.values else ""
-        text = _MINIJEUX_LINES.get(sel, "Commande inconnue.")
-        await interaction.response.send_message(text, ephemeral=True)
+        if interaction.user.id != self._parent.invoker_id:
+            await interaction.response.send_message("❌ Ce menu n’est pas pour toi.", ephemeral=True)
+            return
+        key = self.values[0] if self.values else ""
+        await self._parent.cog._run_minigame_choice(interaction, key)
 
 
 class MinijeuxHubView(View):
-    """Menu : rappelle la commande slash (et préfixe) à lancer."""
+    """Menu : la sélection lance le jeu (sauf duel, qui nécessite un adversaire)."""
 
-    def __init__(self) -> None:
+    def __init__(self, cog: "MiniGames", invoker_id: int):
         super().__init__(timeout=180)
-        self.add_item(MinijeuxHubSelect())
+        self.cog = cog
+        self.invoker_id = invoker_id
+        self.add_item(MinijeuxHubSelect(self))
 
 
 class MiniGames(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    async def _run_minigame_choice(self, interaction: discord.Interaction, key: str) -> None:
+        """Lance un mini-jeu depuis un menu (Select) : même logique que les commandes slash."""
+        await interaction.response.defer(thinking=True)
+        ctx = await self.bot.get_context(interaction)
+        try:
+            if key == "duel":
+                await interaction.followup.send(
+                    "⚔️ Un **duel** nécessite un adversaire : utilise **`/duel @membre`** "
+                    "(manches + difficulté). Tu peux aussi taper **`!duel`**.",
+                    ephemeral=True,
+                )
+                return
+            if key == "higherlower":
+                await self.higher_lower(ctx)
+            elif key == "guess_year":
+                await self.guess_year(ctx)
+            elif key == "guess_episodes":
+                await self.guess_episodes(ctx)
+            elif key == "guess_genre":
+                await self.guess_genre(ctx)
+            elif key == "guess_character":
+                await self.guess_character(ctx)
+            elif key == "guessop":
+                og = self.bot.get_cog("Openings")
+                if og:
+                    await og.guess_op(ctx)  # type: ignore[attr-defined]
+                else:
+                    await interaction.followup.send("❌ Guess OP indisponible.", ephemeral=True)
+            elif key == "animequiz":
+                qz = self.bot.get_cog("Quiz")
+                if qz:
+                    await qz.animequiz(ctx, "medium")  # type: ignore[attr-defined]
+                else:
+                    await interaction.followup.send("❌ Quiz indisponible.", ephemeral=True)
+            elif key == "animequizmulti":
+                qz = self.bot.get_cog("Quiz")
+                if qz:
+                    await qz.animequizmulti(ctx, 5)  # type: ignore[attr-defined]
+                else:
+                    await interaction.followup.send("❌ Quiz indisponible.", ephemeral=True)
+            else:
+                await interaction.followup.send("❌ Option inconnue.", ephemeral=True)
+        except Exception:
+            LOG.exception("minigame dispatch failed (%s)", key)
+            try:
+                await interaction.followup.send(
+                    "❌ Erreur en lançant le mini-jeu. Réessaie ou utilise la commande directement.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
 
     # --------------------------------------
     # /guess (year, episodes, genre, character)
@@ -180,24 +280,23 @@ class MiniGames(commands.Cog):
     @commands.hybrid_group(
         name="guess",
         invoke_without_command=True,
-        description="Mini-jeux « devine » : année, épisodes, genre, personnage.",
+        description="Menu « devine » ou sous-commandes : year, episodes, genre, character.",
     )
     async def guess_cmd(self, ctx: commands.Context) -> None:
         if ctx.invoked_subcommand is not None:
             return
         em = discord.Embed(
-            title="🎯 /guess — choisis une variante",
+            title="🎯 /guess — lance un mode",
             description=(
-                "• **`/guess year`** — année de première diffusion\n"
-                "• **`/guess episodes`** — nombre d’épisodes\n"
-                "• **`/guess genre`** — un des genres de l’anime\n"
-                "• **`/guess character`** — personnage (4 boutons)\n\n"
-                "En préfixe : `!guess year`, `!guess episodes`, etc.\n"
-                "Pour tout voir : **`/minijeux`**"
+                "**Choisis ci-dessous** pour jouer tout de suite.\n\n"
+                "Pour relancer sans menu la prochaine fois : "
+                "**`/guess year`**, **`/guess episodes`**, **`/guess genre`**, **`/guess character`** "
+                "(ou `!guess year`, etc.).\n"
+                "Autres mini-jeux : **`/minijeux`**"
             ),
             color=discord.Color.purple(),
         )
-        await ctx.send(embed=em, ephemeral=bool(ctx.interaction))
+        await ctx.send(embed=em, view=GuessHubView(self, ctx.author.id))
 
     @commands.hybrid_command(name="higherlower", description="Quel anime est le plus populaire ?")
     async def higher_lower(self, ctx: commands.Context):
@@ -427,6 +526,16 @@ class MiniGames(commands.Cog):
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
 
+        uid = ctx.author.id
+        now = time.monotonic()
+        cd_until = _GUESS_GENRE_COOLDOWN_UNTIL.get(uid, 0.0)
+        if now < cd_until:
+            remaining = max(1, int(cd_until - now))
+            await ctx.send(
+                f"⏳ **Anti-spam genre** : attends encore **{remaining}s** avant de relancer `/guess genre`."
+            )
+            return
+
         await ctx.send("🎭 Sélection d'un anime…")
         anime = None
         for _ in range(5):
@@ -461,7 +570,8 @@ class MiniGames(commands.Cog):
             title="🎭 Mini-jeu : Devine le genre !",
             description=(
                 f"Quel est un des genres de **{title}** ?\n"
-                "Réponds par un genre (ex : `Action`, `Romance`)."
+                "Réponds par un genre (ex : `Action`, `Romance`).\n"
+                "_Ne spamme pas uniquement les genres ultra courants : voir **anti-spam**._"
             ),
             color=discord.Color.magenta(),
         )
@@ -475,14 +585,50 @@ class MiniGames(commands.Cog):
 
         try:
             msg = await self.bot.wait_for("message", timeout=20.0, check=check)
-            guess = msg.content.strip().lower()
+            guess_raw = msg.content.strip()
+            guess = guess_raw.lower()
             if guess in [g.lower() for g in genres]:
-                await ctx.send(f"✅ Exact ! Les genres de **{title}** incluent {', '.join(anime['genres'])}. Tu gagnes 5 XP !")
-                await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
-                core.add_mini_score(ctx.author.id, "guessgenre", 1)
+                now2 = time.monotonic()
+                spam = _guess_genre_is_spam_candidate(guess_raw)
+                if spam:
+                    dq = _guess_genre_prune_times(uid, now2)
+                    dq.append(now2)
+                    streak = _GUESS_GENRE_SPAM_STREAK.get(uid, 0) + 1
+                    _GUESS_GENRE_SPAM_STREAK[uid] = streak
+                    penalize = streak > _SPAM_MAX_STREAK or len(dq) > _SPAM_MAX_IN_WINDOW
+                    if penalize:
+                        _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
+                        _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
+                        _GUESS_GENRE_COOLDOWN_UNTIL[uid] = now2 + _GUESS_GENRE_COOLDOWN_SEC
+                        await core.add_xp(self.bot, ctx.channel, ctx.author.id, -5, announce=False)
+                        await ctx.send(
+                            f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de réponses « faciles » "
+                            f"(Action, Adventure, Comedy…) **plus de {_SPAM_MAX_STREAK} fois d’affilée** ou "
+                            f"**plus de {_SPAM_MAX_IN_WINDOW} en 5 min**.\n"
+                            f"**−5 XP** · cooldown **{int(_GUESS_GENRE_COOLDOWN_SEC)}s** sur `/guess genre`.\n"
+                            f"Genres de **{title}** : {', '.join(anime['genres'])}."
+                        )
+                    else:
+                        await ctx.send(
+                            f"✅ Exact ! Les genres de **{title}** incluent {', '.join(anime['genres'])}. Tu gagnes 5 XP !"
+                        )
+                        await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
+                        core.add_mini_score(ctx.author.id, "guessgenre", 1)
+                else:
+                    _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
+                    _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
+                    await ctx.send(
+                        f"✅ Exact ! Les genres de **{title}** incluent {', '.join(anime['genres'])}. Tu gagnes 5 XP !"
+                    )
+                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
+                    core.add_mini_score(ctx.author.id, "guessgenre", 1)
             else:
+                _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
+                _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
                 await ctx.send(f"❌ Mauvaise réponse. Les genres de **{title}** étaient : {', '.join(anime['genres'])}.")
         except asyncio.TimeoutError:
+            _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
+            _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
             await ctx.send("⏰ Temps écoulé ! Le mini-jeu est annulé.")
 
     # --------------------------------------
@@ -608,23 +754,19 @@ class MiniGames(commands.Cog):
 
     @commands.hybrid_command(
         name="minijeux",
-        description="Menu des mini-jeux : choisis dans la liste pour voir la commande à lancer.",
+        description="Menu des mini-jeux : choisis dans la liste pour lancer une partie.",
     )
     async def minijeux(self, ctx: commands.Context) -> None:
         em = discord.Embed(
             title="🎮 Mini-jeux",
             description=(
-                "Utilise le menu ci-dessous pour lire **ce que fait chaque jeu** et **quelle commande lancer** "
-                "(le bot ne peut pas lancer un slash à ta place).\n\n"
-                "• **Guess** — `/guess` puis `year`, `episodes`, `genre` ou `character`\n"
-                "• **Higher / Lower** — `/higherlower`\n"
-                "• **Guess OP** — `/guessop` (vocal)\n"
-                "• **Quiz** — `/animequiz`, `/animequizmulti`\n"
-                "• **Duel** — `/duel`"
+                "**Choisis un jeu** dans le menu — la partie **démarre tout de suite** dans ce salon "
+                "(sauf **Duel** : il faut un adversaire → **`/duel @membre`**).\n\n"
+                "Raccourcis : `/guess …`, `/higherlower`, `/guessop`, `/animequiz`, `/animequizmulti`."
             ),
             color=discord.Color.blurple(),
         )
-        await ctx.send(embed=em, view=MinijeuxHubView())
+        await ctx.send(embed=em, view=MinijeuxHubView(self, ctx.author.id))
 
 
 async def setup(bot: commands.Bot) -> None:

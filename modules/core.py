@@ -510,6 +510,33 @@ def guild_whitelist_add(guild_id: int, media_id: int) -> dict | None:
     conn.commit()
     return {"id": media_id, "title": m.get("title") or {}, "siteUrl": site, "cover": cover}
 
+
+def guild_whitelist_add_from_snapshot(guild_id: int, media: dict) -> bool:
+    """
+    Ajoute un média à la whitelist sans requête AniList (données déjà connues,
+    ex. objet `media` d’un airing de `get_airings_global`).
+    Retourne True si une **nouvelle** ligne a été insérée (déjà présent → False).
+    """
+    _ensure_guild_whitelist_table()
+    mid = int((media or {}).get("id") or 0)
+    if not mid:
+        return False
+    t = (media.get("title") or {})
+    title = t.get("romaji") or t.get("english") or t.get("native") or str(mid)
+    site = media.get("siteUrl") or ""
+    cov = media.get("cover")
+    if not cov and isinstance(media.get("coverImage"), dict):
+        cov = (media.get("coverImage") or {}).get("large")
+    cover = cov or ""
+    conn = _db()
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO guild_whitelist (guild_id, media_id, title_romaji, site_url, cover, added_at) VALUES (?,?,?,?,?,strftime('%s','now'))",
+        (int(guild_id), mid, title, site, cover),
+    )
+    conn.commit()
+    return (cur.rowcount or 0) > 0
+
+
 def guild_whitelist_remove(guild_id: int, media_id: int) -> bool:
     _ensure_guild_whitelist_table()
     conn = _db()

@@ -23,7 +23,7 @@ INTRO_MINIGAMES = (
     "• **/animequiz** — Quiz solo rapide (images/indices)\n"
     "• **/duel** — Affronte un ami en 1v1\n"
     "• **/guessop** — Devine l’**opening** à l’oreille (vocal)\n"
-    "• **/minijeux** — Menu avec toutes les idées + commandes\n"
+    "• **/minijeux** — Menu : choisis un jeu, la partie se lance\n"
     "• Autres: `/guess year`, `/guess episodes`, `/higherlower`"
 )
 
@@ -115,7 +115,7 @@ class Onboarding(commands.Cog):
                     "• **/animequiz** — Quiz solo (rapide, fun)\n"
                     "• **/duel** — 1v1 quiz entre amis\n"
                     "• **/guessop** — Devine l’**opening** 🎧 (vocal)\n"
-                    "• **/minijeux** — Liste des jeux + quelle commande lancer\n"
+                    "• **/minijeux** — Menu : un clic = une partie\n"
                     "• Plus: `/guess year`, `/guess episodes`, `/guess character`, `/higherlower`\n\n"
                     "Astuce: lancez ces jeux dans un salon dédié pour éviter de flood."
                 ),

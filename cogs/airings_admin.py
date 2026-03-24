@@ -83,6 +83,8 @@ class SelectModal(discord.ui.Modal, title="Sélection manuelle"):
             await interaction.response.send_message("Aucun ID/indice valide reconnu.", ephemeral=True)
             return
 
+        await interaction.response.defer(ephemeral=True)
+
         guild_id = interaction.guild_id
         added = removed = 0
         if self.mode == "add":
@@ -98,11 +100,11 @@ class SelectModal(discord.ui.Modal, title="Sélection manuelle"):
         nv = _build_airings_view(self.view.guild_id, self.view.items, self.view.days, self.view.page)
         n = added if self.mode == "add" else removed
         try:
-            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
-        except discord.HTTPException:
-            await interaction.response.send_message(
+            await interaction.edit_original_response(embed=nv.build_embed(), view=nv)
+        except (discord.HTTPException, discord.NotFound) as e:
+            await interaction.followup.send(
                 f"{'✅ Ajouté' if self.mode == 'add' else '🗑️ Retiré'} : **{n}** élément(s). "
-                "Rouvre `/airings all` pour rafraîchir la liste.",
+                f"Impossible de rafraîchir la vue (`{e}`). Rouvre `/airings all`.",
                 ephemeral=True,
             )
             return
@@ -158,16 +160,25 @@ class PageAddSelect(discord.ui.Select):
         if not vals:
             await interaction.response.send_message("Aucun animé sélectionné.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
+        guild_id = self.airings_view.guild_id
+        page_items = self.airings_view.current_page_items()
+        mid_to_media: dict[int, dict] = {}
+        for it in page_items:
+            m = it.get("media") or {}
+            if m.get("id") is not None:
+                mid_to_media[int(m["id"])] = m
         added = 0
         for v in vals:
-            if core.guild_whitelist_add(self.airings_view.guild_id, int(v)):
+            m = mid_to_media.get(int(v))
+            if m and core.guild_whitelist_add_from_snapshot(guild_id, m):
                 added += 1
         self.airings_view.refresh_whitelist()
         nv = _build_airings_view(self.airings_view.guild_id, self.airings_view.items, self.airings_view.days, self.airings_view.page)
         try:
-            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
-        except discord.HTTPException as e:
-            await interaction.response.send_message(
+            await interaction.edit_original_response(embed=nv.build_embed(), view=nv)
+        except (discord.HTTPException, discord.NotFound) as e:
+            await interaction.followup.send(
                 f"✅ **{added}** ajout(s). Impossible de rafraîchir la vue (`{e}`). Rouvre `/airings all`.",
                 ephemeral=True,
             )
@@ -207,6 +218,7 @@ class PageRemoveSelect(discord.ui.Select):
         if not vals:
             await interaction.response.send_message("Aucune sélection.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
         removed = 0
         for v in vals:
             if core.guild_whitelist_remove(self.airings_view.guild_id, int(v)):
@@ -214,9 +226,9 @@ class PageRemoveSelect(discord.ui.Select):
         self.airings_view.refresh_whitelist()
         nv = _build_airings_view(self.airings_view.guild_id, self.airings_view.items, self.airings_view.days, self.airings_view.page)
         try:
-            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
-        except discord.HTTPException as e:
-            await interaction.response.send_message(
+            await interaction.edit_original_response(embed=nv.build_embed(), view=nv)
+        except (discord.HTTPException, discord.NotFound) as e:
+            await interaction.followup.send(
                 f"🗑️ **{removed}** retrait(s). Impossible de rafraîchir la vue (`{e}`). Rouvre `/airings all`.",
                 ephemeral=True,
             )
@@ -300,29 +312,30 @@ class AllView(discord.ui.View):
         if not interaction.guild_id:
             await interaction.response.send_message("❌ Commande utilisable seulement sur un serveur.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
         count = 0
         for it in self.current_page_items():
             m = it.get("media") or {}
-            mid = int(m.get("id"))
-            if core.guild_whitelist_add(self.guild_id, mid):
+            if m.get("id") is not None and core.guild_whitelist_add_from_snapshot(self.guild_id, m):
                 count += 1
         self.refresh_whitelist()
         nv = _build_airings_view(self.guild_id, self.items, self.days, self.page)
         try:
-            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
-        except discord.HTTPException as e:
-            await interaction.response.send_message(
+            await interaction.edit_original_response(embed=nv.build_embed(), view=nv)
+        except (discord.HTTPException, discord.NotFound) as e:
+            await interaction.followup.send(
                 f"✅ **{count}** ajout(s), mais mise à jour de la vue impossible (`{e}`). Rouvre `/airings all`.",
                 ephemeral=True,
             )
             return
-        await interaction.followup.send(f"✅ **{count}** animé(s) ajouté(s) (page entière).", ephemeral=True)
+        await interaction.followup.send(f"✅ **{count}** nouvelle(s) entrée(s) ajoutée(s) (page entière).", ephemeral=True)
 
     @discord.ui.button(label="Toute la page → retirer", style=discord.ButtonStyle.danger, row=1)
     async def remove_page_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not interaction.guild_id:
             await interaction.response.send_message("❌ Commande utilisable seulement sur un serveur.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
         count = 0
         for it in self.current_page_items():
             m = it.get("media") or {}
@@ -332,9 +345,9 @@ class AllView(discord.ui.View):
         self.refresh_whitelist()
         nv = _build_airings_view(self.guild_id, self.items, self.days, self.page)
         try:
-            await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
-        except discord.HTTPException as e:
-            await interaction.response.send_message(
+            await interaction.edit_original_response(embed=nv.build_embed(), view=nv)
+        except (discord.HTTPException, discord.NotFound) as e:
+            await interaction.followup.send(
                 f"🗑️ **{count}** retrait(s), mais mise à jour de la vue impossible (`{e}`). Rouvre `/airings all`.",
                 ephemeral=True,
             )
