@@ -57,12 +57,13 @@ def add_opening(
     theme_label: str,
     video_url: str,
     source: str,
-) -> Optional[int]:
+) -> tuple[Optional[int], bool]:
     """
-    Enregistre une opening (URL unique). Retourne l'id (existant ou nouveau).
+    Enregistre une opening (URL unique).
+    Retourne (id, True) si **nouvelle** ligne, (id, False) si l’URL existait déjà.
     """
     if not video_url or not title:
-        return None
+        return None, False
     now = int(time.time())
     try:
         with _connect() as c:
@@ -73,14 +74,17 @@ def add_opening(
                 """,
                 (title.strip(), (theme_label or "").strip(), video_url.strip(), source, now),
             )
+            chg = c.execute("SELECT changes()").fetchone()
+            inserted = int(chg[0]) > 0 if chg else False
             row = c.execute(
                 "SELECT id FROM openings WHERE video_url = ? LIMIT 1",
                 (video_url.strip(),),
             ).fetchone()
-            return int(row[0]) if row else None
+            oid = int(row[0]) if row else None
+            return oid, inserted
     except Exception as e:
         LOG.warning("guessop_catalog add_opening: %s", e)
-        return None
+        return None, False
 
 
 def pick_random() -> Optional[Tuple[int, str, str, str]]:

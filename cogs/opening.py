@@ -283,23 +283,42 @@ class Openings(commands.Cog):
 
     @tasks.loop(hours=8)
     async def guessop_catalog_harvest(self) -> None:
-        """Enrichit lentement le catalogue via l’API AnimeThemes (global, même base pour tous les serveurs)."""
+        """Enrichit le catalogue : une page listée + tirages aléatoires (URLs souvent déjà vues si base énorme)."""
         if not USE_ANIMETHEMES:
             return
         before = gopc.count()
-        for _ in range(35):
+        new_inserts = 0
+        try:
+            page = random.randint(1, 1500)
+            items = await animethemes.harvest_openings_from_page(page, 40)
+            for t, th, url in items:
+                if url.startswith(("http://", "https://")):
+                    _, ins = gopc.add_opening(t, th, url, "harvest_auto_page")
+                    if ins:
+                        new_inserts += 1
+        except Exception as e:
+            LOG.debug("guessop page harvest: %s", e)
+        await asyncio.sleep(1.0)
+        for _ in range(24):
             try:
                 got = await animethemes.random_opening()
                 if got:
                     t, th, url = got
                     if url.startswith(("http://", "https://")):
-                        gopc.add_opening(t, th, url, "harvest_auto")
+                        _, ins = gopc.add_opening(t, th, url, "harvest_auto_random")
+                        if ins:
+                            new_inserts += 1
             except Exception:
                 pass
             await asyncio.sleep(2.0)
         after = gopc.count()
-        if after > before:
-            LOG.info("Guess OP harvest : catalogue %d → %d (+%d)", before, after, after - before)
+        if new_inserts:
+            LOG.info(
+                "Guess OP harvest auto : %d → %d entrées, +%d nouvelles URLs",
+                before,
+                after,
+                new_inserts,
+            )
 
     @guessop_catalog_harvest.before_loop
     async def _before_guessop_harvest(self) -> None:
@@ -362,7 +381,9 @@ class Openings(commands.Cog):
                         media_source = video_url
                         source_footer = "Source : AnimeThemes.moe → ajout catalogue"
                         if video_url.startswith(("http://", "https://")):
-                            gopc.add_opening(correct_anime, theme_label or "OP", video_url, "animethemes_live")
+                            _, _ = gopc.add_opening(
+                                correct_anime, theme_label or "OP", video_url, "animethemes_live"
+                            )
 
             # --------- 3) Fallback local ---------
             if not media_source:
@@ -375,6 +396,17 @@ class Openings(commands.Cog):
                 media_source = os.path.join(LOCAL_AUDIO_FOLDER, pick)
                 correct_anime = _clean_title_from_filename(pick)
                 source_footer = "Source : fichiers locaux"
+
+            async def _prepare_local_file():
+                local_path = media_source
+                cleanup = False
+                if isinstance(media_source, str) and media_source.startswith(("http://", "https://")):
+                    local_path = await _fetch_to_temp(media_source)
+                    cleanup = True
+                return local_path, cleanup
+
+            # Téléchargement HTTP en parallèle (réduit le silence après connexion vocale)
+            prepare_task = asyncio.create_task(_prepare_local_file())
 
             # --------- 4) Génération des choix (leurres via AniList) ---------
             cache_key = "popular_romaji_60"
@@ -429,18 +461,9 @@ class Openings(commands.Cog):
             except Exception as e:
                 return await send(f"❌ Impossible de rejoindre le vocal : {e}")
 
-            async def _prepare_local_file():
-                local_path = media_source
-                cleanup = False
-                if isinstance(media_source, str) and media_source.startswith(("http://", "https://")):
-                    local_path = await _fetch_to_temp(media_source)
-                    cleanup = True
-                return local_path, cleanup
-
-            prepare_task = asyncio.create_task(_prepare_local_file())
-
             # --------- 7) Compte à rebours visuel (edit toutes les 5s) ---------
             async def _tick_embed():
+                await asyncio.sleep(1.5)
                 remaining = ANSWER_TIMEOUT
                 while remaining > 0 and not view.is_finished() and view.message:
                     await asyncio.sleep(COUNTDOWN_STEP)
@@ -659,25 +682,44 @@ class Openings(commands.Cog):
 
     @commands.hybrid_command(
         name="guessopharvest",
-        description="(Owner) Enrichit vite le catalogue via AnimeThemes (~1–2 min)",
+        description="(Owner) Enrichit le catalogue (pages AnimeThemes + aléatoire) — compte les vraies nouvelles URLs",
     )
     @commands.is_owner()
     async def guessop_harvest_manual(self, ctx: commands.Context) -> None:
         if getattr(ctx, "interaction", None) and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(ephemeral=True)
         before = gopc.count()
-        for _ in range(45):
+        new_inserts = 0
+        # Pages : beaucoup d’URLs que `?random` ne renvoie presque jamais une fois la base énorme
+        for _ in range(15):
+            page = random.randint(1, 1500)
+            try:
+                items = await animethemes.harvest_openings_from_page(page, 35)
+                for t, th, url in items:
+                    if url.startswith(("http://", "https://")):
+                        _, ins = gopc.add_opening(t, th, url, "manual_page")
+                        if ins:
+                            new_inserts += 1
+            except Exception:
+                pass
+            await asyncio.sleep(0.45)
+        for _ in range(35):
             try:
                 got = await animethemes.random_opening()
                 if got:
                     t, th, url = got
                     if url.startswith(("http://", "https://")):
-                        gopc.add_opening(t, th, url, "manual_harvest")
+                        _, ins = gopc.add_opening(t, th, url, "manual_random")
+                        if ins:
+                            new_inserts += 1
             except Exception:
                 pass
-            await asyncio.sleep(1.2)
+            await asyncio.sleep(1.0)
         after = gopc.count()
-        await ctx.send(f"✅ Catalogue : **{before}** → **{after}** openings (URLs uniques).")
+        await ctx.send(
+            f"✅ Catalogue : **{before}** → **{after}** openings.\n"
+            f"**+{new_inserts}** nouvelles URLs (le reste était déjà en base — normal avec ~2000+ entrées)."
+        )
 
     # --- DIAG AUDIO intégré au même Cog ---
     @commands.hybrid_command(name="voicediag", description="Diagnostic audio (ffmpeg/ffprobe/opus)")

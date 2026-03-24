@@ -90,6 +90,43 @@ def _random_from_cache() -> Optional[Tuple[str, str, str]]:
     except Exception:
         return None
 
+# ---------- Pagination : plusieurs animes / page (nouvelles URLs vs ?random seul) ----------
+async def harvest_openings_from_page(
+    page: int = 1,
+    page_size: int = 25,
+) -> List[Tuple[str, str, str]]:
+    """
+    Liste d’openings (titre, thème, URL) pour une page du catalogue AnimeThemes.
+    À combiner avec le catalogue SQLite : beaucoup d’URLs ne sont pas dans `?random`.
+    """
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+    url = (
+        f"{BASE}/anime"
+        f"?include=animethemes.animethemeentries.videos"
+        f"&fields[anime]=name,slug"
+        f"&page[number]={page}&page[size]={page_size}"
+    )
+    data = await _fetch_json(url)
+    if not data:
+        return []
+    animes: List[Dict[str, Any]] = data.get("anime") or []
+    out: List[Tuple[str, str, str]] = []
+    for anime in animes:
+        title = anime.get("name") or anime.get("slug") or "?"
+        themes = [
+            t
+            for t in (anime.get("animethemes") or [])
+            if (t.get("type") or "").upper() == THEME_KIND
+        ]
+        for theme in themes:
+            for entry in theme.get("animethemeentries") or []:
+                link = _pick_video(entry)
+                if link:
+                    out.append((title, theme.get("slug") or THEME_KIND, link))
+    return out
+
+
 # ---------- API publique ----------
 async def random_opening() -> Optional[Tuple[str, str, str]]:
     got = await _random_opening_via_anime_random()
