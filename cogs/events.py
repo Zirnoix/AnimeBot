@@ -15,7 +15,7 @@ INTRO_DESC = (
     "→ `/setchannel` dans le salon voulu\n\n"
     "2) **Liste du serveur** (ce que suivent `/next` et `/planning` en mode serveur)\n"
     "→ `/airings all` — ajoute les titres à suivre\n\n"
-    "Les **alertes image** (−30 min / à l’heure) utilisent le compte du bot + comptes liés, pas cette liste."
+    "Les **alertes image** (à la sortie de l’épisode) utilisent le compte du bot + comptes liés, pas cette liste."
 )
 
 INTRO_MINIGAMES = (
@@ -23,8 +23,8 @@ INTRO_MINIGAMES = (
     "• **/animequiz** — Quiz solo rapide (images/indices)\n"
     "• **/duel** — Affronte un ami en 1v1\n"
     "• **/guessop** — Devine l’**opening** à l’oreille (vocal)\n"
-    "• **/minijeux** — Menu : choisis un jeu, la partie se lance\n"
-    "• Autres: `/guess year`, `/guess episodes`, `/higherlower`"
+    "• **/minijeux** — Deux menus (**Devinettes** / **Autres**) : un clic = une partie\n"
+    "• **`/higherlower`** — Plus ou moins populaire (hors menu)"
 )
 
 EXTRA_TIPS = (
@@ -104,7 +104,7 @@ class Onboarding(commands.Cog):
                     "→ `/setchannel` dans ce salon\n\n"
                     "**2) Liste du serveur** (`/next` / `/planning` mode serveur)\n"
                     "→ `/airings all` pour choisir les titres.\n\n"
-                    "_Les alertes image automatiques (−30 min) viennent du compte du bot + comptes liés, pas de cette liste._"
+                    "_Les alertes image (sortie d’épisode) viennent du compte du bot + comptes liés, pas de cette liste._"
                 ),
             )
 
@@ -116,7 +116,7 @@ class Onboarding(commands.Cog):
                     "• **/duel** — 1v1 quiz entre amis\n"
                     "• **/guessop** — Devine l’**opening** 🎧 (vocal)\n"
                     "• **/minijeux** — Menu : un clic = une partie\n"
-                    "• Plus: `/guess year`, `/guess episodes`, `/guess character`, `/higherlower`\n\n"
+                    "• Plus: **`/minijeux`** (Guess + autres), **`/higherlower`**\n\n"
                     "Astuce: lancez ces jeux dans un salon dédié pour éviter de flood."
                 ),
             )

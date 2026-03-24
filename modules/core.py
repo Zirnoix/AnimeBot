@@ -950,18 +950,22 @@ def query_anilist(query: str, variables: dict = None) -> dict:
                 LOG.warning("[AniList] Non-JSON response (HTTP %s): %s", resp.status_code, resp.text[:300])
                 j = {}
 
-            # 429: respecte Retry-After si présent, puis retry
+            # 429: respecte Retry-After si présent, puis retry (DEBUG tant qu’on retente ; WARNING si échec final)
             if resp.status_code == 429:
-                LOG.warning("[AniList] HTTP 429 – %s", str(j)[:300])
                 retry_after = 0.0
                 try:
                     retry_after = float(resp.headers.get("Retry-After", "0"))
                 except Exception:
                     retry_after = 0.0
                 if attempt < max_tries:
+                    LOG.debug(
+                        "[AniList] HTTP 429 (tentative %s/%s), attente %.1fs — %s",
+                        attempt, max_tries, retry_after if retry_after > 0 else backoff, str(j)[:200],
+                    )
                     time.sleep(retry_after if retry_after > 0 else backoff)
                     backoff *= 1.8
                     continue
+                LOG.warning("[AniList] HTTP 429 après %s tentatives — %s", max_tries, str(j)[:300])
                 return j or {}
 
             # autres codes ≠ 200

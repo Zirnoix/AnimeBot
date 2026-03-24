@@ -203,11 +203,16 @@ class AnimeBot(commands.Bot):
             except Exception:
                 pass
 
+    @check_anilist_status.before_loop
+    async def _check_anilist_status_before(self) -> None:
+        # Décalle le 1er ping par rapport au ping boot (on_ready) pour limiter les 429 AniList
+        await asyncio.sleep(45)
+
     @tasks.loop(minutes=5)
     async def check_anilist_status(self) -> None:
         try:
             test_query = "query { Media(id: 1, type: ANIME) { id } }"
-            ok = bool(core.query_anilist(test_query))
+            ok = bool(await asyncio.to_thread(core.query_anilist, test_query))
             chan = self._get_notification_channel_sync()
             if ok:
                 self._anilist_fail_streak = 0
@@ -239,7 +244,7 @@ class AnimeBot(commands.Bot):
     async def _check_anilist_status_once(self) -> None:
         try:
             test_query = "query { Media(id: 1, type: ANIME) { id } }"
-            self.anilist_online = bool(core.query_anilist(test_query))
+            self.anilist_online = bool(await asyncio.to_thread(core.query_anilist, test_query))
             LOG.info("AniList status au boot: %s", "OK" if self.anilist_online else "DOWN")
         except Exception as e:
             LOG.warning("_check_anilist_status_once: %s", e)

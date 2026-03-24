@@ -1,5 +1,6 @@
 # cogs/openings.py
 from __future__ import annotations
+import logging
 import os
 import random
 import asyncio
@@ -12,11 +13,14 @@ import time
 
 import aiohttp
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from modules import core
 from modules import voice              # ensure_connected + make_source précis/robuste
 from modules import animethemes        # provider AnimeThemes + filtres AniList
+from modules import guessop_catalog as gopc
+
+LOG = logging.getLogger(__name__)
 
 # ==== Configuration ====
 USE_ANIMETHEMES = True          # Active l’utilisation d’AnimeThemes.moe
@@ -47,6 +51,10 @@ BANNED_FORMATS = {"MUSIC"}
 # Fichiers locaux de secours
 LOCAL_AUDIO_FOLDER = "assets/audio/openings"
 FFPROBE_BIN = os.getenv("FFPROBE_BIN", "ffprobe")
+
+# Catalogue SQLite : priorité quand assez d’entrées (0–1, plus = plus de catalogue)
+CATALOG_PICK_BIAS = float(os.getenv("GUESSOP_CATALOG_BIAS", "0.88"))
+CATALOG_MIN_FOR_BIAS = int(os.getenv("GUESSOP_CATALOG_MIN", "5"))
 
 # ================== UTILS ==================
 def _get_cached_titles(key: str) -> list[str] | None:
@@ -128,7 +136,12 @@ def _bar(remaining: int, total: int, width: int = 10) -> str:
     filled = int(width * (total - remaining) / max(1, total))
     return "█" * filled + "░" * (width - filled)
 
-def _build_question_embed(choices: List[str], remaining_sec: int, footer: str | None = None) -> discord.Embed:
+def _build_question_embed(
+    choices: List[str],
+    remaining_sec: int,
+    footer: str | None = None,
+    responders: List[str] | None = None,
+) -> discord.Embed:
     em = discord.Embed(
         title="🎵 Devine l’opening !",
         description=f"{_bar(remaining_sec, ANSWER_TIMEOUT)}  **{remaining_sec}s** restantes.\nClique sur **1–4** pour répondre.",
@@ -136,20 +149,38 @@ def _build_question_embed(choices: List[str], remaining_sec: int, footer: str | 
     )
     for i, title in enumerate(choices, 1):
         em.add_field(name=f"{i}️⃣", value=title, inline=False)
+    if responders:
+        names = ", ".join(responders[:30])
+        if len(responders) > 30:
+            names += f" … (+{len(responders) - 30})"
+        em.add_field(name="Déjà répondu", value=names, inline=False)
     if footer:
         em.set_footer(text=footer)
     return em
 
 # ================== UI (BOUTONS) ==================
 class GuessOPView(discord.ui.View):
-    def __init__(self, bot, ctx, voice_channel, choices, correct_index, timeout_sec=ANSWER_TIMEOUT):
+    def __init__(
+        self,
+        bot,
+        ctx,
+        voice_channel,
+        choices,
+        correct_index,
+        timeout_sec=ANSWER_TIMEOUT,
+        source_footer: str = "",
+    ):
         super().__init__(timeout=timeout_sec)
         self.bot = bot
         self.ctx = ctx
         self.voice_channel = voice_channel
         self.choices = choices
         self.correct_index = correct_index
+        self.source_footer = source_footer
         self.already_answered: set[int] = set()
+        self.responders: list[str] = []
+        self._remaining = timeout_sec
+        self._embed_lock = asyncio.Lock()
         self.winners_order: list[discord.Member] = []
         self.others_correct: list[discord.Member] = []
         self._lock = asyncio.Lock()
@@ -157,6 +188,21 @@ class GuessOPView(discord.ui.View):
 
         for i in range(4):
             self.add_item(GuessOPButton(i))
+
+    async def _update_responders_embed(self) -> None:
+        async with self._embed_lock:
+            if not self.message:
+                return
+            try:
+                em = _build_question_embed(
+                    self.choices,
+                    self._remaining,
+                    self.source_footer,
+                    self.responders,
+                )
+                await self.message.edit(embed=em, view=self)
+            except Exception:
+                pass
 
     async def on_timeout(self):
         for item in self.children:
@@ -189,6 +235,7 @@ class GuessOPButton(discord.ui.Button):
             if interaction.user.id in view.already_answered:
                 return await interaction.response.send_message("✋ Une seule réponse par joueur.", ephemeral=True)
             view.already_answered.add(interaction.user.id)
+            view.responders.append(interaction.user.display_name)
 
             if self.index == view.correct_index:
                 if len(view.winners_order) < 3:
@@ -204,6 +251,8 @@ class GuessOPButton(discord.ui.Button):
             else:
                 await interaction.response.send_message("❌ Mauvaise réponse.", ephemeral=True)
 
+        asyncio.create_task(view._update_responders_embed())
+
 # ================== COG ==================
 class Openings(commands.Cog):
     """Mini-jeu GuessOP (openings d’anime, boutons, multi-joueurs, audio)."""
@@ -211,11 +260,56 @@ class Openings(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._locks: dict[int, asyncio.Lock] = {}  # anti-double partie par serveur
+        try:
+            gopc.init_db()
+            imported = gopc.import_legacy_json()
+            if imported:
+                LOG.info("Guess OP catalogue : +%d entrées (import legacy JSON)", imported)
+        except Exception as e:
+            LOG.warning("guessop_catalog init: %s", e)
+        try:
+            self.guessop_catalog_harvest.start()
+        except Exception:
+            pass
+
+    def cog_unload(self) -> None:
+        try:
+            self.guessop_catalog_harvest.cancel()
+        except Exception:
+            pass
 
     def _guild_lock(self, guild_id: int) -> asyncio.Lock:
         return self._locks.setdefault(guild_id, asyncio.Lock())
 
-    @commands.hybrid_command(name="guessop", description="Devine l'opening (20s audio + 4 choix)")
+    @tasks.loop(hours=8)
+    async def guessop_catalog_harvest(self) -> None:
+        """Enrichit lentement le catalogue via l’API AnimeThemes (global, même base pour tous les serveurs)."""
+        if not USE_ANIMETHEMES:
+            return
+        before = gopc.count()
+        for _ in range(35):
+            try:
+                got = await animethemes.random_opening()
+                if got:
+                    t, th, url = got
+                    if url.startswith(("http://", "https://")):
+                        gopc.add_opening(t, th, url, "harvest_auto")
+            except Exception:
+                pass
+            await asyncio.sleep(2.0)
+        after = gopc.count()
+        if after > before:
+            LOG.info("Guess OP harvest : catalogue %d → %d (+%d)", before, after, after - before)
+
+    @guessop_catalog_harvest.before_loop
+    async def _before_guessop_harvest(self) -> None:
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(180)
+
+    @commands.hybrid_command(
+        name="guessop",
+        description="Devine l'opening (20s audio + 4 choix, catalogue global enrichi automatiquement)",
+    )
     @commands.cooldown(1, 15, commands.BucketType.user)  # anti-spam: 1 commande / 15s par user
     async def guess_op(self, ctx: commands.Context) -> None:
         # Anti-timeout pour slash
@@ -238,27 +332,39 @@ class Openings(commands.Cog):
             media_source = None
             source_footer = ""
 
-            # --------- 1) Essai AnimeThemes ---------
-            got = None
-            if USE_ANIMETHEMES:
-                try:
-                    got = await animethemes.random_opening_filtered(
-                        min_year=MIN_YEAR,
-                        min_score_10=MIN_SCORE_10,
-                        banned_genres=BANNED_GENRES,
-                        banned_formats=BANNED_FORMATS,
-                        max_attempts=12,
-                    )
-                except Exception:
-                    got = None
+            # --------- 1) Catalogue persistant (prioritaire quand assez riche) ---------
+            n_cat = gopc.count()
+            if n_cat >= CATALOG_MIN_FOR_BIAS and random.random() < CATALOG_PICK_BIAS:
+                picked = gopc.pick_random()
+                if picked:
+                    oid, correct_anime, theme_label, media_source = picked
+                    source_footer = f"Catalogue Guess OP · {n_cat} openings"
+                    gopc.record_used(oid)
 
-                if got:
-                    title, theme_label, video_url = got
-                    correct_anime = title
-                    media_source = video_url
-                    source_footer = "Source : AnimeThemes.moe"
+            # --------- 2) Sinon AnimeThemes (+ ajout au catalogue) ---------
+            if not media_source:
+                got = None
+                if USE_ANIMETHEMES:
+                    try:
+                        got = await animethemes.random_opening_filtered(
+                            min_year=MIN_YEAR,
+                            min_score_10=MIN_SCORE_10,
+                            banned_genres=BANNED_GENRES,
+                            banned_formats=BANNED_FORMATS,
+                            max_attempts=12,
+                        )
+                    except Exception:
+                        got = None
 
-            # --------- 2) Fallback local ---------
+                    if got:
+                        title, theme_label, video_url = got
+                        correct_anime = title
+                        media_source = video_url
+                        source_footer = "Source : AnimeThemes.moe → ajout catalogue"
+                        if video_url.startswith(("http://", "https://")):
+                            gopc.add_opening(correct_anime, theme_label or "OP", video_url, "animethemes_live")
+
+            # --------- 3) Fallback local ---------
             if not media_source:
                 if not os.path.exists(LOCAL_AUDIO_FOLDER):
                     return await send("❌ Aucun opening trouvé (AnimeThemes vide + pas de dossier local).")
@@ -270,7 +376,7 @@ class Openings(commands.Cog):
                 correct_anime = _clean_title_from_filename(pick)
                 source_footer = "Source : fichiers locaux"
 
-            # --------- 3) Génération des choix (leurres via AniList) ---------
+            # --------- 4) Génération des choix (leurres via AniList) ---------
             cache_key = "popular_romaji_60"
             pool = _get_cached_titles(cache_key)
             if pool is None:
@@ -302,14 +408,22 @@ class Openings(commands.Cog):
             random.shuffle(choices)
             correct_index = choices.index(correct_anime)
 
-            # --------- 4) Envoi question + boutons ---------
-            em = _build_question_embed(choices, ANSWER_TIMEOUT, source_footer)
-            view = GuessOPView(self.bot, ctx, voice_channel, choices, correct_index, timeout_sec=ANSWER_TIMEOUT)
+            # --------- 5) Envoi question + boutons ---------
+            em = _build_question_embed(choices, ANSWER_TIMEOUT, source_footer, [])
+            view = GuessOPView(
+                self.bot,
+                ctx,
+                voice_channel,
+                choices,
+                correct_index,
+                timeout_sec=ANSWER_TIMEOUT,
+                source_footer=source_footer,
+            )
             sent = await send(embed=em, view=view)
             if isinstance(sent, discord.Message):
                 view.message = sent
 
-            # --------- 5) Connexion immédiate + Préparation audio en parallèle ---------
+            # --------- 6) Connexion immédiate + Préparation audio en parallèle ---------
             try:
                 vc = await voice.ensure_connected(voice_channel)
             except Exception as e:
@@ -325,23 +439,27 @@ class Openings(commands.Cog):
 
             prepare_task = asyncio.create_task(_prepare_local_file())
 
-            # --------- 6) Compte à rebours visuel (edit toutes les 5s) ---------
-            countdown_lock = asyncio.Lock()
-
+            # --------- 7) Compte à rebours visuel (edit toutes les 5s) ---------
             async def _tick_embed():
                 remaining = ANSWER_TIMEOUT
                 while remaining > 0 and not view.is_finished() and view.message:
                     await asyncio.sleep(COUNTDOWN_STEP)
                     remaining = max(0, remaining - COUNTDOWN_STEP)
+                    view._remaining = remaining
                     try:
-                        async with countdown_lock:
-                            await view.message.edit(embed=_build_question_embed(choices, remaining, source_footer), view=view)
+                        async with view._embed_lock:
+                            await view.message.edit(
+                                embed=_build_question_embed(
+                                    choices, remaining, source_footer, view.responders
+                                ),
+                                view=view,
+                            )
                     except Exception:
                         break
 
             countdown_task = asyncio.create_task(_tick_embed())
 
-            # --------- 7) Timer de fin de manche (borne dure UI) ---------
+            # --------- 8) Timer de fin de manche (borne dure UI) ---------
             async def _end_round_after_timeout():
                 await asyncio.sleep(ANSWER_TIMEOUT)
                 try:
@@ -356,7 +474,7 @@ class Openings(commands.Cog):
 
             end_timer_task = asyncio.create_task(_end_round_after_timeout())
 
-            # --------- 8) Lecture AUDIO pile DURATION_SEC (seek sécurisé + guard démarrage) ---------
+            # --------- 9) Lecture AUDIO pile DURATION_SEC (seek sécurisé + guard démarrage) ---------
             local_path = None
             cleanup = False
 
@@ -445,7 +563,7 @@ class Openings(commands.Cog):
                     except Exception:
                         pass
 
-            # --------- 9) Fin de manche (= dès que la View se termine) ---------
+            # --------- 10) Fin de manche (= dès que la View se termine) ---------
             try:
                 await view.wait()
             except Exception:
@@ -464,7 +582,7 @@ class Openings(commands.Cog):
             except Exception:
                 pass
 
-            # --------- 10) Résultat ---------
+            # --------- 11) Résultat ---------
             if not view.winners_order and not view.others_correct:
                 return await send(f"⏰ Temps écoulé ! La bonne réponse était : **{correct_anime}**")
 
@@ -520,6 +638,46 @@ class Openings(commands.Cog):
                     await view.message.delete()
             except Exception:
                 pass
+
+    @commands.hybrid_command(name="guessopdb", description="(Owner) Statistiques du catalogue Guess OP")
+    @commands.is_owner()
+    async def guessop_db(self, ctx: commands.Context) -> None:
+        if getattr(ctx, "interaction", None) and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(ephemeral=True)
+        st = gopc.stats()
+        lines = "\n".join(f"• **{s}** : {c}" for s, c in st.get("by_source", [])) or "—"
+        top = gopc.top_used(5)
+        top_txt = "\n".join(f"• {t} — {u}×" for t, u in top) if top else "—"
+        em = discord.Embed(
+            title="📚 Catalogue Guess OP",
+            description=f"**{st['total']}** openings uniques (URL) — même base sur **tous** les serveurs.",
+            color=discord.Color.blue(),
+        )
+        em.add_field(name="Par source", value=lines[:1024], inline=False)
+        em.add_field(name="Plus tirés", value=top_txt[:1024], inline=False)
+        await ctx.send(embed=em)
+
+    @commands.hybrid_command(
+        name="guessopharvest",
+        description="(Owner) Enrichit vite le catalogue via AnimeThemes (~1–2 min)",
+    )
+    @commands.is_owner()
+    async def guessop_harvest_manual(self, ctx: commands.Context) -> None:
+        if getattr(ctx, "interaction", None) and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(ephemeral=True)
+        before = gopc.count()
+        for _ in range(45):
+            try:
+                got = await animethemes.random_opening()
+                if got:
+                    t, th, url = got
+                    if url.startswith(("http://", "https://")):
+                        gopc.add_opening(t, th, url, "manual_harvest")
+            except Exception:
+                pass
+            await asyncio.sleep(1.2)
+        after = gopc.count()
+        await ctx.send(f"✅ Catalogue : **{before}** → **{after}** openings (URLs uniques).")
 
     # --- DIAG AUDIO intégré au même Cog ---
     @commands.hybrid_command(name="voicediag", description="Diagnostic audio (ffmpeg/ffprobe/opus)")

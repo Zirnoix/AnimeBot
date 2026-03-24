@@ -1,5 +1,5 @@
 """
-Anime tracker (HYBRID) avec alertes MP.
+Anime tracker (HYBRID) avec notification MP à la **sortie** de l’épisode (pas d’alerte « X min avant »).
 
 - Groupe hybrid /track (et !track)
 - Sous-commandes hybrid: list, add, remove, clear
@@ -31,14 +31,21 @@ _sent_alerts: Dict[str, int] = {}  # key: user_id|title|episode|min, value: ts
 def _now_ts() -> int:
     return int(datetime.now(timezone.utc).timestamp())
 
-def _should_alert(anime: Dict[str, Any], minutes_before: int) -> bool:
+# Une seule notif par épisode : après l’heure de diffusion (pas d’alerte « X min avant »)
+_RELEASE_GRACE_SEC = 18 * 3600  # fenêtre max après l’airing pour envoyer (ratrages / bot offline)
+
+
+def _should_notify_episode_release(anime: Dict[str, Any]) -> bool:
+    """True si l’épisode est sorti (ou vient de sortir) et qu’on est encore dans la fenêtre de rattrapage."""
     airing = anime.get("airingAt")
     if not airing:
         return False
-    diff = airing - _now_ts()
-    target = minutes_before * 60
-    # Fenêtre ±60s autour du point "minutes_before"
-    return 0 <= (target - diff) <= 60
+    now = _now_ts()
+    if now < airing:
+        return False
+    if now > airing + _RELEASE_GRACE_SEC:
+        return False
+    return True
 
 
 class Tracker(commands.Cog):
@@ -363,43 +370,41 @@ class Tracker(commands.Cog):
                 if not anime:
                     continue
 
-                for m in (30, 15):
-                    if not _should_alert(anime, m):
-                        continue
+                if not _should_notify_episode_release(anime):
+                    continue
 
-                    key = f"{uid}|{title}|{anime.get('episode')}|{m}"
-                    if _sent_alerts.get(key):
-                        continue
+                key = f"{uid}|{title}|{anime.get('episode')}|release"
+                if _sent_alerts.get(key):
+                    continue
 
-                    # Génération de la carte (même style que !next)
-                    img_path = None
-                    try:
-                        img_path = generate_next_card(
-                            anime,
-                            out_path=os.path.join(tempfile.gettempdir(), f"track_alert_{uid}.png"),
-                            scale=1.2,
-                            padding=40,
+                # Génération de la carte (même style que !next)
+                img_path = None
+                try:
+                    img_path = generate_next_card(
+                        anime,
+                        out_path=os.path.join(tempfile.gettempdir(), f"track_alert_{uid}.png"),
+                        scale=1.2,
+                        padding=40,
+                    )
+                except Exception as e:
+                    LOG.warning("generate_next_card failed: %s", e)
+
+                try:
+                    tname = anime.get("title_romaji") or anime.get("title_english") or "Anime"
+                    line = f"📺 **Sortie** — **{tname}** · Épisode **{anime.get('episode')}**"
+                    if img_path:
+                        await user.send(
+                            line,
+                            file=discord.File(img_path, filename=f"alert_{int(_now_ts())}.png")
                         )
-                    except Exception as e:
-                        LOG.warning("generate_next_card failed: %s", e)
-
-                    try:
-                        if img_path:
-                            await user.send(
-                                f"⏰ **Alerte {m} min** pour **{anime.get('title_romaji') or anime.get('title_english') or 'Anime'}** — Épisode {anime.get('episode')}",
-                                file=discord.File(img_path, filename=f"alert_{int(_now_ts())}.png")
-                            )
-                        else:
-                            when = core.format_airing_datetime_fr(anime.get("airingAt"), "Europe/Paris")
-                            await user.send(
-                                f"⏰ **Alerte {m} min** — **{anime.get('title_romaji') or anime.get('title_english') or 'Anime'}** "
-                                f"(Épisode {anime.get('episode')}) • {when}"
-                            )
-                        _sent_alerts[key] = _now_ts()
-                    except discord.Forbidden:
-                        LOG.warning("MP refusés par l'utilisateur %s", uid)
-                    except Exception as e:
-                        LOG.warning("Envoi MP échoué (%s): %s", uid, e)
+                    else:
+                        when = core.format_airing_datetime_fr(anime.get("airingAt"), "Europe/Paris")
+                        await user.send(f"{line}\n🕐 {when}")
+                    _sent_alerts[key] = _now_ts()
+                except discord.Forbidden:
+                    LOG.warning("MP refusés par l'utilisateur %s", uid)
+                except Exception as e:
+                    LOG.warning("Envoi MP échoué (%s): %s", uid, e)
 
     @alert_loop.before_loop
     async def before_alert_loop(self):

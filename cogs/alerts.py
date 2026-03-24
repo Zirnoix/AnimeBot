@@ -39,32 +39,22 @@ def _key(anime: Dict[str, Any], tag: str) -> str:
     e = str(anime.get("episode") or "?")
     return f"{t}|{e}|{tag}"
 
-def _should_alert(anime: Dict[str, Any], minutes_before: int, slack: int = 120) -> bool:
-    """
-    Déclenche si on est dans [target - slack, target + slack] autour de l’instant visé.
-    slack par défaut = 120s pour tolérer la loop 60s + jitter.
-    """
-    airing = anime.get("airingAt")
-    if not airing:
-        return False
-    diff = airing - _now_ts()          # secondes avant l’airing
-    target = minutes_before * 60       # 0 pour “à l’heure”, 1800 pour -30 min
-    return abs(diff - target) <= slack
-
 def _fmt_when(anime: Dict[str, Any]) -> str:
     return core.format_airing_datetime_fr(anime.get("airingAt"), "Europe/Paris")
 
-# si on n’a pas envoyé à l’heure, mais qu’on est encore dans les 10 minutes après
-def _late_airing_should_fire(anime: Dict[str, Any], grace: int = 600) -> bool:
+def _episode_released_catchup(anime: Dict[str, Any], grace_after: int = 18 * 3600) -> bool:
+    """True si la diffusion a commencé et qu’on est encore dans la fenêtre de notification (une seule fois grâce à sent)."""
     airing = anime.get("airingAt")
     if not airing:
         return False
-    diff = _now_ts() - airing  # depuis combien de secondes ça a commencé
-    return 0 <= diff <= grace
+    now = _now_ts()
+    if now < airing:
+        return False
+    return now <= airing + grace_after
 
 
 class Alerts(commands.Cog):
-    """Alertes image (−30 min / à l’heure) dans le salon `/setchannel`. Basées sur le compte bot + comptes liés — pas sur la liste /airings."""
+    """Alertes image à la **sortie** de l’épisode dans le salon `/setchannel` (pas d’alerte « 30 min avant »). Compte bot + comptes liés — pas /airings."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -119,8 +109,8 @@ class Alerts(commands.Cog):
     # ----------- envoi image -----------
     async def _send_card_alert(self, ch: discord.TextChannel, anime: Dict[str, Any], label: str, header: str) -> None:
         """
-        label = identifiant anti-doublon ("30img" ou "0img")
-        header = texte au-dessus de l’image ("⏰ Alerte 30 min" / "✅ C’est l’heure !")
+        label = identifiant anti-doublon ("0img" = sortie)
+        header = texte au-dessus de l’image (ex. sortie épisode)
         """
         k = _key(anime, label)
         if self.sent.get(k):
@@ -160,7 +150,7 @@ class Alerts(commands.Cog):
             self.sent[k] = {"at": _now_ts()}
             _save_sent(self.sent)
 
-    # ----------- boucle: -30 min + live (0 min), tous en image -----------
+    # ----------- boucle: sortie uniquement (à l’heure + léger retard) -----------
     @tasks.loop(seconds=60)
     async def check_airing(self):
         ch = await self._get_alert_channel()
@@ -174,31 +164,24 @@ class Alerts(commands.Cog):
             if now - ts > 14 * 24 * 3600:
                 self.sent.pop(k, None)
 
+        header = "📺 **Sortie** — l’épisode est disponible !"
+
         # 1) Planning du bot (global)
         mine = await self._my_next()
-        if mine:
-            if _should_alert(mine, 30, slack=120):
-                await self._send_card_alert(ch, mine, "30img", "⏰ **Alerte 30 min**")
-            if _should_alert(mine, 0, slack=120):
-                await self._send_card_alert(ch, mine, "0img", "✅ **C’est l’heure !**")
-            elif _late_airing_should_fire(mine, grace=600):
-                await self._send_card_alert(ch, mine, "0img", "✅ **C’est l’heure !** (retard)")
+        if mine and _episode_released_catchup(mine):
+            await self._send_card_alert(ch, mine, "0img", header)
 
         # 2) (Optionnel) Utilisateurs liés
         users = await self._users_next()
         for item in users:
-            if _should_alert(item, 30, slack=120):
-                await self._send_card_alert(ch, item, "30img", "⏰ **Alerte 30 min**")
-            if _should_alert(item, 0, slack=120):
-                await self._send_card_alert(ch, item, "0img", "✅ **C’est l’heure !**")
-            elif _late_airing_should_fire(item, grace=600):
-                await self._send_card_alert(ch, item, "0img", "✅ **C’est l’heure !** (retard)")
+            if _episode_released_catchup(item):
+                await self._send_card_alert(ch, item, "0img", header)
 
 
     @check_airing.before_loop
     async def before(self):
         await self.bot.wait_until_ready()
-        LOG.info("Alerte épisodes: boucle démarrée (30 min + live).")
+        LOG.info("Alerte épisodes: boucle démarrée (sortie uniquement).")
 
 
 async def setup(bot: commands.Bot):

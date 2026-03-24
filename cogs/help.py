@@ -26,9 +26,9 @@ DESC_OVERRIDE: Dict[str, str] = {
     "animequiz": "Quiz anime (solo).",
     "animequizmulti": "Quiz anime multi-joueurs.",
     "duel": "Duel de quiz entre 2 joueurs.",
-    "guess": "Mini-jeux « devine » : année, épisodes, genre, personnage.",
-    "guessop": "Devine l’opening à l’oreille (salon vocal requis).",
-    "minijeux": "Menu des mini-jeux : choix = lance la partie (sauf duel → /duel @membre).",
+    "guess": "(Retiré) Utilise **`/minijeux`** → menu **Devinettes**.",
+    "guessop": "Devine l’opening (vocal) — catalogue global SQLite + récolte auto AnimeThemes.",
+    "minijeux": "Deux menus : **Devinettes (Guess)** et **Autres** — choix = lance la partie (duel → /duel @membre).",
     "higherlower": "Jeu Higher/Lower version anime.",
     "year": "Guess : deviner l’année.",
     "character": "Guess : deviner le personnage.",
@@ -100,7 +100,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
     ]),
     ("🎯 Pages MiniGames", [
         "animequiz", "animequizmulti", "duel",
-        "guess", "guess year", "guess character", "guess episodes", "guess genre", "guessop",
+        "guessop",
         "higherlower", "minijeux",
     ]),
     ("🔗 Pages Link", [
@@ -497,7 +497,7 @@ class Help(commands.Cog):
             color=discord.Color.blurple()
         )
         picks = [
-            ("/guess", DESC_OVERRIDE["guess"]),
+            ("/minijeux", DESC_OVERRIDE["minijeux"]),
             ("/next", DESC_OVERRIDE["next"]),
             ("/planning", DESC_OVERRIDE["planning"]),
             ("/mystats", DESC_OVERRIDE["mystats"]),

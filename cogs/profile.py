@@ -318,7 +318,7 @@ def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days):
     e.add_field(name="🔥 Streak", value=streak_line, inline=False)
     gg_pen = core.get_guess_genre_penalty_count(ctx.author.id)
     e.add_field(
-        name="⚠️ Sanctions /guess genre",
+        name="⚠️ Sanctions Guess genre",
         value=str(gg_pen) if gg_pen else "0",
         inline=True,
     )
