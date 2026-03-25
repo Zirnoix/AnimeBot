@@ -1,6 +1,6 @@
 """
 Mini-jeux communautaires : raid boss (planning hebdo + alerte admin), chain quiz,
-« qui est-ce » (image floutée), bingo multijoueur.
+« qui est-ce » (image floutée).
 
 Commandes en slash (hybrid désactivé pour le préfixe sur les groupes admin — utiliser /).
 """
@@ -14,7 +14,7 @@ import logging
 import os
 import random
 from datetime import datetime, time, timedelta
-from typing import Any, Optional, Set, Tuple
+from typing import Any, Optional
 
 import aiohttp
 import discord
@@ -47,20 +47,14 @@ SORT_TO_ANILIST = {
     "hard": "TRENDING_DESC",
 }
 
-# Lignes bingo 3×3 (indices 0–8)
-_BINGO_LINES: Tuple[Tuple[int, ...], ...] = (
-    (0, 1, 2),
-    (3, 4, 5),
-    (6, 7, 8),
-    (0, 3, 6),
-    (1, 4, 7),
-    (2, 5, 8),
-    (0, 4, 8),
-    (2, 4, 6),
-)
+# guesswho : division taille, flou gaussien, timeout (s), XP si victoire
+GUESSWHO_MODES: dict[str, tuple[int, float, float, int]] = {
+    "easy": (5, 4.0, 55.0, 18),
+    "medium": (8, 6.0, 45.0, 28),
+    "hard": (12, 9.0, 38.0, 42),
+}
 
 _active_raids: dict[int, bool] = {}  # guild_id -> running
-_bingo_lock: dict[int, bool] = {}  # channel_id -> running
 
 
 def _load_raid_cfg() -> dict[str, Any]:
@@ -80,6 +74,18 @@ def _save_raid_cfg(data: dict[str, Any]) -> None:
 def _week_key(dt: datetime) -> str:
     y, w, _ = dt.isocalendar()
     return f"{y}-W{w:02d}"
+
+
+def _raid_target_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
+    """Salon configuré pour le raid (`/raidconfig canal`), sinon None."""
+    cfg = _load_raid_cfg().get(str(guild.id), {})
+    cid = cfg.get("channel_id")
+    if not cid:
+        return None
+    ch = guild.get_channel(int(cid))
+    if isinstance(ch, discord.TextChannel):
+        return ch
+    return None
 
 
 def _next_raid_moment(now: datetime, weekday: int, hour: int, minute: int) -> datetime:
@@ -218,112 +224,8 @@ class BossRaidRoundView(View):
             _active_raids.pop(self.guild_id, None)
 
 
-class BingoView(View):
-    """Bouton Bingo — vérifie qu’une ligne complète est tirée."""
-
-    def __init__(self, session: BingoSession):
-        super().__init__(timeout=300.0)
-        self.session = session
-        btn = Button(label="Bingo !", style=discord.ButtonStyle.success, emoji="🎉")
-        btn.callback = self._on_bingo
-        self.add_item(btn)
-
-    async def _on_bingo(self, interaction: discord.Interaction) -> None:
-        await self.session.try_claim(interaction)
-
-
-class BingoSession:
-    def __init__(self, cog: CommunityGames, channel: discord.TextChannel, titles: list[str], order: list[int]):
-        self.cog = cog
-        self.channel = channel
-        self.titles = titles
-        self.order = order
-        self.revealed: Set[int] = set()
-        self.message: discord.Message | None = None
-        self.view: BingoView | None = None
-        self.winner_id: int | None = None
-        self._task: asyncio.Task | None = None
-
-    def grid_text(self) -> str:
-        lines = []
-        for r in range(3):
-            row = []
-            for c in range(3):
-                i = r * 3 + c
-                mark = "✅" if i in self.revealed else "⬜"
-                t = self.titles[i][:22] + ("…" if len(self.titles[i]) > 22 else "")
-                row.append(f"{mark} `{i+1}` {t}")
-            lines.append(" · ".join(row))
-        return "\n".join(lines)
-
-    async def try_claim(self, interaction: discord.Interaction) -> None:
-        if self.winner_id is not None:
-            await interaction.response.send_message("La partie est déjà terminée.", ephemeral=True)
-            return
-        if len(self.revealed) < 3:
-            await interaction.response.send_message("Il faut au moins **3** titres tirés pour un bingo.", ephemeral=True)
-            return
-        for line in _BINGO_LINES:
-            if all(i in self.revealed for i in line):
-                self.winner_id = interaction.user.id
-                core.add_mini_score(interaction.user.id, "bingo", 1)
-                try:
-                    await core.add_xp(self.cog.bot, self.channel, interaction.user.id, 15, announce=False)
-                except Exception:
-                    pass
-                cells = " · ".join(str(i + 1) for i in line)
-                await interaction.response.send_message(
-                    f"🎉 **{interaction.user.display_name}** crie **Bingo !** — cases **{cells}** complètes ! GG !",
-                    ephemeral=False,
-                )
-                if self._task and not self._task.done():
-                    self._task.cancel()
-                _bingo_lock.pop(self.channel.id, None)
-                if self.message:
-                    try:
-                        await self.message.edit(view=None)
-                    except Exception:
-                        pass
-                return
-        await interaction.response.send_message(
-            "❌ Aucune ligne / colonne / diagonale complète avec les titres déjà tirés.", ephemeral=True
-        )
-
-    async def run_reveals(self) -> None:
-        try:
-            for step, idx in enumerate(self.order):
-                await asyncio.sleep(5.0 if step > 0 else 1.0)
-                self.revealed.add(idx)
-                if self.winner_id is not None:
-                    return
-                if not self.message:
-                    continue
-                emb = discord.Embed(
-                    title="🎱 Bingo anime",
-                    description=self.grid_text(),
-                    color=discord.Color.green(),
-                )
-                emb.add_field(
-                    name="Dernier tirage",
-                    value=f"**{self.titles[idx]}**",
-                    inline=False,
-                )
-                emb.set_footer(text="Quand une ligne est entièrement verte dans ta tête, clique Bingo ! (réel : ✅ sur les cases).")
-                try:
-                    await self.message.edit(embed=emb, view=self.view)
-                except Exception:
-                    break
-            await asyncio.sleep(2.0)
-            if self.winner_id is None and self.message:
-                await self.channel.send("⏱️ Fin des tirages — personne n’a validé à temps.")
-        except asyncio.CancelledError:
-            pass
-        finally:
-            _bingo_lock.pop(self.channel.id, None)
-
-
 class CommunityGames(commands.Cog):
-    """Raid boss, chain quiz, guesswho, bingo."""
+    """Raid boss, chain quiz, guesswho."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -566,27 +468,53 @@ class CommunityGames(commands.Cog):
     @app_commands.command(name="raidstart", description="Lancer un raid boss maintenant (admin).")
     @app_commands.default_permissions(administrator=True)
     async def raid_start(self, interaction: discord.Interaction) -> None:
-        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message("❌ Salon texte serveur requis.", ephemeral=True)
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         if _active_raids.get(interaction.guild.id):
             await interaction.followup.send("Un raid est déjà en cours sur ce serveur.", ephemeral=True)
             return
+        target = _raid_target_channel(interaction.guild)
+        if target is None:
+            await interaction.followup.send(
+                "❌ Aucun salon de raid configuré. Utilise d’abord **`/raidconfig canal`** (choisis le salon du raid).",
+                ephemeral=True,
+            )
+            return
         wk = _week_key(datetime.now(core.TIMEZONE))
-        await self._start_boss_raid(interaction.guild, interaction.channel, wk)
-        await interaction.followup.send("✅ Raid lancé dans ce salon.", ephemeral=True)
+        await self._start_boss_raid(interaction.guild, target, wk)
+        await interaction.followup.send(f"✅ Raid lancé dans {target.mention}.", ephemeral=True)
 
     @app_commands.command(name="raidalerttest", description="Envoie un message type « raid dans 1 h » (test admin).")
     @app_commands.default_permissions(administrator=True)
     async def raid_alert_test(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message("❌ Salon texte requis.", ephemeral=True)
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
             return
-        await interaction.response.send_message(
-            "@here 🧪 **TEST** — dans 1 h ce serait l’alerte avant le **Boss Raid**.",
-            allowed_mentions=discord.AllowedMentions.all(),
-        )
+        target = _raid_target_channel(interaction.guild)
+        if target is None:
+            await interaction.response.send_message(
+                "❌ Aucun salon de raid configuré. Utilise d’abord **`/raidconfig canal`**.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await target.send(
+                "@here 🧪 **TEST** — dans 1 h ce serait l’alerte avant le **Boss Raid**.",
+                allowed_mentions=discord.AllowedMentions(everyone=True),
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                f"❌ Je ne peux pas envoyer de message dans {target.mention}. Vérifie les permissions du bot.",
+                ephemeral=True,
+            )
+            return
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erreur : `{e}`", ephemeral=True)
+            return
+        await interaction.followup.send(f"✅ Message de test envoyé dans {target.mention}.", ephemeral=True)
 
     # ---------- Chain quiz ----------
 
@@ -656,13 +584,26 @@ class CommunityGames(commands.Cog):
 
     @commands.hybrid_command(
         name="guesswho",
-        description="Devine le personnage à partir d’une image très floutée (réponse dans le salon).",
+        description="Devine le personnage sur une image floutée — difficulté = flou + récompense XP.",
     )
-    async def guesswho(self, ctx: commands.Context) -> None:
+    @app_commands.describe(
+        difficulte="Facile = un peu plus net (+18 XP). Normal (+28). Difficile = très flou (+42).",
+    )
+    @app_commands.choices(
+        difficulte=[
+            app_commands.Choice(name="Facile (+18 XP)", value="easy"),
+            app_commands.Choice(name="Normal (+28 XP)", value="medium"),
+            app_commands.Choice(name="Difficile (+42 XP)", value="hard"),
+        ]
+    )
+    async def guesswho(self, ctx: commands.Context, difficulte: str = "medium") -> None:
         if not await _require_slash(ctx, "guesswho"):
             return
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
+
+        div, blur_r, timeout_sec, xp_win = GUESSWHO_MODES.get(difficulte, GUESSWHO_MODES["medium"])
+        diff_label = {"easy": "Facile", "medium": "Normal", "hard": "Difficile"}.get(difficulte, "Normal")
 
         page = random.randint(1, 100)
         query = """
@@ -697,9 +638,10 @@ class CommunityGames(commands.Cog):
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                         raw = await resp.read()
                 im = Image.open(io.BytesIO(raw)).convert("RGB")
-                im = im.resize((max(32, im.width // 8), max(32, im.height // 8)), Image.Resampling.LANCZOS)
-                im = im.resize((im.width * 8, im.height * 8), Image.Resampling.NEAREST)
-                im = im.filter(ImageFilter.GaussianBlur(radius=6))
+                d = max(3, int(div))
+                im = im.resize((max(32, im.width // d), max(32, im.height // d)), Image.Resampling.LANCZOS)
+                im = im.resize((im.width * d, im.height * d), Image.Resampling.NEAREST)
+                im = im.filter(ImageFilter.GaussianBlur(radius=float(blur_r)))
                 im.save(buf, format="PNG")
                 buf.seek(0)
             except Exception as e:
@@ -710,7 +652,10 @@ class CommunityGames(commands.Cog):
 
         embed = discord.Embed(
             title="🕵️ Qui est-ce ?",
-            description=f"Image **très** dégradée — devine le **personnage** ({45}s). Indice anime : _{hint}_",
+            description=(
+                f"**{diff_label}** — en cas de victoire : **+{xp_win} XP**.\n"
+                f"Tape le **nom du personnage** ({int(timeout_sec)} s). Indice anime : _{hint}_"
+            ),
             color=discord.Color.purple(),
         )
         if buf:
@@ -723,11 +668,14 @@ class CommunityGames(commands.Cog):
         try:
             msg = await self.bot.wait_for(
                 "message",
-                timeout=45.0,
+                timeout=timeout_sec,
                 check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
             )
         except asyncio.TimeoutError:
-            await ctx.send(f"⏰ Temps écoulé — c’était **{name}**.")
+            await ctx.send(
+                f"⏰ Temps écoulé — c’était **{name}** "
+                f"_(difficulté **{diff_label}**, récompense prévue **+{xp_win} XP**)_."
+            )
             return
 
         g = (msg.content or "").strip()
@@ -738,73 +686,17 @@ class CommunityGames(commands.Cog):
         if not ok:
             ok = normalize(g) == normalize(name)
         if ok:
-            await core.add_xp(self.bot, ctx.channel, ctx.author.id, 12, announce=False)
+            await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_win, announce=False)
             core.add_mini_score(ctx.author.id, "guesswho", 1)
-            await ctx.send(f"✅ Bravo ! C’était **{name}**.")
+            await ctx.send(
+                f"✅ Bravo ! C’était **{name}** — tu gagnes **+{xp_win} XP** "
+                f"_(**{diff_label}**)_."
+            )
         else:
-            await ctx.send(f"❌ Non — la réponse était **{name}**.")
-
-    # ---------- Bingo ----------
-
-    @commands.hybrid_command(
-        name="bingo",
-        description="Bingo 3×3 : des titres d’anime sont tirés — sois le premier à valider une ligne complète.",
-    )
-    async def bingo(self, ctx: commands.Context) -> None:
-        if not isinstance(ctx.channel, discord.TextChannel):
-            return
-        if not await _require_slash(ctx, "bingo"):
-            return
-        if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(thinking=True)
-        if _bingo_lock.get(ctx.channel.id):
-            await ctx.send("❌ Une partie de bingo est déjà en cours dans ce salon.")
-            return
-
-        qz = self.bot.get_cog("Quiz")
-        if not qz:
-            await ctx.send("❌ Indisponible.")
-            return
-
-        titles: list[str] = []
-        seen: set[str] = set()
-        for _ in range(24):
-            anime = await qz._fetch_random_anilist_media("POPULARITY_DESC")  # type: ignore[attr-defined]
-            if not anime:
-                continue
-            t = (anime.get("title") or {}).get("romaji") or (anime.get("title") or {}).get("english") or "?"
-            if t in seen:
-                continue
-            seen.add(t)
-            titles.append(t)
-            if len(titles) >= 9:
-                break
-        if len(titles) < 9:
-            await ctx.send("❌ Pas assez de titres AniList.")
-            return
-
-        random.shuffle(titles)
-        order = list(range(9))
-        random.shuffle(order)
-
-        session = BingoSession(self, ctx.channel, titles, order)
-        emb = discord.Embed(
-            title="🎱 Bingo anime",
-            description=session.grid_text(),
-            color=discord.Color.green(),
-        )
-        emb.add_field(
-            name="Règles",
-            value="Les **9** titres vont être tirés un par un (~5 s). Quand **3 cases** de ta ligne/colonne/diagonale sont sorties, clique **Bingo !**",
-            inline=False,
-        )
-        view = BingoView(session)
-        session.view = view
-        msg = await ctx.send(embed=emb, view=view)
-        session.message = msg
-        _bingo_lock[ctx.channel.id] = True
-        session._task = asyncio.create_task(session.run_reveals())
-
+            await ctx.send(
+                f"❌ Ce n’était pas ça — la réponse était **{name}** "
+                f"_(**{diff_label}** aurait rapporté **+{xp_win} XP**)_."
+            )
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(CommunityGames(bot))

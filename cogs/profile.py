@@ -131,7 +131,6 @@ _MINI_LABELS: Dict[str, str] = {
     "guesscharacter": "Guess — perso",
     "guesswho": "Qui est-ce ?",
     "chainquiz": "Chain quiz",
-    "bingo": "Bingo anime",
     "bossraid": "Raid boss",
     "guessop": "Guess OP",
     "duel": "Duel lancés",
@@ -171,7 +170,7 @@ def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str
             "guessop",
             "guesspop", "guesspo", "guessspo", "guessopener",
         })),
-        ("🐉", "Communauté", frozenset({"chainquiz", "bingo", "bossraid"})),
+        ("🐉", "Communauté", frozenset({"chainquiz", "bossraid"})),
         ("⚔️", "Duels", frozenset({"duel", "duel_victory"})),
     ]
     used: set[str] = set()

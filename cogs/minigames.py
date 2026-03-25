@@ -33,15 +33,18 @@ _SPAM_GENRE_NAMES = frozenset({
 _GUESS_GENRE_SPAM_STREAK: dict[int, int] = {}
 _GUESS_GENRE_SPAM_TIMES: dict[int, deque[float]] = {}
 _GUESS_GENRE_COOLDOWN_UNTIL: dict[int, float] = {}
-_GUESS_GENRE_COOLDOWN_SEC = 120.0
+_GUESS_GENRE_COOLDOWN_SEC = 120.0  # base (si pas de strikes)
 _SPAM_WINDOW_SEC = 300.0
 _SPAM_MAX_STREAK = 3  # au-delà : 4e victoire « facile » d’affilée → pénalité
 _SPAM_MAX_IN_WINDOW = 3  # au-delà : 4e en 5 min → pénalité
-_SPAM_ATTEMPT_WARN = 4  # 4e fois le même genre « facile » en fenêtre → avertissement MP
-_SPAM_ATTEMPT_MAX = 5  # 5e fois → pénalité (même sans victoire)
+# Même genre « facile » répété dans la fenêtre (compteur par mot normalisé)
+_ATTEMPT_SOFT_WARN = 2  # 1er avertissement salon (avant sanction)
+_ATTEMPT_HARD_WARN = 3  # dernier avertissement explicite
+_ATTEMPT_PENALTY = 4  # sanction (−XP + cooldown progressif)
 
 _GUESS_GENRE_SPAM_ATTEMPTS: dict[int, deque[tuple[float, str]]] = {}
-_SPAM_ATTEMPT_WARN_LAST: dict[int, float] = {}
+# Sanctions progressives : ne se remet pas à zéro juste après un cooldown
+_GUESS_GENRE_STRIKES: dict[int, int] = {}
 
 
 def _guess_genre_is_spam_candidate(guess: str) -> bool:
@@ -74,17 +77,35 @@ def _guess_genre_prune_attempt_dq(uid: int, now: float) -> deque[tuple[float, st
 
 
 def _clear_guess_genre_spam(uid: int) -> None:
+    """Reset complet (timeout, mauvaise réponse qui casse la série)."""
     _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
     _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
     _GUESS_GENRE_SPAM_ATTEMPTS.pop(uid, None)
 
 
-async def _dm_guess_genre_warn(bot: commands.Bot, user_id: int, text: str) -> None:
-    try:
-        u = await bot.fetch_user(user_id)
-        await u.send(text)
-    except Exception:
-        pass
+def _clear_guess_genre_streak_only(uid: int) -> None:
+    """Garde l’historique des tentatives « même genre » (anti re-spam après sanction)."""
+    _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
+    _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
+
+
+def _remove_attempt_key(uid: int, key: str) -> None:
+    """Retire une clé du deque après sanction pour ce mot (évite double sanction instantanée)."""
+    dq = _GUESS_GENRE_SPAM_ATTEMPTS.get(uid)
+    if not dq:
+        return
+    _GUESS_GENRE_SPAM_ATTEMPTS[uid] = deque([(t, k) for t, k in dq if k != key], maxlen=32)
+
+
+def _genre_strike_cooldown_sec(uid: int) -> float:
+    s = _GUESS_GENRE_STRIKES.get(uid, 0)
+    return min(900.0, 90.0 + s * 75.0)
+
+
+def _genre_strike_xp(uid: int) -> int:
+    """1re sanction : −5 XP, puis −8, −11… (progressif)."""
+    s = _GUESS_GENRE_STRIKES.get(uid, 0)
+    return -(5 + min(max(s - 1, 0), 5) * 3)
 
 
 class MiniGamesInteractionContext:
@@ -238,12 +259,7 @@ class MinijeuxAutresSelect(Select):
                 discord.SelectOption(
                     label="🕵️ Qui est-ce ?",
                     value="guesswho",
-                    description="Image très floutée — devine le personnage",
-                ),
-                discord.SelectOption(
-                    label="🎱 Bingo anime",
-                    value="bingo",
-                    description="Grille 3×3, tirages au sort — premier bingo gagne",
+                    description="Flou + difficulté (jusqu’à +42 XP)",
                 ),
             ],
         )
@@ -315,15 +331,13 @@ class MiniGames(commands.Cog):
                     await qz.animequizmulti(ctx, 5)  # type: ignore[attr-defined]
                 else:
                     await interaction.followup.send("❌ Quiz indisponible.", ephemeral=True)
-            elif key in {"chainquiz", "guesswho", "bingo"}:
+            elif key in {"chainquiz", "guesswho"}:
                 cg = self.bot.get_cog("CommunityGames")
                 if cg:
                     if key == "chainquiz":
                         await cg.chainquiz(ctx)  # type: ignore[attr-defined]
-                    elif key == "guesswho":
-                        await cg.guesswho(ctx)  # type: ignore[attr-defined]
                     else:
-                        await cg.bingo(ctx)  # type: ignore[attr-defined]
+                        await cg.guesswho(ctx)  # type: ignore[attr-defined]
                 else:
                     await interaction.followup.send("❌ Mini-jeu indisponible.", ephemeral=True)
             else:
@@ -598,10 +612,14 @@ class MiniGames(commands.Cog):
             title="🎭 Mini-jeu : Devine le genre !",
             description=(
                 f"Quel est un des genres de **{title}** ?\n"
-                "Réponds par un genre (ex : `Action`, `Romance`).\n"
-                "_Ne spamme pas uniquement les genres ultra courants : voir **anti-spam**._"
+                "Réponds par un genre AniList (ex. `Psychological`, `Slice of Life`).\n"
+                "Les genres **très courants** (Action, Comedy, Romance, Fantasy…) sont valides, "
+                "mais **répéter le même mot** en boucle déclenche des **avertissements puis des sanctions**."
             ),
             color=discord.Color.magenta(),
+        )
+        embed.set_footer(
+            text="Astuce : si tu hésites, choisis un genre plus rare ou précis plutôt que toujours le même « facile »."
         )
         img_url = anime.get("coverImage", {}).get("extraLarge")
         if img_url:
@@ -617,46 +635,50 @@ class MiniGames(commands.Cog):
             guess = guess_raw.lower()
             now2 = time.monotonic()
 
-            # Même genre « facile » répété (bonne ou mauvaise réponse) : avertissement puis pénalité
+            # Même genre « facile » répété (bonne ou mauvaise réponse) : alertes salon puis sanction progressive
             if _guess_genre_is_spam_candidate(guess_raw):
                 key = _guess_genre_norm_key(guess_raw)
                 adq = _guess_genre_prune_attempt_dq(uid, now2)
                 adq.append((now2, key))
                 same_attempts = sum(1 for ts, k in adq if k == key)
-                if same_attempts == _SPAM_ATTEMPT_WARN:
-                    lastw = _SPAM_ATTEMPT_WARN_LAST.get(uid, 0.0)
-                    if now2 - lastw > 180.0:
-                        _SPAM_ATTEMPT_WARN_LAST[uid] = now2
-                        await _dm_guess_genre_warn(
-                            self.bot,
-                            uid,
-                            (
-                                f"⚠️ **Genre anti-spam** : tu as utilisé **{guess_raw}** plusieurs fois en peu de temps.\n"
-                                f"À la **{_SPAM_ATTEMPT_MAX}e** fois (même genre) dans la fenêtre de 5 min, ce sera "
-                                f"**−5 XP**, un cooldown de **{int(_GUESS_GENRE_COOLDOWN_SEC)}s** sur le **Guess genre**, "
-                                f"et une entrée sur ta **/mycard** (sanctions enregistrées)."
-                            ),
-                        )
-                if same_attempts >= _SPAM_ATTEMPT_MAX:
-                    _clear_guess_genre_spam(uid)
-                    _GUESS_GENRE_COOLDOWN_UNTIL[uid] = now2 + _GUESS_GENRE_COOLDOWN_SEC
-                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, -5, announce=False)
+
+                if same_attempts == _ATTEMPT_SOFT_WARN:
+                    await ctx.send(
+                        f"⚠️ {ctx.author.mention} — tu as déjà utilisé **{guess_raw}** plusieurs fois en ~5 min.\n"
+                        f"Évite de **répéter ce mot** ; choisis un **autre** genre (ou un plus précis). "
+                        f"Les genres très courants sont autorisés, mais pas en boucle."
+                    )
+                elif same_attempts == _ATTEMPT_HARD_WARN:
+                    await ctx.send(
+                        f"🚨 **Dernier avertissement** pour **{guess_raw}** : une répétition de plus = "
+                        f"**sanction** (−XP, cooldown long, entrée `/mycard`). Varie vraiment."
+                    )
+
+                if same_attempts >= _ATTEMPT_PENALTY:
+                    _GUESS_GENRE_STRIKES[uid] = _GUESS_GENRE_STRIKES.get(uid, 0) + 1
+                    strike = _GUESS_GENRE_STRIKES[uid]
+                    cd_sec = _genre_strike_cooldown_sec(uid)
+                    xp_hit = _genre_strike_xp(uid)
+                    _remove_attempt_key(uid, key)
+                    _clear_guess_genre_streak_only(uid)
+                    _GUESS_GENRE_COOLDOWN_UNTIL[uid] = now2 + cd_sec
+                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_hit, announce=False)
                     total_pen = core.inc_guess_genre_penalty_count(uid)
                     correct = guess in genres
                     if correct:
                         await ctx.send(
                             f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de répétitions du même "
-                            f"genre « facile » en 5 min.\n"
-                            f"**−5 XP** · cooldown **{int(_GUESS_GENRE_COOLDOWN_SEC)}s** · sanctions enregistrées : "
+                            f"genre « facile » en ~5 min.\n"
+                            f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
                             f"**{total_pen}** (voir `/mycard`).\n"
                             f"Genres de **{title}** : {', '.join(anime['genres'])}."
                         )
                     else:
                         await ctx.send(
                             f"❌ **{guess_raw}** ne fait pas partie des genres de **{title}**.\n"
-                            f"**Anti-spam** : même genre « facile » répété **{same_attempts}×** en 5 min.\n"
-                            f"**−5 XP** · cooldown **{int(_GUESS_GENRE_COOLDOWN_SEC)}s** · sanctions : **{total_pen}** "
-                            f"(voir `/mycard`).\n"
+                            f"**Anti-spam** : même genre « facile » répété **{same_attempts}×** en ~5 min.\n"
+                            f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
+                            f"**{total_pen}** (voir `/mycard`).\n"
                             f"Les genres étaient : {', '.join(anime['genres'])}."
                         )
                     return
@@ -668,18 +690,31 @@ class MiniGames(commands.Cog):
                     dq.append(now2)
                     streak = _GUESS_GENRE_SPAM_STREAK.get(uid, 0) + 1
                     _GUESS_GENRE_SPAM_STREAK[uid] = streak
+                    if streak == 2:
+                        await ctx.send(
+                            f"⚠️ {ctx.author.mention} — **2** bonnes réponses d’affilée avec un genre « facile ». "
+                            f"Enchaîne encore comme ça et tu risques une **sanction** ; varie les genres."
+                        )
+                    elif streak == 3:
+                        await ctx.send(
+                            f"🚨 **Dernier avertissement** (série de genres courants) : au prochain dépassement, "
+                            f"**sanction** (−XP + cooldown)."
+                        )
                     penalize = streak > _SPAM_MAX_STREAK or len(dq) > _SPAM_MAX_IN_WINDOW
                     if penalize:
-                        _clear_guess_genre_spam(uid)
-                        _GUESS_GENRE_COOLDOWN_UNTIL[uid] = now2 + _GUESS_GENRE_COOLDOWN_SEC
-                        await core.add_xp(self.bot, ctx.channel, ctx.author.id, -5, announce=False)
+                        _GUESS_GENRE_STRIKES[uid] = _GUESS_GENRE_STRIKES.get(uid, 0) + 1
+                        strike = _GUESS_GENRE_STRIKES[uid]
+                        cd_sec = _genre_strike_cooldown_sec(uid)
+                        xp_hit = _genre_strike_xp(uid)
+                        _clear_guess_genre_streak_only(uid)
+                        _GUESS_GENRE_COOLDOWN_UNTIL[uid] = now2 + cd_sec
+                        await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_hit, announce=False)
                         total_pen = core.inc_guess_genre_penalty_count(uid)
                         await ctx.send(
                             f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de réponses « faciles » "
-                            f"(Action, Adventure, Comedy…) **plus de {_SPAM_MAX_STREAK} fois d’affilée** ou "
-                            f"**plus de {_SPAM_MAX_IN_WINDOW} en 5 min**.\n"
-                            f"**−5 XP** · cooldown **{int(_GUESS_GENRE_COOLDOWN_SEC)}s** · sanctions : **{total_pen}** "
-                            f"(voir `/mycard`).\n"
+                            f"d’affilée ou en 5 min.\n"
+                            f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
+                            f"**{total_pen}** (voir `/mycard`).\n"
                             f"Genres de **{title}** : {', '.join(anime['genres'])}."
                         )
                     else:
@@ -860,7 +895,7 @@ class MiniGames(commands.Cog):
                 "dès que tu choisis.\n"
                 "• **Duel** : rappel — lance **`/duel @membre`** (pas de partie auto depuis le menu).\n\n"
                 "Raccourcis : **`/guessyear`**, **`/guessepisodes`**, **`/guessgenre`**, **`/guesscharacter`**, "
-                "**`/guesswho`**, **`/chainquiz`**, **`/bingo`**, **`/higherlower`**, **`/guessop`**, "
+                "**`/guesswho`**, **`/chainquiz`**, **`/higherlower`**, **`/guessop`**, "
                 "**`/animequiz`**, **`/animequizmulti`**. Raid boss : **`/raidconfig`** (admin)."
             ),
             color=discord.Color.blurple(),
