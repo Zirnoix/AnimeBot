@@ -20,6 +20,7 @@ import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select
 from modules import core
+from modules import minigame_lock
 
 LOG = logging.getLogger(__name__)
 
@@ -60,6 +61,14 @@ def _guess_genre_prune_times(uid: int, now: float) -> deque[float]:
     while dq and now - dq[0] > _SPAM_WINDOW_SEC:
         dq.popleft()
     return dq
+
+
+def _easy_genre_hint_short() -> str:
+    names = sorted(_SPAM_GENRE_NAMES, key=lambda s: s.lower())
+    sample = ", ".join(n.replace("-", " ").title() for n in names[:14])
+    return (
+        f"_Genres souvent considérés comme « faciles » (spam si répétés) : **{sample}**, …_"
+    )
 
 
 def _guess_genre_norm_key(guess: str) -> str:
@@ -357,118 +366,204 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     @commands.hybrid_command(name="higherlower", description="Quel anime est le plus populaire ?")
     async def higher_lower(self, ctx: commands.Context):
-        # Appelée en slash ? On évite le timeout 3s
-        if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(thinking=True)
-
-        await ctx.send("🎲 Préparation du mini-jeu…")
-
-        page = random.randint(1, 10)
-        query = '''
-        query ($page: Int) {
-          Page(page: $page, perPage: 50) {
-            media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
-              title { romaji }
-              popularity
-              coverImage { extraLarge }
-            }
-          }
-        }
-        '''
-        data = core.query_anilist(query, {"page": page})
-        if not data or not data.get("data"):
-            await ctx.send(core.anilist_error_user_message())
+        uid = ctx.author.id
+        if not minigame_lock.try_begin(uid, "higherlower"):
+            await minigame_lock.reply_busy(ctx)
             return
-
-        media_list = data["data"]["Page"]["media"]
-        if len(media_list) < 2:
-            await ctx.send("❌ Pas assez de données pour jouer.")
-            return
-
-        choice1, choice2 = random.sample(media_list, 2)
-
-        embed = discord.Embed(
-            title="⬆️⬇️ Quel anime est le plus populaire ?",
-            description=(
-                "Clique sur **1️⃣** ou **2️⃣** pour choisir :\n\n"
-                f"**1️⃣** {choice1['title']['romaji']}\n"
-                f"**2️⃣** {choice2['title']['romaji']}"
-            ),
-            color=discord.Color.orange(),
-        )
-
-        url1 = choice1["coverImage"]["extraLarge"]
-        url2 = choice2["coverImage"]["extraLarge"]
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url1) as resp1:
-                img1_bytes = await resp1.read()
-            async with session.get(url2) as resp2:
-                img2_bytes = await resp2.read()
-
-        img1 = Image.open(BytesIO(img1_bytes)).convert("RGBA")
-        img2 = Image.open(BytesIO(img2_bytes)).convert("RGBA")
-
-        max_height = max(img1.height, img2.height)
-        img1 = img1.resize((int(img1.width * max_height / img1.height), max_height))
-        img2 = img2.resize((int(img2.width * max_height / img2.height), max_height))
-
-        separator_width = 10
-        total_width = img1.width + img2.width + separator_width
-        combined = Image.new("RGBA", (total_width, max_height), (0, 0, 0, 255))
-        combined.paste(img1, (0, 0))
-        combined.paste(img2, (img1.width + separator_width, 0))
-
-        buffer = BytesIO()
-        combined.save(buffer, format="PNG")
-        buffer.seek(0)
-        file = discord.File(buffer, filename="duel.png")
-
-        embed.set_image(url="attachment://duel.png")
-        view = HigherLowerView(ctx, choice1, choice2)
-        await ctx.send(embed=embed, view=view, file=file)
-
         try:
-            await view.wait()
-        except asyncio.TimeoutError:
-            await ctx.send("⏰ Temps écoulé !")
+            # Appelée en slash ? On évite le timeout 3s
+            if ctx.interaction and not ctx.interaction.response.is_done():
+                await ctx.interaction.response.defer(thinking=True)
+
+            await ctx.send("🎲 Préparation du mini-jeu…")
+
+            page = random.randint(1, 10)
+            query = '''
+            query ($page: Int) {
+              Page(page: $page, perPage: 50) {
+                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                  title { romaji }
+                  popularity
+                  coverImage { extraLarge }
+                }
+              }
+            }
+            '''
+            data = core.query_anilist(query, {"page": page})
+            if not data or not data.get("data"):
+                await ctx.send(core.anilist_error_user_message())
+                return
+
+            media_list = data["data"]["Page"]["media"]
+            if len(media_list) < 2:
+                await ctx.send("❌ Pas assez de données pour jouer.")
+                return
+
+            choice1, choice2 = random.sample(media_list, 2)
+
+            embed = discord.Embed(
+                title="⬆️⬇️ Quel anime est le plus populaire ?",
+                description=(
+                    "Clique sur **1️⃣** ou **2️⃣** pour choisir :\n\n"
+                    f"**1️⃣** {choice1['title']['romaji']}\n"
+                    f"**2️⃣** {choice2['title']['romaji']}"
+                ),
+                color=discord.Color.orange(),
+            )
+
+            url1 = choice1["coverImage"]["extraLarge"]
+            url2 = choice2["coverImage"]["extraLarge"]
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url1) as resp1:
+                    img1_bytes = await resp1.read()
+                async with session.get(url2) as resp2:
+                    img2_bytes = await resp2.read()
+
+            img1 = Image.open(BytesIO(img1_bytes)).convert("RGBA")
+            img2 = Image.open(BytesIO(img2_bytes)).convert("RGBA")
+
+            max_height = max(img1.height, img2.height)
+            img1 = img1.resize((int(img1.width * max_height / img1.height), max_height))
+            img2 = img2.resize((int(img2.width * max_height / img2.height), max_height))
+
+            separator_width = 10
+            total_width = img1.width + img2.width + separator_width
+            combined = Image.new("RGBA", (total_width, max_height), (0, 0, 0, 255))
+            combined.paste(img1, (0, 0))
+            combined.paste(img2, (img1.width + separator_width, 0))
+
+            buffer = BytesIO()
+            combined.save(buffer, format="PNG")
+            buffer.seek(0)
+            file = discord.File(buffer, filename="duel.png")
+
+            embed.set_image(url="attachment://duel.png")
+            view = HigherLowerView(ctx, choice1, choice2)
+            await ctx.send(embed=embed, view=view, file=file)
+
+            try:
+                await view.wait()
+            except asyncio.TimeoutError:
+                await ctx.send("⏰ Temps écoulé !")
+        finally:
+            minigame_lock.end(uid)
 
     # --------------------------------------
     # Guess Year
     # --------------------------------------
     async def _guess_year(self, ctx: commands.Context) -> None:
-        if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(thinking=True)
-
-        await ctx.send("🗓️ Chargement d'un anime…")
-        page = random.randint(1, 500)
-        query = '''
-        query ($page: Int) {
-          Page(perPage: 1, page: $page) {
-            media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
-              title { romaji }
-              startDate { year }
-              coverImage { extraLarge }
-            }
-          }
-        }
-        '''
-        data = core.query_anilist(query, {"page": page})
+        uid = ctx.author.id
+        if not minigame_lock.try_begin(uid, "guessyear"):
+            await minigame_lock.reply_busy(ctx)
+            return
         try:
-            anime = data["data"]["Page"]["media"][0]
-            title = anime["title"]["romaji"]
-            year = anime.get("startDate", {}).get("year")
-            if not year:
-                await ctx.send("❌ L'année de cet anime est indisponible.")
+            if ctx.interaction and not ctx.interaction.response.is_done():
+                await ctx.interaction.response.defer(thinking=True)
+
+            await ctx.send("🗓️ Chargement d'un anime…")
+            page = random.randint(1, 500)
+            query = '''
+            query ($page: Int) {
+              Page(perPage: 1, page: $page) {
+                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                  title { romaji }
+                  startDate { year }
+                  coverImage { extraLarge }
+                }
+              }
+            }
+            '''
+            data = core.query_anilist(query, {"page": page})
+            try:
+                anime = data["data"]["Page"]["media"][0]
+                title = anime["title"]["romaji"]
+                year = anime.get("startDate", {}).get("year")
+                if not year:
+                    await ctx.send("❌ L'année de cet anime est indisponible.")
+                    return
+
+                embed = discord.Embed(
+                    title="📅 Mini-jeu : Devine l'année !",
+                    description=(
+                        f"En quelle année **{title}** a-t-il commencé à être diffusé ?\n"
+                        "Réponds par une année (ex : `2015`)."
+                    ),
+                    color=discord.Color.purple(),
+                )
+                img_url = anime.get("coverImage", {}).get("extraLarge")
+                if img_url:
+                    embed.set_image(url=img_url)
+                await ctx.send(embed=embed)
+
+                def check(m: discord.Message) -> bool:
+                    return m.author == ctx.author and m.channel == ctx.channel
+
+                msg = await self.bot.wait_for("message", timeout=15.0, check=check)
+                try:
+                    guessed_year = int(msg.content.strip())
+                    if abs(guessed_year - year) <= 1:
+                        await ctx.send(f"✅ Bravo ! L'année était bien **{year}** (tu as répondu {guessed_year}). Tu gagnes 8 XP !")
+                        await core.add_xp(self.bot, ctx.channel, ctx.author.id, 8)
+                        core.add_mini_score(ctx.author.id, "guessyear", 1)
+                    else:
+                        await ctx.send(f"❌ Raté. L'année était **{year}** (tu as répondu {guessed_year}).")
+                except ValueError:
+                    await ctx.send(f"❌ Format invalide. L'année était **{year}**.")
+            except (Exception, asyncio.TimeoutError):
+                await ctx.send("❌ Une erreur s'est produite ou temps écoulé.")
+        finally:
+            minigame_lock.end(uid)
+
+    # --------------------------------------
+    # Guess Episodes
+    # --------------------------------------
+    async def _guess_episodes(self, ctx: commands.Context) -> None:
+        uid = ctx.author.id
+        if not minigame_lock.try_begin(uid, "guessepisodes"):
+            await minigame_lock.reply_busy(ctx)
+            return
+        try:
+            if ctx.interaction and not ctx.interaction.response.is_done():
+                await ctx.interaction.response.defer(thinking=True)
+
+            await ctx.send("🎬 Sélection d'un anime…")
+            anime = None
+            for _ in range(5):
+                page = random.randint(1, 500)
+                query = '''
+                query ($page: Int) {
+                  Page(perPage: 1, page: $page) {
+                    media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                      title { romaji }
+                      episodes
+                      coverImage { extraLarge }
+                    }
+                  }
+                }
+                '''
+                data = core.query_anilist(query, {"page": page})
+                try:
+                    candidate = data["data"]["Page"]["media"][0]
+                    if candidate.get("episodes") and isinstance(candidate.get("episodes"), int):
+                        anime = candidate
+                        break
+                except Exception:
+                    continue
+
+            if not anime:
+                await ctx.send(core.anilist_error_user_message())
                 return
 
+            title = anime["title"]["romaji"]
+            episodes = anime["episodes"]
             embed = discord.Embed(
-                title="📅 Mini-jeu : Devine l'année !",
+                title="🎞️ Mini-jeu : Combien d'épisodes ?",
                 description=(
-                    f"En quelle année **{title}** a-t-il commencé à être diffusé ?\n"
-                    "Réponds par une année (ex : `2015`)."
+                    f"Combien d'épisodes compte **{title}** ?\n"
+                    "Réponds par un nombre (ex : `24`)."
                 ),
-                color=discord.Color.purple(),
+                color=discord.Color.blue(),
             )
             img_url = anime.get("coverImage", {}).get("extraLarge")
             if img_url:
@@ -478,246 +573,194 @@ class MiniGames(commands.Cog):
             def check(m: discord.Message) -> bool:
                 return m.author == ctx.author and m.channel == ctx.channel
 
-            msg = await self.bot.wait_for("message", timeout=15.0, check=check)
             try:
-                guessed_year = int(msg.content.strip())
-                if abs(guessed_year - year) <= 1:
-                    await ctx.send(f"✅ Bravo ! L'année était bien **{year}** (tu as répondu {guessed_year}). Tu gagnes 8 XP !")
-                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 8)
-                    core.add_mini_score(ctx.author.id, "guessyear", 1)
-                else:
-                    await ctx.send(f"❌ Raté. L'année était **{year}** (tu as répondu {guessed_year}).")
-            except ValueError:
-                await ctx.send(f"❌ Format invalide. L'année était **{year}**.")
-        except (Exception, asyncio.TimeoutError):
-            await ctx.send("❌ Une erreur s'est produite ou temps écoulé.")
-
-    # --------------------------------------
-    # Guess Episodes
-    # --------------------------------------
-    async def _guess_episodes(self, ctx: commands.Context) -> None:
-        if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(thinking=True)
-
-        await ctx.send("🎬 Sélection d'un anime…")
-        anime = None
-        for _ in range(5):
-            page = random.randint(1, 500)
-            query = '''
-            query ($page: Int) {
-              Page(perPage: 1, page: $page) {
-                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
-                  title { romaji }
-                  episodes
-                  coverImage { extraLarge }
-                }
-              }
-            }
-            '''
-            data = core.query_anilist(query, {"page": page})
-            try:
-                candidate = data["data"]["Page"]["media"][0]
-                if candidate.get("episodes") and isinstance(candidate.get("episodes"), int):
-                    anime = candidate
-                    break
-            except Exception:
-                continue
-
-        if not anime:
-            await ctx.send(core.anilist_error_user_message())
-            return
-
-        title = anime["title"]["romaji"]
-        episodes = anime["episodes"]
-        embed = discord.Embed(
-            title="🎞️ Mini-jeu : Combien d'épisodes ?",
-            description=(
-                f"Combien d'épisodes compte **{title}** ?\n"
-                "Réponds par un nombre (ex : `24`)."
-            ),
-            color=discord.Color.blue(),
-        )
-        img_url = anime.get("coverImage", {}).get("extraLarge")
-        if img_url:
-            embed.set_image(url=img_url)
-        await ctx.send(embed=embed)
-
-        def check(m: discord.Message) -> bool:
-            return m.author == ctx.author and m.channel == ctx.channel
-
-        try:
-            msg = await self.bot.wait_for("message", timeout=20.0, check=check)
-            try:
-                guessed = int(msg.content.strip())
-                tolerance = max(int(episodes * 0.1), 5)
-                if abs(guessed - episodes) <= tolerance:
-                    await ctx.send(f"✅ Bravo ! **{title}** compte {episodes} épisodes (tu as répondu {guessed}). Tu gagnes 8 XP !")
-                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 8)
-                    core.add_mini_score(ctx.author.id, "guessepisodes", 1)
-                else:
-                    await ctx.send(f"❌ Raté. **{title}** compte {episodes} épisodes (tu as répondu {guessed}).")
-            except ValueError:
-                await ctx.send(f"❌ Ce n'est pas un nombre valide. **{title}** a **{episodes}** épisodes.")
-        except asyncio.TimeoutError:
-            await ctx.send("⏰ Temps écoulé ! Le mini-jeu est annulé.")
+                msg = await self.bot.wait_for("message", timeout=20.0, check=check)
+                try:
+                    guessed = int(msg.content.strip())
+                    tolerance = max(int(episodes * 0.1), 5)
+                    if abs(guessed - episodes) <= tolerance:
+                        await ctx.send(f"✅ Bravo ! **{title}** compte {episodes} épisodes (tu as répondu {guessed}). Tu gagnes 8 XP !")
+                        await core.add_xp(self.bot, ctx.channel, ctx.author.id, 8)
+                        core.add_mini_score(ctx.author.id, "guessepisodes", 1)
+                    else:
+                        await ctx.send(f"❌ Raté. **{title}** compte {episodes} épisodes (tu as répondu {guessed}).")
+                except ValueError:
+                    await ctx.send(f"❌ Ce n'est pas un nombre valide. **{title}** a **{episodes}** épisodes.")
+            except asyncio.TimeoutError:
+                await ctx.send("⏰ Temps écoulé ! Le mini-jeu est annulé.")
+        finally:
+            minigame_lock.end(uid)
 
     # --------------------------------------
     # Guess Genre
     # --------------------------------------
     async def _guess_genre(self, ctx: commands.Context) -> None:
-        if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(thinking=True)
-
         uid = ctx.author.id
         now = time.monotonic()
         cd_until = _GUESS_GENRE_COOLDOWN_UNTIL.get(uid, 0.0)
         if now < cd_until:
             remaining = max(1, int(cd_until - now))
-            await ctx.send(
-                f"⏳ **Anti-spam genre** : attends encore **{remaining}s** avant de relancer le **Guess genre** (`/guessgenre` ou `/minijeux`)."
-            )
+            await minigame_lock.reply_guessgenre_cooldown(ctx, uid, remaining)
             return
 
-        await ctx.send("🎭 Sélection d'un anime…")
-        anime = None
-        for _ in range(5):
-            page = random.randint(1, 500)
-            query = '''
-            query ($page: Int) {
-              Page(perPage: 1, page: $page) {
-                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
-                  title { romaji }
-                  genres
-                  coverImage { extraLarge }
-                }
-              }
-            }
-            '''
-            data = core.query_anilist(query, {"page": page})
-            try:
-                candidate = data["data"]["Page"]["media"][0]
-                if candidate.get("genres"):
-                    anime = candidate
-                    break
-            except Exception:
-                continue
-
-        if not anime:
-            await ctx.send(core.anilist_error_user_message())
+        if not minigame_lock.try_begin(uid, "guessgenre"):
+            await minigame_lock.reply_busy(ctx)
             return
-
-        title = anime["title"]["romaji"]
-        genres = [g.lower() for g in anime.get("genres", [])]
-        embed = discord.Embed(
-            title="🎭 Mini-jeu : Devine le genre !",
-            description=(
-                f"Quel est un des genres de **{title}** ?\n"
-                "Réponds par un genre AniList (ex. `Psychological`, `Slice of Life`).\n"
-                "Les genres **très courants** (Action, Comedy, Romance, Fantasy…) sont valides, "
-                "mais **répéter le même mot** en boucle déclenche des **avertissements puis des sanctions**."
-            ),
-            color=discord.Color.magenta(),
-        )
-        embed.set_footer(
-            text="Astuce : si tu hésites, choisis un genre plus rare ou précis plutôt que toujours le même « facile »."
-        )
-        img_url = anime.get("coverImage", {}).get("extraLarge")
-        if img_url:
-            embed.set_image(url=img_url)
-        await ctx.send(embed=embed)
-
-        def check(m: discord.Message) -> bool:
-            return m.author == ctx.author and m.channel == ctx.channel
 
         try:
-            msg = await self.bot.wait_for("message", timeout=20.0, check=check)
-            guess_raw = msg.content.strip()
-            guess = guess_raw.lower()
-            now2 = time.monotonic()
+            if ctx.interaction and not ctx.interaction.response.is_done():
+                await ctx.interaction.response.defer(thinking=True)
 
-            # Même genre « facile » répété (bonne ou mauvaise réponse) : alertes salon puis sanction progressive
-            if _guess_genre_is_spam_candidate(guess_raw):
-                key = _guess_genre_norm_key(guess_raw)
-                adq = _guess_genre_prune_attempt_dq(uid, now2)
-                adq.append((now2, key))
-                same_attempts = sum(1 for ts, k in adq if k == key)
+            await ctx.send("🎭 Sélection d'un anime…")
+            anime = None
+            for _ in range(5):
+                page = random.randint(1, 500)
+                query = '''
+                query ($page: Int) {
+                  Page(perPage: 1, page: $page) {
+                    media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                      title { romaji }
+                      genres
+                      coverImage { extraLarge }
+                    }
+                  }
+                }
+                '''
+                data = core.query_anilist(query, {"page": page})
+                try:
+                    candidate = data["data"]["Page"]["media"][0]
+                    if candidate.get("genres"):
+                        anime = candidate
+                        break
+                except Exception:
+                    continue
 
-                if same_attempts == _ATTEMPT_SOFT_WARN:
-                    await ctx.send(
-                        f"⚠️ {ctx.author.mention} — tu as déjà utilisé **{guess_raw}** plusieurs fois en ~5 min.\n"
-                        f"Évite de **répéter ce mot** ; choisis un **autre** genre (ou un plus précis). "
-                        f"Les genres très courants sont autorisés, mais pas en boucle."
-                    )
-                elif same_attempts == _ATTEMPT_HARD_WARN:
-                    await ctx.send(
-                        f"🚨 **Dernier avertissement** pour **{guess_raw}** : une répétition de plus = "
-                        f"**sanction** (−XP, cooldown long, entrée `/mycard`). Varie vraiment."
-                    )
+            if not anime:
+                await ctx.send(core.anilist_error_user_message())
+                return
 
-                if same_attempts >= _ATTEMPT_PENALTY:
-                    _GUESS_GENRE_STRIKES[uid] = _GUESS_GENRE_STRIKES.get(uid, 0) + 1
-                    strike = _GUESS_GENRE_STRIKES[uid]
-                    cd_sec = _genre_strike_cooldown_sec(uid)
-                    xp_hit = _genre_strike_xp(uid)
-                    _remove_attempt_key(uid, key)
-                    _clear_guess_genre_streak_only(uid)
-                    _GUESS_GENRE_COOLDOWN_UNTIL[uid] = now2 + cd_sec
-                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_hit, announce=False)
-                    total_pen = core.inc_guess_genre_penalty_count(uid)
-                    correct = guess in genres
-                    if correct:
-                        await ctx.send(
-                            f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de répétitions du même "
-                            f"genre « facile » en ~5 min.\n"
-                            f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
-                            f"**{total_pen}** (voir `/mycard`).\n"
-                            f"Genres de **{title}** : {', '.join(anime['genres'])}."
-                        )
-                    else:
-                        await ctx.send(
-                            f"❌ **{guess_raw}** ne fait pas partie des genres de **{title}**.\n"
-                            f"**Anti-spam** : même genre « facile » répété **{same_attempts}×** en ~5 min.\n"
-                            f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
-                            f"**{total_pen}** (voir `/mycard`).\n"
-                            f"Les genres étaient : {', '.join(anime['genres'])}."
-                        )
-                    return
+            title = anime["title"]["romaji"]
+            genres = [g.lower() for g in anime.get("genres", [])]
+            embed = discord.Embed(
+                title="🎭 Mini-jeu : Devine le genre !",
+                description=(
+                    f"Quel est un des genres de **{title}** ?\n"
+                    "Réponds par un genre AniList (ex. `Psychological`, `Slice of Life`).\n"
+                    "Les genres **très courants** (Action, Comedy, Romance, Fantasy…) sont valides, "
+                    "mais **répéter le même mot** en boucle déclenche des **avertissements puis des sanctions**.\n"
+                    f"{_easy_genre_hint_short()}"
+                ),
+                color=discord.Color.magenta(),
+            )
+            embed.set_footer(
+                text="Astuce : varie — un genre plus rare ou précis évite les avertissements « facile »."
+            )
+            img_url = anime.get("coverImage", {}).get("extraLarge")
+            if img_url:
+                embed.set_image(url=img_url)
+            await ctx.send(embed=embed)
 
-            if guess in genres:
-                spam = _guess_genre_is_spam_candidate(guess_raw)
-                if spam:
-                    dq = _guess_genre_prune_times(uid, now2)
-                    dq.append(now2)
-                    streak = _GUESS_GENRE_SPAM_STREAK.get(uid, 0) + 1
-                    _GUESS_GENRE_SPAM_STREAK[uid] = streak
-                    if streak == 2:
+            def check(m: discord.Message) -> bool:
+                return m.author == ctx.author and m.channel == ctx.channel
+
+            try:
+                msg = await self.bot.wait_for("message", timeout=20.0, check=check)
+                guess_raw = msg.content.strip()
+                guess = guess_raw.lower()
+                now2 = time.monotonic()
+
+                # Même genre « facile » répété (bonne ou mauvaise réponse) : alertes salon puis sanction progressive
+                if _guess_genre_is_spam_candidate(guess_raw):
+                    key = _guess_genre_norm_key(guess_raw)
+                    adq = _guess_genre_prune_attempt_dq(uid, now2)
+                    adq.append((now2, key))
+                    same_attempts = sum(1 for ts, k in adq if k == key)
+
+                    if same_attempts == _ATTEMPT_SOFT_WARN:
                         await ctx.send(
-                            f"⚠️ {ctx.author.mention} — **2** bonnes réponses d’affilée avec un genre « facile ». "
-                            f"Enchaîne encore comme ça et tu risques une **sanction** ; varie les genres."
+                            f"⚠️ {ctx.author.mention} — tu as déjà utilisé **{guess_raw}** plusieurs fois en ~5 min.\n"
+                            f"Évite de **répéter ce mot** ; choisis un **autre** genre (ou un plus précis).\n"
+                            f"{_easy_genre_hint_short()}"
                         )
-                    elif streak == 3:
+                    elif same_attempts == _ATTEMPT_HARD_WARN:
                         await ctx.send(
-                            f"🚨 **Dernier avertissement** (série de genres courants) : au prochain dépassement, "
-                            f"**sanction** (−XP + cooldown)."
+                            f"🚨 **Dernier avertissement** pour **{guess_raw}** : une répétition de plus = "
+                            f"**sanction** (−XP, cooldown long, entrée `/mycard`). Varie vraiment.\n"
+                            f"{_easy_genre_hint_short()}"
                         )
-                    penalize = streak > _SPAM_MAX_STREAK or len(dq) > _SPAM_MAX_IN_WINDOW
-                    if penalize:
+
+                    if same_attempts >= _ATTEMPT_PENALTY:
                         _GUESS_GENRE_STRIKES[uid] = _GUESS_GENRE_STRIKES.get(uid, 0) + 1
                         strike = _GUESS_GENRE_STRIKES[uid]
                         cd_sec = _genre_strike_cooldown_sec(uid)
                         xp_hit = _genre_strike_xp(uid)
+                        _remove_attempt_key(uid, key)
                         _clear_guess_genre_streak_only(uid)
                         _GUESS_GENRE_COOLDOWN_UNTIL[uid] = now2 + cd_sec
                         await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_hit, announce=False)
                         total_pen = core.inc_guess_genre_penalty_count(uid)
-                        await ctx.send(
-                            f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de réponses « faciles » "
-                            f"d’affilée ou en 5 min.\n"
-                            f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
-                            f"**{total_pen}** (voir `/mycard`).\n"
-                            f"Genres de **{title}** : {', '.join(anime['genres'])}."
-                        )
+                        correct = guess in genres
+                        if correct:
+                            await ctx.send(
+                                f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de répétitions du même "
+                                f"genre « facile » en ~5 min.\n"
+                                f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
+                                f"**{total_pen}** (voir `/mycard`).\n"
+                                f"Genres de **{title}** : {', '.join(anime['genres'])}."
+                            )
+                        else:
+                            await ctx.send(
+                                f"❌ **{guess_raw}** ne fait pas partie des genres de **{title}**.\n"
+                                f"**Anti-spam** : même genre « facile » répété **{same_attempts}×** en ~5 min.\n"
+                                f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
+                                f"**{total_pen}** (voir `/mycard`).\n"
+                                f"Les genres étaient : {', '.join(anime['genres'])}."
+                            )
+                        return
+
+                if guess in genres:
+                    spam = _guess_genre_is_spam_candidate(guess_raw)
+                    if spam:
+                        dq = _guess_genre_prune_times(uid, now2)
+                        dq.append(now2)
+                        streak = _GUESS_GENRE_SPAM_STREAK.get(uid, 0) + 1
+                        _GUESS_GENRE_SPAM_STREAK[uid] = streak
+                        if streak == 2:
+                            await ctx.send(
+                                f"⚠️ {ctx.author.mention} — **2** bonnes réponses d’affilée avec un genre « facile ». "
+                                f"Enchaîne encore comme ça et tu risques une **sanction** ; varie les genres."
+                            )
+                        elif streak == 3:
+                            await ctx.send(
+                                f"🚨 **Dernier avertissement** (série de genres courants) : au prochain dépassement, "
+                                f"**sanction** (−XP + cooldown)."
+                            )
+                        penalize = streak > _SPAM_MAX_STREAK or len(dq) > _SPAM_MAX_IN_WINDOW
+                        if penalize:
+                            _GUESS_GENRE_STRIKES[uid] = _GUESS_GENRE_STRIKES.get(uid, 0) + 1
+                            strike = _GUESS_GENRE_STRIKES[uid]
+                            cd_sec = _genre_strike_cooldown_sec(uid)
+                            xp_hit = _genre_strike_xp(uid)
+                            _clear_guess_genre_streak_only(uid)
+                            _GUESS_GENRE_COOLDOWN_UNTIL[uid] = now2 + cd_sec
+                            await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_hit, announce=False)
+                            total_pen = core.inc_guess_genre_penalty_count(uid)
+                            await ctx.send(
+                                f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de réponses « faciles » "
+                                f"d’affilée ou en 5 min.\n"
+                                f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
+                                f"**{total_pen}** (voir `/mycard`).\n"
+                                f"Genres de **{title}** : {', '.join(anime['genres'])}."
+                            )
+                        else:
+                            await ctx.send(
+                                f"✅ Exact ! Les genres de **{title}** incluent {', '.join(anime['genres'])}. Tu gagnes 5 XP !"
+                            )
+                            await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
+                            core.add_mini_score(ctx.author.id, "guessgenre", 1)
                     else:
+                        _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
+                        _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
                         await ctx.send(
                             f"✅ Exact ! Les genres de **{title}** incluent {', '.join(anime['genres'])}. Tu gagnes 5 XP !"
                         )
@@ -726,134 +769,142 @@ class MiniGames(commands.Cog):
                 else:
                     _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
                     _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
-                    await ctx.send(
-                        f"✅ Exact ! Les genres de **{title}** incluent {', '.join(anime['genres'])}. Tu gagnes 5 XP !"
-                    )
-                    await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
-                    core.add_mini_score(ctx.author.id, "guessgenre", 1)
-            else:
-                _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
-                _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
-                await ctx.send(f"❌ Mauvaise réponse. Les genres de **{title}** étaient : {', '.join(anime['genres'])}.")
-        except asyncio.TimeoutError:
-            _clear_guess_genre_spam(uid)
-            await ctx.send("⏰ Temps écoulé ! Le mini-jeu est annulé.")
+                    await ctx.send(f"❌ Mauvaise réponse. Les genres de **{title}** étaient : {', '.join(anime['genres'])}.")
+            except asyncio.TimeoutError:
+                _clear_guess_genre_spam(uid)
+                await ctx.send("⏰ Temps écoulé ! Le mini-jeu est annulé.")
+        finally:
+            minigame_lock.end(uid)
 
     # --------------------------------------
     # Guess Character (boutons)
     # --------------------------------------
     async def _guess_character(self, ctx: commands.Context) -> None:
-        if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(thinking=True)
+        uid = ctx.author.id
+        if not minigame_lock.try_begin(uid, "guesscharacter"):
+            await minigame_lock.reply_busy(ctx)
+            return
+        try:
+            if ctx.interaction and not ctx.interaction.response.is_done():
+                await ctx.interaction.response.defer(thinking=True)
 
-        page = random.randint(1, 100)
-        query = '''
-        query ($page: Int) {
-          Page(page: $page, perPage: 4) {
-            characters(sort: FAVOURITES_DESC) {
-              name { full }
-              image { large }
-              media(type: ANIME) {
-                nodes { title { romaji } }
+            page = random.randint(1, 100)
+            query = '''
+            query ($page: Int) {
+              Page(page: $page, perPage: 4) {
+                characters(sort: FAVOURITES_DESC) {
+                  name { full }
+                  image { large }
+                  media(type: ANIME) {
+                    nodes { title { romaji } }
+                  }
+                }
               }
             }
-          }
-        }
-        '''
-        data = core.query_anilist(query, {"page": page})
-        if not data or "data" not in data:
-            await ctx.send(core.anilist_error_user_message())
-            return
+            '''
+            data = core.query_anilist(query, {"page": page})
+            if not data or "data" not in data:
+                await ctx.send(core.anilist_error_user_message())
+                return
 
-        characters = data["data"]["Page"]["characters"]
-        if len(characters) < 4:
-            await ctx.send("❌ Pas assez de personnages trouvés.")
-            return
+            characters = data["data"]["Page"]["characters"]
+            if len(characters) < 4:
+                await ctx.send("❌ Pas assez de personnages trouvés.")
+                return
 
-        correct = random.choice(characters)
-        correct_name = correct["name"]["full"]
-        correct_image = correct["image"]["large"]
-        nodes = (correct.get("media", {}) or {}).get("nodes", [])
-        correct_anime = (nodes[0]["title"]["romaji"] if nodes else "—")
+            correct = random.choice(characters)
+            correct_name = correct["name"]["full"]
+            correct_image = correct["image"]["large"]
+            nodes = (correct.get("media", {}) or {}).get("nodes", [])
+            correct_anime = (nodes[0]["title"]["romaji"] if nodes else "—")
 
-        options = [c["name"]["full"] for c in characters]
-        try:
-            correct_index = options.index(correct_name)
-        except ValueError:
-            correct_index = random.randrange(len(options))
+            options = [c["name"]["full"] for c in characters]
+            try:
+                correct_index = options.index(correct_name)
+            except ValueError:
+                correct_index = random.randrange(len(options))
 
-        embed = discord.Embed(
-            title="👤 Devine le personnage !",
-            description="Clique sur le bouton correspondant au bon nom.",
-            color=discord.Color.blurple()
-        )
-        embed.set_image(url=correct_image)
+            embed = discord.Embed(
+                title="👤 Devine le personnage !",
+                description="Clique sur le bouton correspondant au bon nom.",
+                color=discord.Color.blurple()
+            )
+            embed.set_image(url=correct_image)
 
-        class GCView(View):
-            def __init__(self, *, timeout: float = 20):
-                super().__init__(timeout=timeout)
-                self.resolved = False
-                self.message: discord.Message | None = None
+            class GCView(View):
+                def __init__(self, *, timeout: float = 20):
+                    super().__init__(timeout=timeout)
+                    self.resolved = False
+                    self.message: discord.Message | None = None
 
-            async def on_timeout(self) -> None:
-                if self.resolved or not self.message:
+                async def on_timeout(self) -> None:
+                    if self.resolved:
+                        self.stop()
+                        return
+                    if not self.message:
+                        self.stop()
+                        return
+                    self.resolved = True
+                    for item in self.children:
+                        if isinstance(item, Button):
+                            item.disabled = True
+                    await self.message.edit(
+                        content=f"⏰ Temps écoulé. La bonne réponse était **{correct_name}** *(**{correct_anime}**)*.",
+                        view=self
+                    )
+                    self.stop()
+
+            view = GCView(timeout=20)
+
+            async def make_button_callback(inter: discord.Interaction, index: int):
+                # Seul le lanceur peut cliquer
+                if inter.user.id != ctx.author.id:
+                    await inter.response.send_message("❌ Ce n'est pas ton quiz !", ephemeral=True)
                     return
-                self.resolved = True
-                for item in self.children:
+
+                if view.resolved:
+                    try:
+                        await inter.response.defer()
+                    except Exception:
+                        pass
+                    return
+
+                view.resolved = True
+                for item in view.children:
                     if isinstance(item, Button):
                         item.disabled = True
-                await self.message.edit(
-                    content=f"⏰ Temps écoulé. La bonne réponse était **{correct_name}** *(**{correct_anime}**)*.",
-                    view=self
-                )
 
-        view = GCView(timeout=20)
+                if index == correct_index:
+                    txt = (f"✅ Bien joué **{inter.user.display_name}** ! "
+                           f"C’était **{correct_name}** *(**{correct_anime}**)*. "
+                           f"Tu gagnes **+5 XP**.")
+                    try:
+                        await core.add_xp(self.bot, view.message.channel, inter.user.id, 5)
+                    except Exception:
+                        pass
+                    try:
+                        core.add_mini_score(inter.user.id, "guesscharacter", 1)
+                    except Exception:
+                        pass
+                else:
+                    txt = (f"❌ Mauvaise réponse. "
+                           f"C’était **{correct_name}** *(**{correct_anime}**)*.")
 
-        async def make_button_callback(inter: discord.Interaction, index: int):
-            # Seul le lanceur peut cliquer
-            if inter.user.id != ctx.author.id:
-                await inter.response.send_message("❌ Ce n'est pas ton quiz !", ephemeral=True)
-                return
+                await inter.response.edit_message(content=txt, view=view)
+                view.stop()
 
-            if view.resolved:
-                try:
-                    await inter.response.defer()
-                except Exception:
-                    pass
-                return
+            for i, opt in enumerate(options):
+                btn = Button(label=opt, style=discord.ButtonStyle.primary)
+                async def _cb(inter: discord.Interaction, idx=i):
+                    await make_button_callback(inter, idx)
+                btn.callback = _cb
+                view.add_item(btn)
 
-            view.resolved = True
-            for item in view.children:
-                if isinstance(item, Button):
-                    item.disabled = True
-
-            if index == correct_index:
-                txt = (f"✅ Bien joué **{inter.user.display_name}** ! "
-                       f"C’était **{correct_name}** *(**{correct_anime}**)*. "
-                       f"Tu gagnes **+5 XP**.")
-                try:
-                    await core.add_xp(self.bot, view.message.channel, inter.user.id, 5)
-                except Exception:
-                    pass
-                try:
-                    core.add_mini_score(inter.user.id, "guesscharacter", 1)
-                except Exception:
-                    pass
-            else:
-                txt = (f"❌ Mauvaise réponse. "
-                       f"C’était **{correct_name}** *(**{correct_anime}**)*.")
-
-            await inter.response.edit_message(content=txt, view=view)
-
-        for i, opt in enumerate(options):
-            btn = Button(label=opt, style=discord.ButtonStyle.primary)
-            async def _cb(inter: discord.Interaction, idx=i):
-                await make_button_callback(inter, idx)
-            btn.callback = _cb
-            view.add_item(btn)
-
-        sent = await ctx.send(embed=embed, view=view)
-        view.message = sent
+            sent = await ctx.send(embed=embed, view=view)
+            view.message = sent
+            await view.wait()
+        finally:
+            minigame_lock.end(uid)
 
     @commands.hybrid_command(
         name="guessyear",

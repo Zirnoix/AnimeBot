@@ -29,6 +29,7 @@ from discord.ext import commands
 from discord import app_commands
 
 from modules import core
+from modules import minigame_lock
 from modules.core import normalize
 
 logger = logging.getLogger(__name__)
@@ -327,6 +328,10 @@ class Quiz(commands.Cog):
         ]
     )
     async def animequiz(self, ctx: commands.Context, difficulty: str = "medium") -> None:
+        uid = ctx.author.id
+        if not minigame_lock.try_begin(uid, "animequiz"):
+            await minigame_lock.reply_busy(ctx)
+            return
         try:
             await _maybe_defer(ctx)
             await ctx.send("🎮 Préparation du quiz...")
@@ -379,8 +384,8 @@ class Quiz(commands.Cog):
 
                     # scoreboard + xp
                     scores = core.load_scores()
-                    uid = str(ctx.author.id)
-                    scores[uid] = scores.get(uid, 0) + 1
+                    uid_str = str(ctx.author.id)
+                    scores[uid_str] = scores.get(uid_str, 0) + 1
                     core.save_scores(scores)
 
                     xp_amount = 5 if difficulty == "easy" else 10 if difficulty == "medium" else 15
@@ -403,9 +408,15 @@ class Quiz(commands.Cog):
         except Exception as e:
             logger.error(f"Erreur dans animequiz: {e}")
             await ctx.send("❌ Une erreur s'est produite lors du quiz.")
+        finally:
+            minigame_lock.end(uid)
 
     @commands.hybrid_command(name="animequizmulti", description="Quiz multi (1 à 20) — easy/medium/hard aléatoires.")
     async def animequizmulti(self, ctx: commands.Context, nb_questions: int = 5) -> None:
+        uid = ctx.author.id
+        if not minigame_lock.try_begin(uid, "animequizmulti"):
+            await minigame_lock.reply_busy(ctx)
+            return
         try:
             await _maybe_defer(ctx)
             if not 1 <= nb_questions <= 20:
@@ -485,13 +496,13 @@ class Quiz(commands.Cog):
 
             # scoreboard global
             scores = core.load_scores()
-            uid = str(ctx.author.id)
+            uid_str = str(ctx.author.id)
             if score < (nb_questions / 2):
                 penalty = 1
-                scores[uid] = max(0, scores.get(uid, 0) - penalty)
+                scores[uid_str] = max(0, scores.get(uid_str, 0) - penalty)
                 await ctx.send(f"⚠️ Moins de 50% de bonnes réponses, -{penalty} point retiré.")
             else:
-                scores[uid] = scores.get(uid, 0) + score
+                scores[uid_str] = scores.get(uid_str, 0) + score
             core.save_scores(scores)
 
             total_xp += combo_bonus_total
@@ -517,6 +528,8 @@ class Quiz(commands.Cog):
         except Exception as e:
             logger.error(f"Erreur dans animequizmulti: {e}")
             await ctx.send("❌ Une erreur s'est produite durant le quiz.")
+        finally:
+            minigame_lock.end(uid)
 
     # ---------- DUEL AMÉLIORÉ ----------
     @commands.hybrid_command(
