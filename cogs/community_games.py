@@ -63,9 +63,16 @@ _active_raids: dict[int, bool] = {}  # guild_id -> running
 RAID_JOIN_SECONDS = 90.0
 RAID_ROUND_SECONDS = 95.0
 RAID_MAX_ROUNDS = 12
-RAID_BOSS_HP = 22_000
+# PV du boss = nombre d’inscrits × ce coefficient (ex. 2 joueurs → 12 000 HP)
+RAID_HP_PER_PLAYER = 6000
 RAID_DAMAGE_MIN = 550
 RAID_DAMAGE_MAX = 980
+
+
+def _raid_max_hp_for_players(n: int) -> int:
+    """Échelle les PV selon l’équipe (minimum 1 joueur)."""
+    n = max(1, int(n))
+    return RAID_HP_PER_PLAYER * n
 # XP hebdo : base + bonus dégâts + MVP + plus rapide
 RAID_XP_BASE_EACH = 110
 RAID_XP_DAMAGE_POOL = 320
@@ -433,18 +440,22 @@ class CommunityGames(commands.Cog):
             _active_raids.pop(guild_id, None)
             return
 
+        n = len(joined)
+        max_hp = _raid_max_hp_for_players(n)
         state = RaidBattleState(
             guild_id=guild_id,
             channel_id=channel.id,
-            hp=RAID_BOSS_HP,
-            max_hp=RAID_BOSS_HP,
+            hp=max_hp,
+            max_hp=max_hp,
             round_n=1,
             max_rounds=RAID_MAX_ROUNDS,
             participants=set(joined),
         )
         await channel.send(
-            f"✅ **{len(joined)}** participant(s). Le combat commence !\n"
-            f"• **{RAID_BOSS_HP}** HP · jusqu’à **{RAID_MAX_ROUNDS}** manches (~{int(RAID_ROUND_SECONDS)} s chacune)\n"
+            f"✅ **{n}** participant(s) — le boss a **{max_hp}** HP "
+            f"(_{RAID_HP_PER_PLAYER} × {n} selon l’équipe_).\n"
+            f"• Jusqu’à **{RAID_MAX_ROUNDS}** manches — timer **~{int(RAID_ROUND_SECONDS)} s** max **par manche** "
+            "si quelqu’un n’a pas encore répondu.\n"
             "• Chaque **bonne réponse** (défi perso) inflige **~{0}–{1}** dégâts.".format(
                 RAID_DAMAGE_MIN, RAID_DAMAGE_MAX
             )
@@ -508,6 +519,40 @@ class CommunityGames(commands.Cog):
                 pass
             await self._raid_conclude_victory(ch, state, extra_intro=f"Coup final : **{name}**.")
             return
+
+        if len(state.answered_this_round) >= len(state.participants):
+            await self._raid_complete_round_early(state, ch, hub)
+
+    async def _raid_complete_round_early(
+        self,
+        state: RaidBattleState,
+        channel: discord.TextChannel,
+        hub: RaidRoundHubView,
+    ) -> None:
+        """Tous les inscrits ont contribué cette manche : enchaîne sans attendre le timer."""
+        if not _active_raids.get(state.guild_id):
+            return
+        if state.hp <= 0:
+            return
+        hub.ended = True
+        hub.stop()
+        try:
+            if state.hub_message:
+                await state.hub_message.edit(
+                    content="✅ **Tout le monde a répondu** — enchaînement…",
+                    embed=None,
+                    view=None,
+                )
+        except Exception:
+            pass
+        await channel.send(
+            f"⏩ **Manche {state.round_n}** terminée (tout le monde a participé) — **{state.hp}** HP restants."
+        )
+        if state.round_n >= state.max_rounds:
+            await self._raid_force_finish(channel, state)
+            return
+        state.round_n += 1
+        await self._raid_open_round(channel, state)
 
     async def _raid_after_round_timeout(self, state: RaidBattleState, channel: discord.TextChannel) -> None:
         if not _active_raids.get(state.guild_id):
@@ -621,12 +666,13 @@ class CommunityGames(commands.Cog):
 
         await channel.send(
             "⚔️ **BOSS RAID (hebdo)** — Inscription ouverte **~{0} s**.\n"
-            "• Chaque inscrit aura **son propre** quiz (message **éphémère**) : pas de mêmes boutons pour tout le monde.\n"
-            "• Le salon affiche **HP + journal** des coups. **{1}** manches max, **{2}** HP — à la fin du temps, "
-            "le boss **tombe** même s’il reste des PV.\n"
+            "• Chaque inscrit aura **son propre** quiz (message **éphémère**).\n"
+            "• Le salon affiche **HP + journal** ; jusqu’à **{1}** manches. "
+            "Les **PV du boss** dépendent du **nombre d’inscrits** (annoncés juste après l’inscription).\n"
+            "• Dès que **tout le monde** a validé sa manche, on enchaîne **sans attendre** la fin du timer.\n"
+            "• À la **dernière** manche, si le boss a encore des PV : **salve finale** puis victoire.\n"
             "• XP **généreuse** (base + part des dégâts + bonus MVP / plus rapide).".format(
                 int(RAID_JOIN_SECONDS),
-                RAID_BOSS_HP,
                 RAID_MAX_ROUNDS,
             )
         )
