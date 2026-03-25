@@ -20,6 +20,37 @@ def _pick_title_obj(t: dict | None) -> str:
     return t.get("english") or t.get("romaji") or t.get("native") or "—"
 
 
+def _anilist_anime_url(mid: int) -> str:
+    return f"https://anilist.co/anime/{mid}"
+
+
+def _md_link_title(s: str, max_len: int = 72) -> str:
+    """Titre affiché dans un lien Markdown (évite [] qui cassent le rendu)."""
+    t = (s or "—").replace("[", "(").replace("]", ")")
+    if len(t) > max_len:
+        return t[: max_len - 1] + "…"
+    return t
+
+
+def _chunk_lines_for_embed(lines: List[str], max_chars: int = 1020) -> List[str]:
+    """Découpe en plusieurs blocs ≤ ~1024 car. (limite d’un field Discord)."""
+    chunks: List[str] = []
+    buf: List[str] = []
+    size = 0
+    for line in lines:
+        add = len(line) + (1 if buf else 0)
+        if buf and size + add > max_chars:
+            chunks.append("\n".join(buf))
+            buf = [line]
+            size = len(line)
+        else:
+            buf.append(line)
+            size += add
+    if buf:
+        chunks.append("\n".join(buf))
+    return chunks
+
+
 def _dedupe_airings_by_media_id(items: List[dict]) -> List[dict]:
     """
     Discord interdit deux options StringSelect avec la même `value` (même media_id).
@@ -280,18 +311,20 @@ class AllView(discord.ui.View):
             mark = "✅" if mid in self.wl_ids else "➕"
             name = _pick_title_obj(m.get("title"))
             ep = it.get("episode") or "?"
-            lines.append(f"**{i}.** {mark} **{name}** — Ep {ep} — `{mid}`")
+            link_txt = _md_link_title(name)
+            url = _anilist_anime_url(mid)
+            lines.append(f"**{i}.** {mark} [{link_txt}]({url}) — Ep **{ep}**")
         if not lines:
             lines = ["(aucun élément sur cette page)"]
-        body = "\n".join(lines)
-        if len(body) > 1024:
-            body = body[:1021] + "…"
-        e.add_field(
-            name=f"Page {self.page + 1}/{self.pages_count()} · {len(self.items)} titre(s)",
-            value=body,
-            inline=False,
-        )
-        e.set_footer(text="Liste du serveur · max 25 titres/page · tronqué si trop long")
+        chunks = _chunk_lines_for_embed(lines)
+        pc = self.pages_count()
+        for ci, chunk in enumerate(chunks):
+            if len(chunks) == 1:
+                fname = f"Page {self.page + 1}/{pc} · {len(page_items)} animé(s)"
+            else:
+                fname = f"Page {self.page + 1}/{pc} · partie {ci + 1}/{len(chunks)}"
+            e.add_field(name=fname, value=chunk[:1024], inline=False)
+        e.set_footer(text="Liens → fiche AniList · jusqu’à 25 titres/page (plusieurs blocs si nécessaire)")
         return e
 
     # --- buttons ---

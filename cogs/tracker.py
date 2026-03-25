@@ -45,7 +45,41 @@ def _should_notify_episode_release(anime: Dict[str, Any]) -> bool:
         return False
     if now > airing + _RELEASE_GRACE_SEC:
         return False
-    return True
+        return True
+
+
+class TrackClearConfirmView(discord.ui.View):
+    """Confirmation (boutons) — en slash la question est éphémère."""
+
+    def __init__(self, cog: "Tracker", author_id: int) -> None:
+        super().__init__(timeout=20)
+        self.cog = cog
+        self.author_id = author_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Ce menu n’est pas pour toi.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Oui, tout supprimer", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        tracker = core.load_tracker()
+        uid = str(self.author_id)
+        tracker[uid] = []
+        core.save_tracker(tracker)
+        await interaction.response.edit_message(content="✅ **Liste vidée.**", view=None)
+        try:
+            u = await self.cog.bot.fetch_user(self.author_id)
+            await u.send("✅ Ta liste de suivi a été **complètement vidée**.")
+        except Exception:
+            pass
+        self.stop()
+
+    @discord.ui.button(label="Non", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.edit_message(content="❌ **Annulé.**", view=None)
+        self.stop()
 
 
 class Tracker(commands.Cog):
@@ -115,11 +149,24 @@ class Tracker(commands.Cog):
             await ctx.author.send(content=content, embed=embed)
             return True
         except discord.Forbidden:
-            await self._reply(ctx, content="⚠️ Impossible de t'envoyer un MP. Active-les pour ce serveur (Confidentialité & sécurité).")
+            await self._reply(
+                ctx,
+                content="⚠️ Impossible de t'envoyer un MP. Active-les pour ce serveur (Confidentialité & sécurité).",
+                ephemeral=True,
+            )
         except Exception as e:
             LOG.warning("DM failed: %s", e)
-            await self._reply(ctx, content="⚠️ Impossible d'envoyer le MP (erreur inconnue).")
+            await self._reply(ctx, content="⚠️ Impossible d'envoyer le MP (erreur inconnue).", ephemeral=True)
         return False
+
+    @staticmethod
+    async def _try_delete_message(msg: discord.Message | None) -> None:
+        if msg is None:
+            return
+        try:
+            await msg.delete()
+        except Exception:
+            pass
 
     # ----------------- Groupe HYBRID -----------------
 
@@ -141,17 +188,20 @@ class Tracker(commands.Cog):
 
     @track.command(name="list", with_app_command=True, description="Liste tes animes suivis (en MP).")
     async def track_list(self, ctx: commands.Context) -> None:
+        await self._maybe_defer(ctx, ephemeral=True)
         tracker = core.load_tracker()
         current_list = tracker.get(str(ctx.author.id), [])
         if not current_list:
             usage = "/track add <titre>" if ctx.interaction else "!track add <titre>"
-            await self._dm(ctx, content=f"📭 Tu ne suis aucun anime actuellement.\nUtilise **{usage}** pour commencer.")
+            ok = await self._dm(ctx, content=f"📭 Tu ne suis aucun anime actuellement.\nUtilise **{usage}** pour commencer.")
+            if ok and ctx.interaction:
+                await self._reply(ctx, content="📬 Message envoyé en **message privé**.", ephemeral=True)
             return
 
         items_per_page = 10
         pages = [current_list[i:i + items_per_page] for i in range(0, len(current_list), items_per_page)]
 
-        # Envoie chaque page en MP
+        sent_any = False
         for i, page in enumerate(pages, 1):
             embed = discord.Embed(
                 title=f"📌 Animes suivis par {ctx.author.display_name}",
@@ -162,27 +212,33 @@ class Tracker(commands.Cog):
             if len(pages) > 1:
                 embed.set_footer(text=f"Page {i}/{len(pages)}")
             ok = await self._dm(ctx, embed=embed)
-            if not ok:
+            if ok:
+                sent_any = True
+            else:
                 break
+
+        if sent_any and ctx.interaction:
+            await self._reply(ctx, content="📬 Liste envoyée en **message privé**.", ephemeral=True)
 
     # ----------------- Ajout -----------------
 
     @track.command(name="add", with_app_command=True, description="Ajoute un anime à ta liste de suivi.")
     @app_commands.describe(anime="Titre de l'anime à suivre")
     async def track_add(self, ctx: commands.Context, *, anime: str) -> None:
-        # Slash: anti-timeout
-        await self._maybe_defer(ctx, ephemeral=False)
+        await self._maybe_defer(ctx, ephemeral=True)
 
         matches = await self.find_anime_matches(anime)
         if not matches:
-            await self._dm(ctx, content=f"❌ Aucun anime trouvé pour **{anime}**.")
+            await self._reply(ctx, content=f"❌ Aucun anime trouvé pour **{anime}**.", ephemeral=True)
             return
 
-        # Choix multiples → on demande dans le salon (slash OU prefix)
         if len(matches) > 1:
             embed = discord.Embed(
                 title="🔍 Plusieurs résultats trouvés",
-                description="Réponds avec le **numéro** correspondant (30s) :",
+                description=(
+                    "Réponds avec le **numéro** correspondant **dans ce salon** (30s). "
+                    "Ton message sera **supprimé** après pour éviter le spam."
+                ),
                 color=discord.Color.blue()
             )
             for i, match in enumerate(matches, 1):
@@ -203,7 +259,13 @@ class Tracker(commands.Cog):
                           (f"🇯🇵 {match['title']['native']}" if match['title']['native'] else ""),
                     inline=False
                 )
-            await self._reply(ctx, embed=embed, ephemeral=False)
+            if ctx.interaction:
+                await self._reply(ctx, embed=embed, ephemeral=True)
+            else:
+                try:
+                    await ctx.author.send(embed=embed)
+                except discord.Forbidden:
+                    await ctx.send(embed=embed)
 
             try:
                 msg = await self.bot.wait_for(
@@ -212,9 +274,13 @@ class Tracker(commands.Cog):
                     check=lambda m: m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit()
                                     and 1 <= int(m.content) <= len(matches)
                 )
+                await self._try_delete_message(msg)
                 selected = matches[int(msg.content) - 1]
             except asyncio.TimeoutError:
-                await self._reply(ctx, content="⏰ Temps écoulé, aucun anime ajouté.")
+                if ctx.interaction:
+                    await self._reply(ctx, content="⏰ Temps écoulé, aucun anime ajouté.", ephemeral=True)
+                else:
+                    await ctx.send("⏰ Temps écoulé, aucun anime ajouté.")
                 return
         else:
             selected = matches[0]
@@ -225,7 +291,7 @@ class Tracker(commands.Cog):
         current_list = tracker.setdefault(uid, [])
 
         if core.normalize(title) in [core.normalize(t) for t in current_list]:
-            await self._dm(ctx, content=f"⚠️ Tu suis déjà **{title}**.")
+            await self._reply(ctx, content=f"⚠️ Tu suis déjà **{title}**.", ephemeral=True)
             return
 
         current_list.append(title)
@@ -247,35 +313,46 @@ class Tracker(commands.Cog):
         )
         if info:
             embed.add_field(name="Informations", value="\n".join(info), inline=False)
-        await self._dm(ctx, embed=embed)
+        ok = await self._dm(ctx, embed=embed)
+        if ok and ctx.interaction:
+            await self._reply(ctx, content="📬 Détails envoyés en **message privé**.", ephemeral=True)
 
     # ----------------- Suppression -----------------
 
     @track.command(name="remove", with_app_command=True, description="Retire un anime de ta liste.")
     @app_commands.describe(anime="Titre (ou partie) de l'anime à retirer")
     async def track_remove(self, ctx: commands.Context, *, anime: str) -> None:
+        await self._maybe_defer(ctx, ephemeral=True)
         tracker = core.load_tracker()
         uid = str(ctx.author.id)
         current_list = tracker.get(uid, [])
         if not current_list:
-            await self._dm(ctx, content="❌ Ta liste est vide.")
+            await self._reply(ctx, content="❌ Ta liste est vide.", ephemeral=True)
             return
 
         matches = [t for t in current_list if core.normalize(anime) in core.normalize(t)]
         if not matches:
-            await self._dm(ctx, content=f"❌ Aucun anime trouvé pour **{anime}** dans ta liste.")
+            await self._reply(ctx, content=f"❌ Aucun anime trouvé pour **{anime}** dans ta liste.", ephemeral=True)
             return
 
-        # Plusieurs correspondances → on demande dans le salon
         if len(matches) > 1:
             embed = discord.Embed(
                 title="🔍 Plusieurs correspondances trouvées",
-                description="Réponds avec le **numéro** à retirer (30s) :",
+                description=(
+                    "Réponds avec le **numéro** à retirer (30s). "
+                    "Ton message sera **supprimé** après."
+                ),
                 color=discord.Color.blue()
             )
             for i, title in enumerate(matches, 1):
                 embed.add_field(name=f"{i}. {title}", value="‎", inline=False)
-            await self._reply(ctx, embed=embed, ephemeral=False)
+            if ctx.interaction:
+                await self._reply(ctx, embed=embed, ephemeral=True)
+            else:
+                try:
+                    await ctx.author.send(embed=embed)
+                except discord.Forbidden:
+                    await ctx.send(embed=embed)
 
             try:
                 msg = await self.bot.wait_for(
@@ -284,9 +361,13 @@ class Tracker(commands.Cog):
                     check=lambda m: m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit()
                                     and 1 <= int(m.content) <= len(matches)
                 )
+                await self._try_delete_message(msg)
                 to_remove = matches[int(msg.content) - 1]
             except asyncio.TimeoutError:
-                await self._reply(ctx, content="⏰ Temps écoulé, aucun anime retiré.")
+                if ctx.interaction:
+                    await self._reply(ctx, content="⏰ Temps écoulé, aucun anime retiré.", ephemeral=True)
+                else:
+                    await ctx.send("⏰ Temps écoulé, aucun anime retiré.")
                 return
         else:
             to_remove = matches[0]
@@ -295,35 +376,33 @@ class Tracker(commands.Cog):
         tracker[uid] = current_list
         core.save_tracker(tracker)
 
-        await self._dm(ctx, content=f"✅ **{to_remove}** a été retiré de ta liste.")
+        ok = await self._dm(ctx, content=f"✅ **{to_remove}** a été retiré de ta liste.")
+        if ok and ctx.interaction:
+            await self._reply(ctx, content="📬 Confirmation envoyée en **message privé**.", ephemeral=True)
 
     # ----------------- Clear -----------------
 
     @track.command(name="clear", with_app_command=True, description="Vide entièrement ta liste de suivi.")
     async def track_clear(self, ctx: commands.Context) -> None:
+        await self._maybe_defer(ctx, ephemeral=True)
         tracker = core.load_tracker()
         uid = str(ctx.author.id)
         if uid not in tracker or not tracker[uid]:
-            await self._dm(ctx, content="📭 Ta liste est déjà vide.")
+            ok = await self._dm(ctx, content="📭 Ta liste est déjà vide.")
+            if ok and ctx.interaction:
+                await self._reply(ctx, content="📬 Message envoyé en **message privé**.", ephemeral=True)
             return
 
-        await self._reply(ctx, content="⚠️ Confirme la suppression complète ? (`oui`/`non`, 20s)", ephemeral=False)
-        try:
-            msg = await self.bot.wait_for(
-                "message",
-                timeout=20.0,
-                check=lambda m: m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ("oui", "non")
+        view = TrackClearConfirmView(self, ctx.author.id)
+        if getattr(ctx, "interaction", None):
+            await self._reply(
+                ctx,
+                content="⚠️ **Supprimer toute ta liste de suivi ?**",
+                view=view,
+                ephemeral=True,
             )
-        except asyncio.TimeoutError:
-            await self._reply(ctx, content="⏰ Temps écoulé, opération annulée.")
-            return
-
-        if msg.content.lower() == "oui":
-            tracker[uid] = []
-            core.save_tracker(tracker)
-            await self._dm(ctx, content="✅ Ta liste a été vidée.")
         else:
-            await self._reply(ctx, content="❌ Opération annulée.")
+            await ctx.send("⚠️ **Supprimer toute ta liste de suivi ?**", view=view)
 
     # ----------------- Recherche AniList -----------------
 

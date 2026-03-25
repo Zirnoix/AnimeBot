@@ -165,6 +165,60 @@ class DuelInviteView(discord.ui.View):
         self.stop()
 
 
+class QuizLevelsSelect(discord.ui.Select):
+    """Menu : titres quiz (score du mois) ou rangs XP globaux (/mycard)."""
+
+    def __init__(self, parent_view: "QuizLevelsView") -> None:
+        self._parent = parent_view
+        super().__init__(
+            custom_id="quizlevels_kind",
+            placeholder="Choisir quel palier afficher…",
+            options=[
+                discord.SelectOption(
+                    label="Titres quiz (score du mois)",
+                    value="quiz",
+                    emoji="🎯",
+                    default=True,
+                ),
+                discord.SelectOption(
+                    label="Rangs XP globaux (/mycard)",
+                    value="xp",
+                    emoji="🌟",
+                ),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        key = (self.values[0] if self.values else "quiz") or "quiz"
+        emb = self._parent._quiz_embed if key == "quiz" else self._parent._xp_embed
+        await interaction.response.edit_message(embed=emb, view=self._parent)
+
+
+class QuizLevelsView(discord.ui.View):
+    def __init__(self, author_id: int, quiz_embed: discord.Embed, xp_embed: discord.Embed) -> None:
+        super().__init__(timeout=180)
+        self.author_id = author_id
+        self._quiz_embed = quiz_embed
+        self._xp_embed = xp_embed
+        self.add_item(QuizLevelsSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Ce menu n’est pas pour toi.", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for c in self.children:
+            if isinstance(c, discord.ui.Select):
+                c.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
+
 class Quiz(commands.Cog):
     """Cog for anime quiz commands (AniList live)."""
 
@@ -782,7 +836,7 @@ class Quiz(commands.Cog):
 
     @commands.hybrid_command(
         name="quizlevels",
-        description="Titres quiz (score du mois) et rangs XP : envoie deux messages séparés.",
+        description="Liste des paliers : menu pour choisir titres quiz (score du mois) ou rangs XP.",
     )
     async def quizlevels(self, ctx: commands.Context) -> None:
         try:
@@ -802,7 +856,7 @@ class Quiz(commands.Cog):
                 value="\n".join(q_lines)[:1024],
                 inline=False,
             )
-            em_quiz.set_footer(text="Podium : +600 / +350 / +200 XP — /quiztop")
+            em_quiz.set_footer(text="Menu ci-dessous · Podium : +600 / +350 / +200 XP — /quiztop")
             em_xp = discord.Embed(
                 title="🌟 Rangs XP (global)",
                 description=(
@@ -816,8 +870,10 @@ class Quiz(commands.Cog):
                 value="\n".join(g_lines)[:1024],
                 inline=False,
             )
-            await ctx.send(embed=em_quiz)
-            await ctx.send(embed=em_xp)
+            em_xp.set_footer(text="Menu ci-dessous pour basculer vers les titres quiz")
+            view = QuizLevelsView(ctx.author.id, em_quiz, em_xp)
+            msg = await ctx.send(embed=em_quiz, view=view)
+            view.message = msg
         except Exception as e:
             logger.error(f"Erreur dans quizlevels: {e}")
             await ctx.send("❌ Une erreur s'est produite.")

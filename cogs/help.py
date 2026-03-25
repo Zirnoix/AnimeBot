@@ -17,7 +17,6 @@ DESC_OVERRIDE: Dict[str, str] = {
     # Episodes
     "next": "Prochain épisode — mode **serveur** = ta liste du serveur (`/airings`) ; mode **global** = toutes les sorties.",
     "planning": "Planning de la semaine — mode **serveur** = liste du serveur ; **global** = toutes les sorties.",
-    "prochains": "Liste des prochains épisodes (avec filtres/limites optionnels).",
     "decouverte": "Découvre un anime (suggestion ou fiche).",
     "monnext": "Ton prochain épisode (compte AniList lié requis).",
     "monplanning": "Ton planning hebdomadaire (compte AniList lié).",
@@ -53,9 +52,8 @@ DESC_OVERRIDE: Dict[str, str] = {
     "mybadges": "Liste tes badges et ta progression.",
     "duelstats": "Duel d’engagement AniList : complétés, en cours, épisodes, temps (+ note si les deux notent).",
     "quiztop": "Top du classement quiz + podium du mois dernier et récompenses.",
-    "quizlevels": "Titres quiz (score du mois) et rangs XP : **deux messages** séparés.",
+    "quizlevels": "Paliers quiz (score du mois) et rangs XP : **un menu** pour choisir quoi afficher.",
     "myrank": "Ton rang, ton XP et ton titre.",
-    "mychart": "Histogramme de tes genres les plus regardés.",
     "stats": "Stats AniList d’un utilisateur spécifié.",
 
     # Tracker
@@ -101,7 +99,7 @@ DESC_OVERRIDE: Dict[str, str] = {
 # ===== Sections curatées (ordre d’affichage) =====
 CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
     ("📺 Pages Episodes", [
-        "next", "planning", "prochains", "decouverte", "monnext", "monplanning"
+        "next", "planning", "decouverte", "monnext", "monplanning"
     ]),
     ("🎯 Pages MiniGames", [
         "animequiz", "animequizmulti", "duel",
@@ -113,7 +111,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "linkanilist", "unlink"
     ]),
     ("📊 Pages Statistiques", [
-        "mycard", "mystats", "mybadges", "duelstats", "quiztop", "quizlevels", "myrank", "mychart", "stats"
+        "mycard", "mystats", "mybadges", "duelstats", "quiztop", "quizlevels", "myrank", "stats"
     ]),
     ("🧭 Pages Tracker", [
         "track", "track add", "track list", "track remove", "track clear"
