@@ -972,8 +972,25 @@ def query_anilist(query: str, variables: dict = None) -> dict:
             if resp.status_code != 200:
                 if resp.status_code == 404:
                     LOG.debug("[AniList] 404 – ressource introuvable (souvent pseudo AniList inconnu).")
-                else:
-                    LOG.warning("[AniList] HTTP %s – %s", resp.status_code, resp.text)
+                    return None
+                # 5xx / surcharge : souvent temporaire côté AniList — retenter (évite 12× WARNING au boot)
+                if resp.status_code in (408, 425, 500, 502, 503, 504) and attempt < max_tries:
+                    LOG.debug(
+                        "[AniList] HTTP %s (essai %s/%s), nouvel essai dans %.1fs — %s",
+                        resp.status_code,
+                        attempt,
+                        max_tries,
+                        backoff,
+                        str(j)[:160] if j else resp.text[:160],
+                    )
+                    time.sleep(backoff)
+                    backoff *= 1.8
+                    continue
+                LOG.warning(
+                    "[AniList] HTTP %s (définitif) – %s",
+                    resp.status_code,
+                    (resp.text[:400] if resp.text else ""),
+                )
                 return None
 
             # erreurs GraphQL
@@ -1002,7 +1019,14 @@ def load_cached_titles() -> List[dict]:
     return []
 
 def get_upcoming_episodes(username: str, *, force: bool = False) -> list[dict]:
-    key = username.lower()
+    """
+    Prochains épisodes pour les entrées AniList **En cours** + **En relecture** (CURRENT, REPEATING).
+    Ne retient que les médias où AniList expose `nextAiringEpisode` (épisode annoncé).
+    """
+    uname = (username or "").strip()
+    if not uname:
+        return []
+    key = uname.lower()
     if not force and _fresh("upcoming", key):
         return _ANILIST_CACHE["upcoming"][key]["data"]
 
@@ -1023,8 +1047,35 @@ def get_upcoming_episodes(username: str, *, force: bool = False) -> list[dict]:
         }
       }
     }"""
-    data = query_anilist(q, variables={"name": username})
-    coll = data and data.get("data", {}).get("MediaListCollection")
+    data = query_anilist(q, variables={"name": uname})
+
+    def _stale_or_empty() -> list[dict]:
+        """Ne pas renvoyer [] après erreur réseau si on a encore un cache (évite 6h de faux vide)."""
+        if force:
+            return []
+        ent = _ANILIST_CACHE["upcoming"].get(key)
+        if ent:
+            LOG.debug(
+                "[AniList] get_upcoming_episodes: cache antérieur conservé (API indisponible / erreur) — %s",
+                uname,
+            )
+            return list(ent["data"])
+        return []
+
+    if not data:
+        return _stale_or_empty()
+
+    if isinstance(data, dict) and data.get("errors"):
+        inner = data.get("data")
+        if inner is None or (isinstance(inner, dict) and inner.get("MediaListCollection") is None):
+            LOG.warning(
+                "[AniList] get_upcoming_episodes GraphQL erreurs pour %s — %s",
+                uname,
+                str(data.get("errors"))[:280],
+            )
+            return _stale_or_empty()
+
+    coll = (data.get("data") or {}).get("MediaListCollection")
     res = []
     if coll:
         for lst in coll.get("lists") or []:
@@ -1045,6 +1096,14 @@ def get_upcoming_episodes(username: str, *, force: bool = False) -> list[dict]:
     res.sort(key=lambda x: x["airingAt"])
     _ANILIST_CACHE["upcoming"][key] = {"ts": time.time(), "data": res}
     return res
+
+
+def invalidate_upcoming_cache(username: str | None = None) -> None:
+    """Vide le cache « upcoming » pour un pseudo (ou tout le bucket si username vide)."""
+    if not username or not str(username).strip():
+        _ANILIST_CACHE["upcoming"].clear()
+        return
+    _ANILIST_CACHE["upcoming"].pop(str(username).strip().lower(), None)
 
 def get_anime_details(media_id: int) -> Optional[dict]:
     query = '''

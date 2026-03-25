@@ -320,8 +320,11 @@ class Episodes(commands.Cog):
         name="monnext",
         description="Tes prochain(s) épisode(s) (compte AniList lié). Envoi en MP (carte image + liste)."
     )
-    @app_commands.describe(limite="Nombre d’entrées (1-5 recommandés)")
-    async def monnext(self, ctx: commands.Context, limite: Optional[int] = 1) -> None:
+    @app_commands.describe(
+        limite="Nombre d’entrées (1-5 recommandés)",
+        rafraichir="Ignorer le cache et reinterroger AniList (utile après une panne API).",
+    )
+    async def monnext(self, ctx: commands.Context, limite: Optional[int] = 1, rafraichir: bool = False) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
 
@@ -331,7 +334,7 @@ class Episodes(commands.Cog):
             return
 
         try:
-            items = core.get_upcoming_episodes(username) or []
+            items = core.get_upcoming_episodes(username, force=rafraichir) or []
         except Exception as e:
             await _send_dm(ctx, content=f"⚠️ Impossible de récupérer tes prochains épisodes.\n`{type(e).__name__}: {e}`")
             return
@@ -343,7 +346,15 @@ class Episodes(commands.Cog):
 
         items = sorted(items, key=lambda x: x.get("airingAt", 0))[:n]
         if not items:
-            await _send_dm(ctx, content="📭 Aucun épisode à venir trouvé.")
+            await _send_dm(
+                ctx,
+                content=(
+                    "📭 Aucun **prochain épisode annoncé** pour ta liste **En cours / Répété** sur AniList.\n"
+                    "• Seules les séries avec une date d’épisode côté AniList (`nextAiringEpisode`) apparaissent ici.\n"
+                    "• Ta liste doit être **publique** pour que le bot puisse la lire.\n"
+                    "• Si l’API venait de planter, réessaie avec **`rafraichir: Oui`** sur cette commande."
+                ),
+            )
             return
 
         # 1) Carte image sur le premier
@@ -374,7 +385,10 @@ class Episodes(commands.Cog):
         name="monplanning",
         description="Ton planning hebdo depuis ta liste AniList (compte lié requis). Envoi en MP."
     )
-    async def monplanning(self, ctx: commands.Context) -> None:
+    @app_commands.describe(
+        rafraichir="Ignorer le cache et reinterroger AniList (utile après une panne API).",
+    )
+    async def monplanning(self, ctx: commands.Context, rafraichir: bool = False) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
 
@@ -384,13 +398,20 @@ class Episodes(commands.Cog):
             return
 
         try:
-            items = core.get_upcoming_episodes(username) or []
+            items = core.get_upcoming_episodes(username, force=rafraichir) or []
         except Exception as e:
             await _send_dm(ctx, content=f"⚠️ Impossible de récupérer ton planning.\n`{type(e).__name__}: {e}`")
             return
 
         if not items:
-            await _send_dm(ctx, content="📭 Aucun épisode à venir dans ta liste.")
+            await _send_dm(
+                ctx,
+                content=(
+                    "📭 Pas de **prochain épisode annoncé** sur AniList pour tes entrées **En cours / Répété** "
+                    "(liste **privée**, titres sans date d’épisode publiée sur AniList, ou cache obsolète).\n"
+                    "Réessaie avec **`rafraichir: Oui`** si besoin."
+                ),
+            )
             return
 
         planning = _group_by_day_user(items)
