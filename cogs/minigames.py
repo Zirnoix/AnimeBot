@@ -230,6 +230,21 @@ class MinijeuxAutresSelect(Select):
                     value="duel",
                     description="1v1 — utilise `/duel @membre` pour lancer",
                 ),
+                discord.SelectOption(
+                    label="⛓️ Chain quiz",
+                    value="chainquiz",
+                    description="Difficulté qui monte à chaque bonne réponse",
+                ),
+                discord.SelectOption(
+                    label="🕵️ Qui est-ce ?",
+                    value="guesswho",
+                    description="Image très floutée — devine le personnage",
+                ),
+                discord.SelectOption(
+                    label="🎱 Bingo anime",
+                    value="bingo",
+                    description="Grille 3×3, tirages au sort — premier bingo gagne",
+                ),
             ],
         )
 
@@ -300,6 +315,17 @@ class MiniGames(commands.Cog):
                     await qz.animequizmulti(ctx, 5)  # type: ignore[attr-defined]
                 else:
                     await interaction.followup.send("❌ Quiz indisponible.", ephemeral=True)
+            elif key in {"chainquiz", "guesswho", "bingo"}:
+                cg = self.bot.get_cog("CommunityGames")
+                if cg:
+                    if key == "chainquiz":
+                        await cg.chainquiz(ctx)  # type: ignore[attr-defined]
+                    elif key == "guesswho":
+                        await cg.guesswho(ctx)  # type: ignore[attr-defined]
+                    else:
+                        await cg.bingo(ctx)  # type: ignore[attr-defined]
+                else:
+                    await interaction.followup.send("❌ Mini-jeu indisponible.", ephemeral=True)
             else:
                 await interaction.followup.send("❌ Option inconnue.", ephemeral=True)
         except Exception:
@@ -834,7 +860,8 @@ class MiniGames(commands.Cog):
                 "dès que tu choisis.\n"
                 "• **Duel** : rappel — lance **`/duel @membre`** (pas de partie auto depuis le menu).\n\n"
                 "Raccourcis : **`/guessyear`**, **`/guessepisodes`**, **`/guessgenre`**, **`/guesscharacter`**, "
-                "**`/higherlower`**, **`/guessop`**, **`/animequiz`**, **`/animequizmulti`**."
+                "**`/guesswho`**, **`/chainquiz`**, **`/bingo`**, **`/higherlower`**, **`/guessop`**, "
+                "**`/animequiz`**, **`/animequizmulti`**. Raid boss : **`/raidconfig`** (admin)."
             ),
             color=discord.Color.blurple(),
         )

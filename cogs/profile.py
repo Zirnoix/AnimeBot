@@ -129,6 +129,10 @@ _MINI_LABELS: Dict[str, str] = {
     "guessepisodes": "Guess — épisodes",
     "guessgenre": "Guess — genre",
     "guesscharacter": "Guess — perso",
+    "guesswho": "Qui est-ce ?",
+    "chainquiz": "Chain quiz",
+    "bingo": "Bingo anime",
+    "bossraid": "Raid boss",
     "guessop": "Guess OP",
     "duel": "Duel lancés",
     "duel_victory": "Duels gagnés",
@@ -163,9 +167,11 @@ def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str
         ("📅", "Engagement", frozenset({"mission_completed", "checkin", "mycard_visits"})),
         ("🎯", "Quiz", frozenset({"animequiz", "animequizmulti"})),
         ("🎭", "Devinettes", frozenset({
-            "guessyear", "guessepisodes", "guessgenre", "guesscharacter", "guessop",
+            "guessyear", "guessepisodes", "guessgenre", "guesscharacter", "guesswho",
+            "guessop",
             "guesspop", "guesspo", "guessspo", "guessopener",
         })),
+        ("🐉", "Communauté", frozenset({"chainquiz", "bingo", "bossraid"})),
         ("⚔️", "Duels", frozenset({"duel", "duel_victory"})),
     ]
     used: set[str] = set()
@@ -339,14 +345,16 @@ class MyCardTabSelect(discord.ui.Select):
 def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days):
     bar = _xp_bar(xp, next_xp)
     e = discord.Embed(
-        title=f"🎴 {ctx.author.display_name}",
-        description=f"**{title}** · Niveau **{level}**",
+        title=f"🎴 Profil de {ctx.author.display_name}",
         color=_EMBED_OVERVIEW,
     )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
-    e.add_field(name="XP", value=f"{_fmt_number(xp)} / {_fmt_number(next_xp)}", inline=True)
-    e.add_field(name="Barre XP", value=bar, inline=True)
-    e.add_field(name="Quiz", value=str(_fmt_number(quiz_score)), inline=True)
+    # Trois colonnes : évite le débordement titre+niveau dans une seule ligne + quiz à côté de la barre
+    e.add_field(name="🏅 Titre", value=f"**{title}**", inline=True)
+    e.add_field(name="🧬 Niveau", value=f"**{level}**", inline=True)
+    e.add_field(name="🧪 XP", value=f"{_fmt_number(xp)} / {_fmt_number(next_xp)}", inline=True)
+    e.add_field(name="📈 Progression", value=bar, inline=False)
+    e.add_field(name="🏆 Score Quiz", value=str(_fmt_number(quiz_score)), inline=False)
 
     # Streak
     next_pal = None
@@ -357,12 +365,12 @@ def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days):
     streak_line = f"🔥 Série actuelle : **{streak_days}** jour(s)"
     if next_pal:
         streak_line += f" • Prochain palier : **{streak_days}/{next_pal}**"
-    e.add_field(name="Streak", value=streak_line, inline=False)
+    e.add_field(name="🔥 Streak", value=streak_line, inline=False)
     gg_pen = core.get_guess_genre_penalty_count(ctx.author.id)
     e.add_field(
-        name="Sanctions Guess genre",
+        name="⚠️ Sanctions Guess genre",
         value=str(gg_pen) if gg_pen else "0",
-        inline=True,
+        inline=False,
     )
     e.set_footer(text="Onglet : menu ci-dessous")
     return e

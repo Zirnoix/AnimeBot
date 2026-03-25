@@ -31,6 +31,16 @@ DESC_OVERRIDE: Dict[str, str] = {
     "guessepisodes": "Devine le nombre d’épisodes (image + réponse dans le salon).",
     "guessgenre": "Trouve un des genres (image + réponse texte).",
     "guesscharacter": "Choisis le bon personnage (4 boutons).",
+    "guesswho": "Devine le personnage sur une image très floutée (réponse texte).",
+    "chainquiz": "Enchaîne des quiz solo : la difficulté monte à chaque bonne réponse.",
+    "bingo": "Bingo 3×3 sur des titres d’anime tirés au sort — premier bingo gagne.",
+    "raidconfig": "Groupe admin : salon, horaire hebdo, activer/désactiver le raid boss.",
+    "raidconfig canal": "Définit le salon des alertes et du combat de raid boss.",
+    "raidconfig horaire": "Jour (0=lun…6=dim) et heure du raid automatique (fuseau BOT_TIMEZONE).",
+    "raidconfig activer": "Active ou désactive le lancement automatique du raid.",
+    "raidconfig statut": "Affiche la configuration du raid et le prochain créneau.",
+    "raidstart": "Lance un raid boss tout de suite dans ce salon (admin).",
+    "raidalerttest": "Envoie un message de test type « raid dans 1 h » (admin).",
     "minijeux": "Deux menus : **Devinettes (Guess)** et **Autres** — choix = lance la partie (duel → /duel @membre).",
     "higherlower": "Jeu Higher/Lower version anime.",
     "year": "Guess : deviner l’année.",
@@ -104,8 +114,11 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
     ("🎯 Pages MiniGames", [
         "animequiz", "animequizmulti", "duel",
         "guessyear", "guessepisodes", "guessgenre", "guesscharacter",
+        "guesswho", "chainquiz", "bingo",
         "guessop",
         "higherlower", "minijeux",
+        "raidconfig", "raidconfig canal", "raidconfig horaire", "raidconfig activer", "raidconfig statut",
+        "raidstart", "raidalerttest",
     ]),
     ("🔗 Pages Link", [
         "linkanilist", "unlink"
