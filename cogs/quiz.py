@@ -782,33 +782,42 @@ class Quiz(commands.Cog):
 
     @commands.hybrid_command(
         name="quizlevels",
-        description="Titres du quiz (score du mois) et rangs XP globaux (/mycard, /myrank).",
+        description="Titres quiz (score du mois) et rangs XP : envoie deux messages séparés.",
     )
     async def quizlevels(self, ctx: commands.Context) -> None:
         try:
             await _maybe_defer(ctx, ephemeral=False)
             q_lines = [f"**{score}+** pts → {title}" for score, title in core.LEVEL_TITLES_QUIZ]
             g_lines = [f"**Niveau {lvl}+** → {title}" for lvl, title in core.LEVEL_TITLES_GLOBAL]
-            em = discord.Embed(
-                title="📚 Niveaux et titres",
+            em_quiz = discord.Embed(
+                title="🎯 Titres quiz (score du mois)",
                 description=(
-                    "Deux systèmes : le **score quiz** (classement du mois, reset le 1ᵉʳ) "
-                    "et le **niveau XP** (progression globale sur ta carte et /myrank)."
+                    "Ton **score** dans **`/quiztop`** augmente quand tu joues aux quiz solo/multi/duel. "
+                    "Il est **remis à zéro le 1ᵉʳ de chaque mois** (classement + podium)."
                 ),
                 color=discord.Color.gold(),
             )
-            em.add_field(
-                name="🎯 Titres quiz (score du mois en cours)",
+            em_quiz.add_field(
+                name="Paliers (points du mois en cours)",
                 value="\n".join(q_lines)[:1024],
                 inline=False,
             )
-            em.add_field(
-                name="🌟 Rangs XP (carte /mycard, /myrank)",
+            em_quiz.set_footer(text="Podium : +600 / +350 / +200 XP — /quiztop")
+            em_xp = discord.Embed(
+                title="🌟 Rangs XP (global)",
+                description=(
+                    "Ton **niveau** et ta barre d’XP sur **`/mycard`** et **`/myrank`** : "
+                    "progression **sur toute la durée** (check-in, mini-jeux, quiz…), **sans** reset mensuel."
+                ),
+                color=discord.Color.purple(),
+            )
+            em_xp.add_field(
+                name="Paliers (niveau)",
                 value="\n".join(g_lines)[:1024],
                 inline=False,
             )
-            em.set_footer(text="Podium mensuel : +600 / +350 / +200 XP + trophées — /quiztop")
-            await ctx.send(embed=em)
+            await ctx.send(embed=em_quiz)
+            await ctx.send(embed=em_xp)
         except Exception as e:
             logger.error(f"Erreur dans quizlevels: {e}")
             await ctx.send("❌ Une erreur s'est produite.")

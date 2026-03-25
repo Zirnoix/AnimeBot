@@ -3,7 +3,7 @@ Mini-games commands.
 
 * `/minijeux` — deux menus : **Devinettes (Guess)** et **Autres** (lance la partie ; duel → /duel)
 * `/higherlower` — popularité
-* Les modes Guess (année, épisodes, genre, perso) ne sont plus exposés en slash dédié : uniquement via `/minijeux`.
+* Raccourcis slash : `/guessyear`, `/guessepisodes`, `/guessgenre`, `/guesscharacter` (même logique que le menu).
 """
 
 from __future__ import annotations
@@ -275,13 +275,13 @@ class MiniGames(commands.Cog):
             if key == "higherlower":
                 await self.higher_lower(ctx)
             elif key == "guess_year":
-                await self.guess_year(ctx)
+                await self._guess_year(ctx)
             elif key == "guess_episodes":
-                await self.guess_episodes(ctx)
+                await self._guess_episodes(ctx)
             elif key == "guess_genre":
-                await self.guess_genre(ctx)
+                await self._guess_genre(ctx)
             elif key == "guess_character":
-                await self.guess_character(ctx)
+                await self._guess_character(ctx)
             elif key == "guessop":
                 og = self.bot.get_cog("Openings")
                 if og:
@@ -313,7 +313,7 @@ class MiniGames(commands.Cog):
                 pass
 
     # --------------------------------------
-    # Guess (year, episodes, genre, character) — uniquement via /minijeux (pas de commande /guess)
+    # Guess (year, episodes, genre, character) — /guess* + /minijeux
     # --------------------------------------
     @commands.hybrid_command(name="higherlower", description="Quel anime est le plus populaire ?")
     async def higher_lower(self, ctx: commands.Context):
@@ -396,7 +396,7 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     # Guess Year
     # --------------------------------------
-    async def guess_year(self, ctx: commands.Context) -> None:
+    async def _guess_year(self, ctx: commands.Context) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
 
@@ -455,7 +455,7 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     # Guess Episodes
     # --------------------------------------
-    async def guess_episodes(self, ctx: commands.Context) -> None:
+    async def _guess_episodes(self, ctx: commands.Context) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
 
@@ -524,7 +524,7 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     # Guess Genre
     # --------------------------------------
-    async def guess_genre(self, ctx: commands.Context) -> None:
+    async def _guess_genre(self, ctx: commands.Context) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
 
@@ -534,7 +534,7 @@ class MiniGames(commands.Cog):
         if now < cd_until:
             remaining = max(1, int(cd_until - now))
             await ctx.send(
-                f"⏳ **Anti-spam genre** : attends encore **{remaining}s** avant de relancer le **Guess genre** (`/minijeux`)."
+                f"⏳ **Anti-spam genre** : attends encore **{remaining}s** avant de relancer le **Guess genre** (`/guessgenre` ou `/minijeux`)."
             )
             return
 
@@ -681,7 +681,7 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     # Guess Character (boutons)
     # --------------------------------------
-    async def guess_character(self, ctx: commands.Context) -> None:
+    async def _guess_character(self, ctx: commands.Context) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
 
@@ -795,6 +795,34 @@ class MiniGames(commands.Cog):
         view.message = sent
 
     @commands.hybrid_command(
+        name="guessyear",
+        description="Devine l’année de diffusion d’un anime (image + réponse dans le salon).",
+    )
+    async def guessyear(self, ctx: commands.Context) -> None:
+        await self._guess_year(ctx)
+
+    @commands.hybrid_command(
+        name="guessepisodes",
+        description="Devine le nombre d’épisodes d’un anime (image + réponse dans le salon).",
+    )
+    async def guessepisodes(self, ctx: commands.Context) -> None:
+        await self._guess_episodes(ctx)
+
+    @commands.hybrid_command(
+        name="guessgenre",
+        description="Trouve un des genres de l’anime (image + réponse texte dans le salon).",
+    )
+    async def guessgenre(self, ctx: commands.Context) -> None:
+        await self._guess_genre(ctx)
+
+    @commands.hybrid_command(
+        name="guesscharacter",
+        description="Choisis le bon personnage parmi 4 propositions (boutons).",
+    )
+    async def guesscharacter(self, ctx: commands.Context) -> None:
+        await self._guess_character(ctx)
+
+    @commands.hybrid_command(
         name="minijeux",
         description="Menu des mini-jeux : choisis dans la liste pour lancer une partie.",
     )
@@ -805,7 +833,8 @@ class MiniGames(commands.Cog):
                 "**Deux menus** : **Devinettes (Guess)** et **Autres** — la partie **démarre** dans ce salon "
                 "dès que tu choisis.\n"
                 "• **Duel** : rappel — lance **`/duel @membre`** (pas de partie auto depuis le menu).\n\n"
-                "Autres raccourcis : **`/higherlower`**, **`/guessop`**, **`/animequiz`**, **`/animequizmulti`**."
+                "Raccourcis : **`/guessyear`**, **`/guessepisodes`**, **`/guessgenre`**, **`/guesscharacter`**, "
+                "**`/higherlower`**, **`/guessop`**, **`/animequiz`**, **`/animequizmulti`**."
             ),
             color=discord.Color.blurple(),
         )
