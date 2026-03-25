@@ -5,26 +5,30 @@ Engagement features: daily check-in (streak) + daily missions (refonte).
 - /mission              -> affiche la mission du jour (menu action)
 - /mission reroll       -> 1 reroll par SEMAINE (lundi→dimanche)
 
-Missions :
-- Utiliser des commandes AniList (/next, /planning, /monnext, /monplanning…)
-- Lancer un duel (/duel), gagner un duel (événement)
-- Gagner un quiz (événement)
-- Gagner un niveau (événement)
-- Combo: utiliser X commandes différentes dans la journée
-
+Missions : commandes du bot, combos « commandes distinctes », événements (duel gagné, quiz, level up).
 Récompenses adaptées à la difficulté (EASY/MEDIUM/HARD).
 """
 
 from __future__ import annotations
+import logging
 import os, json, random
 from datetime import datetime, timedelta, date
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 
 import discord
 from discord.ext import commands
 from discord import app_commands
 
 from modules import core
+from modules.mission_definitions import (
+    DEFAULT_MISSION_HINT,
+    MISSION_HINTS,
+    mission_state_from_def,
+    pick_weighted_random_mission,
+)
+from modules.mission_logic import mission_apply_progress
+
+LOG = logging.getLogger(__name__)
 
 STREAK_PATH   = "data/streaks.json"
 MISSIONS_PATH = "data/missions.json"
@@ -76,30 +80,6 @@ def _days_until(d: date) -> int:
     t = _today_date()
     return max(0, (d - t).days)
 
-# ------------- Mission templates -------------
-# (key, label_template, commands_set, base_goal, difficulty)
-MISSION_TEMPLATES: List[Tuple[str, str, set, int, str]] = [
-    # Suivi AniList
-    ("use_next",      "Utilise `/next` ou `/monnext` aujourd'hui", {"next", "monnext"}, 1, "EASY"),
-    ("use_planning",  "Consulte ton planning (`/planning` ou `/monplanning`)", {"planning", "monplanning"}, 1, "EASY"),
-    ("use_3_tracking","Utilise 3 commandes de suivi différentes (`/next`, `/planning`, `/monplanning`, `/monnext`)", {"next","planning","monplanning","monnext"}, 3, "MEDIUM"),
-
-    # Duel
-    ("duel_initiate", "Propose quelqu’un en duel avec `/duel`", {"duel"}, 1, "EASY"),
-    ("duel_win",      "Remporte un duel aujourd’hui", {"_custom:duel_win"}, 1, "HARD"),
-
-    # Quiz
-    ("quiz_play",     "Participe à un quiz avec `/animequiz`", {"animequiz"}, 1, "EASY"),
-    # accepte win solo ET seuil multi
-    ("quiz_win",      "Gagne un quiz aujourd’hui", {"_custom:quiz_win", "_custom:quiz_solo_ok"}, 1, "MEDIUM"),
-
-    # Progression / XP
-    ("level_up",      "Gagne un niveau aujourd’hui", {"_custom:level_up"}, 1, "HARD"),
-
-    # Social doux
-    ("react_quiz",    "Réagis à un quiz avec un emoji aujourd’hui", {"_custom:react_quiz"}, 1, "EASY"),
-]
-
 # Barème de récompenses selon difficulté (min, max)
 REWARD_TABLE = {
     "EASY":   (20, 35),
@@ -108,22 +88,11 @@ REWARD_TABLE = {
 }
 DEFAULT_REWARD_FALLBACK = 20
 
-# Aide courte affichée par /mission (clé = mission["key"])
-MISSION_HINTS: Dict[str, str] = {
-    "use_next": "Lance **`/next`** ou **`/monnext`** une fois dans ce serveur.",
-    "use_planning": "Ouvre **`/planning`** ou **`/monplanning`** pour consulter les sorties.",
-    "use_3_tracking": "Combien **3** commandes différentes parmi : `/next`, `/planning`, `/monplanning`, `/monnext`.",
-    "duel_initiate": "Lance un duel avec **`/duel @quelqu’un`** (la partie doit démarrer).",
-    "duel_win": "Remporte **au moins une manche** d’un duel aujourd’hui (événement en arrière-plan).",
-    "quiz_play": "Joue **`/animequiz`** (ou une variante) puis termine une réponse.",
-    "quiz_win": "Réponds correctement à un quiz (solo ou manche) **aujourd’hui**.",
-    "level_up": "Passe **un niveau** global (XP) dans la journée — continue à jouer / quiz.",
-    "react_quiz": "Réagis avec un emoji à un **message de quiz** du bot (embed « quiz »).",
-}
 
 def _roll_reward(difficulty: str) -> int:
     lo, hi = REWARD_TABLE.get(difficulty, (DEFAULT_REWARD_FALLBACK, DEFAULT_REWARD_FALLBACK))
     return random.randint(lo, hi)
+
 
 # ----------------- Cog -----------------
 class Engagement(commands.Cog):
@@ -153,6 +122,11 @@ class Engagement(commands.Cog):
         data["last"] = today
         self.streaks[uid] = data
         _save_json(STREAK_PATH, self.streaks)
+
+        try:
+            core.add_mini_score(int(uid), "checkin", 1)
+        except Exception:
+            pass
 
         s = data["streak"]
         if s == 1:
@@ -200,13 +174,10 @@ class Engagement(commands.Cog):
         )
 
     # ------------- DAILY MISSION -------------
-    def _pick_template(self) -> Tuple[str, str, set, int, str]:
-        pool = []
-        for tpl in MISSION_TEMPLATES:
-            diff = tpl[4]
-            weight = 1 if diff == "HARD" else 2 if diff == "MEDIUM" else 3
-            pool.extend([tpl] * weight)
-        return random.choice(pool)
+    def _roll_new_mission_payload(self, *, carry_last_rr: Any, today: str) -> Dict[str, Any]:
+        d = pick_weighted_random_mission()
+        base = mission_state_from_def(d, reward_xp=_roll_reward(d.difficulty))
+        return {"date": today, "last_reroll": carry_last_rr, **base}
 
     def _get_or_create_today_mission(self, uid: str) -> Dict[str, Any]:
         today = _today_str()
@@ -217,32 +188,67 @@ class Engagement(commands.Cog):
             # important : on ne touche PAS à last_reroll ici
             if "commands" in m and isinstance(m["commands"], list):
                 m["commands"] = list(set(m["commands"]))
+            if "distinct" not in m:
+                m["distinct"] = m.get("key") == "use_3_tracking"
+            m.setdefault("distinct_used", [])
             self.missions[uid] = m
             return m
 
-        # --- on PORTE le last_reroll de la veille (persistance hebdo) ---
         prev = self.missions.get(uid) or {}
         carry_last_rr = prev.get("last_reroll")
-
-        key, label, cmds, goal, diff = self._pick_template()
-        m = {
-            "date": today,
-            "key": key,
-            "label": label,
-            "commands": list(cmds),
-            "goal": goal,
-            "progress": 0,
-            "reward_xp": _roll_reward(diff),
-            "difficulty": diff,
-            "completed": False,
-            "last_reroll": carry_last_rr,  # <-- persiste
-        }
+        m = self._roll_new_mission_payload(carry_last_rr=carry_last_rr, today=today)
         self.missions[uid] = m
         _save_json(MISSIONS_PATH, self.missions)
         return m
 
     def _mission_bar_line(self, progress: int, goal: int) -> str:
         return f"{_bar(progress, goal)}  **{progress}/{goal}**"
+
+    async def _after_mission_progress(
+        self,
+        uid: int,
+        m: Dict[str, Any],
+        *,
+        ctx: Optional[commands.Context] = None,
+    ) -> None:
+        """Sauvegarde ; si objectif atteint et pas encore complétée : XP + notification."""
+        uid_str = str(uid)
+        goal = int(m.get("goal", 1))
+        prog = int(m.get("progress", 0))
+        if prog < goal:
+            self.missions[uid_str] = m
+            _save_json(MISSIONS_PATH, self.missions)
+            return
+        if m.get("completed"):
+            self.missions[uid_str] = m
+            _save_json(MISSIONS_PATH, self.missions)
+            return
+
+        m["completed"] = True
+        xp = int(m.get("reward_xp", DEFAULT_REWARD_FALLBACK))
+        try:
+            core.add_mini_score(uid, "mission_completed", 1)
+        except Exception:
+            pass
+        await core.add_xp(self.bot, ctx.channel if ctx else None, uid, xp)
+
+        if ctx and ctx.channel:
+            try:
+                await ctx.send(f"🎯 **Mission accomplie !** +{xp} XP")
+            except Exception as e:
+                LOG.debug("mission notify channel failed uid=%s: %s", uid, e)
+        elif core.get_mission_dm_notify(uid):
+            user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
+            if user:
+                try:
+                    await user.send(f"🎯 **Mission accomplie !** +{xp} XP")
+                except discord.Forbidden:
+                    pass
+                except Exception as e:
+                    LOG.debug("mission notify DM failed uid=%s: %s", uid, e)
+
+        self.missions[uid_str] = m
+        _save_json(MISSIONS_PATH, self.missions)
 
     async def _try_complete_mission(self, ctx: commands.Context):
         """Appelée après chaque commande réussie (listener)."""
@@ -252,24 +258,19 @@ class Engagement(commands.Cog):
             return
 
         cmd = (ctx.command.qualified_name if ctx.command else "") or ""
-        if cmd in set(m.get("commands", [])):
-            m["progress"] = int(m.get("progress", 0)) + 1
-            if m["progress"] >= int(m.get("goal", 1)):
-                m["completed"] = True
-                xp = int(m.get("reward_xp", DEFAULT_REWARD_FALLBACK))
-                await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp)
-                await ctx.send(f"🎯 **Mission accomplie !** +{xp} XP")
-
-            self.missions[uid] = m
-            _save_json(MISSIONS_PATH, self.missions)
+        if not mission_apply_progress(m, cmd):
+            return
+        await self._after_mission_progress(ctx.author.id, m, ctx=ctx)
 
     # ---- /mission avec menu déroulant d’action ----
-    @commands.hybrid_command(name="mission", description="Ta mission du jour (afficher / reroll).")
+    @commands.hybrid_command(name="mission", description="Ta mission du jour (afficher / reroll / MP).")
     @app_commands.describe(action="Que veux-tu faire ?")
     @app_commands.choices(
         action=[
             app_commands.Choice(name="Afficher", value="show"),
             app_commands.Choice(name="Reroll (1/sem.)", value="reroll"),
+            app_commands.Choice(name="MP fin de mission : ON", value="dm_on"),
+            app_commands.Choice(name="MP fin de mission : OFF", value="dm_off"),
         ]
     )
     async def mission(self, ctx: commands.Context, action: Optional[str] = None):
@@ -277,6 +278,42 @@ class Engagement(commands.Cog):
         # normalise si Choice
         if isinstance(action, app_commands.Choice):
             action = action.value
+
+        al = (action or "show")
+        if isinstance(al, str):
+            al = al.lower().strip()
+        else:
+            al = "show"
+
+        if al in ("dm_on", "mp_on", "notif_on"):
+            core.set_mission_dm_notify(ctx.author.id, True)
+            msg = (
+                "✅ Tu recevras un **MP** quand une mission se termine **hors salon** "
+                "(quiz, duel, level up, etc.). Les missions validées par une commande restent annoncées dans le salon."
+            )
+            if ctx.interaction:
+                if not ctx.interaction.response.is_done():
+                    await ctx.interaction.response.send_message(msg, ephemeral=True)
+                else:
+                    await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.reply(msg)
+            return
+
+        if al in ("dm_off", "mp_off", "notif_off"):
+            core.set_mission_dm_notify(ctx.author.id, False)
+            msg = (
+                "✅ **MP désactivés** pour les missions terminées hors salon. "
+                "Tu gardes l’XP ; les missions complétées par une commande s’affichent toujours dans le salon."
+            )
+            if ctx.interaction:
+                if not ctx.interaction.response.is_done():
+                    await ctx.interaction.response.send_message(msg, ephemeral=True)
+                else:
+                    await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.reply(msg)
+            return
 
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=False)
@@ -308,18 +345,15 @@ class Engagement(commands.Cog):
                 return await send(msg)
 
             # autorisé → regénère
-            key, label, cmds, base_goal, diff = self._pick_template()
-            m.update({
-                "key": key,
-                "label": label,
-                "commands": list(cmds),
-                "goal": base_goal,
-                "progress": 0,
-                "reward_xp": _roll_reward(diff),
-                "difficulty": diff,
-                "completed": False,
-                "last_reroll": today.isoformat(),  # <--- marque la semaine
-            })
+            d = pick_weighted_random_mission()
+            base = mission_state_from_def(d, reward_xp=_roll_reward(d.difficulty))
+            m.update(
+                {
+                    **base,
+                    "date": _today_str(),
+                    "last_reroll": today.isoformat(),
+                }
+            )
             self.missions[uid] = m
             _save_json(MISSIONS_PATH, self.missions)
             just_rerolled = True
@@ -335,7 +369,7 @@ class Engagement(commands.Cog):
             diff, discord.Color.blurple()
         )
         mkey = str(m.get("key", ""))
-        hint = MISSION_HINTS.get(mkey, "Réalise l’objectif décrit ci-dessus ; la progression se met à jour automatiquement.")
+        hint = MISSION_HINTS.get(mkey, DEFAULT_MISSION_HINT)
 
         # Pied d’embed : rappel reroll uniquement si déjà utilisé cette semaine (sinon la commande suffit)
         rr_line = ""
@@ -390,23 +424,8 @@ class Engagement(commands.Cog):
             return
         try:
             await self._try_complete_mission(ctx)
-        except Exception:
-            pass
-
-    @commands.Cog.listener()
-    async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
-        if user.bot:
-            return
-        try:
-            msg = reaction.message
-            if msg.partial:
-                await msg.fetch()
-            if msg.embeds:
-                title = (msg.embeds[0].title or "").lower()
-                if "quiz" in title:
-                    await self._custom_progress(user.id, "_custom:react_quiz")
-        except Exception:
-            pass
+        except Exception as e:
+            LOG.debug("mission on_command_completion: %s", e, exc_info=True)
 
     # Hook générique pour que d’autres cogs poussent une progression:
     #   self.bot.dispatch("mission_progress", user_id, "_custom:duel_win")
@@ -414,8 +433,8 @@ class Engagement(commands.Cog):
     async def on_mission_progress(self, user_id: int, key: str):
         try:
             await self._custom_progress(user_id, key)
-        except Exception:
-            pass
+        except Exception as e:
+            LOG.debug("mission on_mission_progress: %s", e, exc_info=True)
 
     # Si ton système XP dispatch un level up:
     #   self.bot.dispatch("level_up", user_id, new_level)
@@ -423,29 +442,17 @@ class Engagement(commands.Cog):
     async def on_level_up(self, user_id: int, new_level: int):
         try:
             await self._custom_progress(user_id, "_custom:level_up")
-        except Exception:
-            pass
+        except Exception as e:
+            LOG.debug("mission on_level_up: %s", e, exc_info=True)
 
     async def _custom_progress(self, uid: int, key: str):
         uid_str = str(uid)
         m = self._get_or_create_today_mission(uid_str)
         if m.get("completed") or key not in set(m.get("commands", [])):
             return
-
-        m["progress"] = int(m.get("progress", 0)) + 1
-        if m["progress"] >= int(m.get("goal", 1)):
-            m["completed"] = True
-            xp = int(m.get("reward_xp", DEFAULT_REWARD_FALLBACK))
-            user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
-            if user:
-                try:
-                    await user.send(f"🎯 **Mission accomplie !** +{xp} XP")
-                except discord.Forbidden:
-                    pass
-            await core.add_xp(self.bot, None, uid, xp)
-
-        self.missions[uid_str] = m
-        _save_json(MISSIONS_PATH, self.missions)
+        if not mission_apply_progress(m, key):
+            return
+        await self._after_mission_progress(uid, m, ctx=None)
 
 
 async def setup(bot: commands.Bot):

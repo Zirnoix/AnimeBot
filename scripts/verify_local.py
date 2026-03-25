@@ -7,8 +7,9 @@ from __future__ import annotations
 import os
 import sys
 
-# Permet d'importer bot.py sans quitter (token factice)
+# Permet d'importer les modules sans quitter (valeurs factices)
 os.environ.setdefault("DISCORD_BOT_TOKEN", "0" * 50)
+os.environ.setdefault("OWNER_ID", "180389173985804288")
 
 
 def main() -> int:

@@ -8,8 +8,6 @@ from discord import app_commands
 
 from modules import core
 
-EMOJI = {"stats": "📊"}
-
 # ---------- Helpers affichage ----------
 def fmt_int(n: int) -> str:
     try:
@@ -52,6 +50,81 @@ def score_to_color(mean: float) -> int:
         g = 180 + int(75 * ((mean - 50) / 50.0))
     b = 90
     return (r << 16) + (g << 8) + b
+
+
+def build_anilist_stats_embed(
+    ctx: commands.Context,
+    brief_user: dict,
+    target: str,
+    profile: dict,
+    total_entries: int,
+    completed: int,
+    current: int,
+) -> discord.Embed:
+    """Embed unique pour /mystats et /stats (mise en page lisible)."""
+    approx = bool(profile.get("_approx"))
+    prefix = "≈ " if approx else ""
+
+    count = int(profile.get("count", 0))
+    minutes = int(profile.get("minutesWatched", 0))
+    mean = float(profile.get("meanScore", 0) or 0.0)
+    fav = profile.get("favoriteGenre") or "—"
+
+    total = int(total_entries or 0)
+    done_pct = 0 if total <= 0 else int(round(100 * completed / total))
+    color = score_to_color(mean) if mean > 0 else 0x5865F2
+
+    display = brief_user.get("name") or target
+    note_s = f"{mean:.1f}" if mean > 0 else "—"
+    line_a = (
+        f"**{prefix}{fmt_int(count)}** titres · **{prefix}{human_minutes_compact(minutes)}** · "
+        f"moyenne **{prefix}{note_s}**/100"
+    )
+    line_b = (
+        f"**{fmt_int(completed)}** terminés · **{fmt_int(current)}** en cours · "
+        f"**{fmt_int(total)}** entrées dans la liste"
+    )
+    desc_parts = []
+    if approx:
+        desc_parts.append("ℹ️ Profil AniList partiel : chiffres **approximatifs** (liste).")
+    desc_parts.extend([line_a, line_b])
+    if fav != "—":
+        desc_parts.append(f"Genre favori (profil) : **{fav}**")
+    description = "\n".join(desc_parts)
+
+    e = discord.Embed(
+        title="📊 Statistiques AniList",
+        description=description,
+        color=color,
+    )
+    url = brief_user.get("siteUrl")
+    av = brief_user.get("avatar")
+    e.set_author(name=display, url=url if url else None, icon_url=av if av else None)
+
+    e.add_field(
+        name="Complétion (terminés / entrées liste)",
+        value=f"{bar_txt(completed, total)} **{done_pct}%**",
+        inline=False,
+    )
+
+    if not approx:
+        try:
+            g = profile.get("genres") or []
+            g_sorted = sorted(g, key=lambda x: int(x.get("count") or 0), reverse=True)[:5]
+            if g_sorted:
+                total_g = sum(int(x.get("count") or 0) for x in g_sorted) or 1
+                lines = []
+                for x in g_sorted:
+                    gn = x.get("genre") or "—"
+                    c = int(x.get("count") or 0)
+                    p = int(round(100 * c / total_g))
+                    lines.append(f"**{gn}** · {fmt_int(c)} ({p}%)")
+                e.add_field(name="Répartition (top 5 genres)", value="\n".join(lines)[:1024], inline=False)
+        except Exception:
+            pass
+
+    e.set_footer(text=f"Demandé par {ctx.author.display_name}")
+    return e
 
 
 class Stats(commands.Cog):
@@ -136,68 +209,7 @@ class Stats(commands.Cog):
         except Exception:
             pass
 
-        approx = bool(profile.get("_approx"))
-        prefix = "≈ " if approx else ""
-
-        count = int(profile.get("count", 0))
-        minutes = int(profile.get("minutesWatched", 0))
-        mean = float(profile.get("meanScore", 0) or 0.0)
-        fav = profile.get("favoriteGenre") or "—"
-
-        total = int(total_entries or 0)
-        done_pct = 0 if total <= 0 else int(round(100 * completed / total))
-        color = score_to_color(mean) if mean > 0 else 0x5865F2
-
-        desc_lines = []
-        if brief_user.get("siteUrl"):
-            desc_lines.append(f"[Profil AniList]({brief_user['siteUrl']})")
-        if approx:
-            desc_lines.append("ℹ️ Stats de profil indisponibles → valeurs **approximées** depuis la liste.")
-        description = "\n".join(desc_lines) if desc_lines else discord.Embed.Empty
-
-        e = discord.Embed(
-            title=f"{EMOJI['stats']} Stats AniList — {brief_user.get('name', target)}",
-            description=description,
-            color=color,
-        )
-        e.add_field(name="🎬 Animés vus", value=prefix + fmt_int(count), inline=True)
-        e.add_field(name="🕒 Temps total", value=prefix + human_minutes_compact(minutes), inline=True)
-        e.add_field(name="⭐ Note moyenne", value=prefix + (f"{mean:.1f}" if mean > 0 else "—"), inline=True)
-
-        e.add_field(name="✅ Completed", value=fmt_int(completed), inline=True)
-        e.add_field(name="📺 En cours", value=fmt_int(current), inline=True)
-        e.add_field(name="📚 Total", value=fmt_int(total), inline=True)
-
-        e.add_field(
-            name="Progression",
-            value=(
-                f"{bar_txt(completed, total)}  **{done_pct}%**\n"
-                "_(proportion d’animes que tu as déjà finis dans ta liste AniList)_"
-            ),
-            inline=False
-        )
-        e.add_field(name="🎭 Genre favori", value=(f"**{fav}**" if fav != "—" else "—"), inline=False)
-
-        if not approx:
-            try:
-                g = profile.get("genres") or []
-                g_sorted = sorted(g, key=lambda x: int(x.get("count") or 0), reverse=True)[:5]
-                if g_sorted:
-                    total_g = sum(int(x.get("count") or 0) for x in g_sorted) or 1
-                    lines = []
-                    for x in g_sorted:
-                        name = x.get("genre") or "—"
-                        c = int(x.get("count") or 0)
-                        p = int(round(100 * c / total_g))
-                        lines.append(f"• **{name}** — {fmt_int(c)} ({p}%)")
-                    e.add_field(name="🏷️ Top genres", value="\n".join(lines), inline=False)
-            except Exception:
-                pass
-
-        if brief_user.get("avatar"):
-            e.set_thumbnail(url=brief_user["avatar"])
-        e.set_footer(text=f"Demandé par {ctx.author.display_name}")
-
+        e = build_anilist_stats_embed(ctx, brief_user, target, profile, total_entries, completed, current)
         await self._send(ctx, embed=e)
 
     # ==================== /stats <pseudo> ====================
@@ -236,68 +248,7 @@ class Stats(commands.Cog):
         except Exception:
             pass
 
-        approx = bool(profile.get("_approx"))
-        prefix = "≈ " if approx else ""
-
-        count = int(profile.get("count", 0))
-        minutes = int(profile.get("minutesWatched", 0))
-        mean = float(profile.get("meanScore", 0) or 0.0)
-        fav = profile.get("favoriteGenre") or "—"
-
-        total = int(total_entries or 0)
-        done_pct = 0 if total <= 0 else int(round(100 * completed / total))
-        color = score_to_color(mean) if mean > 0 else 0x5865F2
-
-        desc_lines = []
-        if brief.get("siteUrl"):
-            desc_lines.append(f"[Profil AniList]({brief['siteUrl']})")
-        if approx:
-            desc_lines.append("ℹ️ Stats de profil indisponibles → valeurs **approximées** depuis la liste.")
-        description = "\n".join(desc_lines) if desc_lines else discord.Embed.Empty
-
-        e = discord.Embed(
-            title=f"📊 Stats AniList — {brief.get('name', target)}",
-            description=description,
-            color=color,
-        )
-        e.add_field(name="🎬 Animés vus", value=prefix + fmt_int(count), inline=True)
-        e.add_field(name="🕒 Temps total", value=prefix + human_minutes_compact(minutes), inline=True)
-        e.add_field(name="⭐ Note moyenne", value=prefix + (f"{mean:.1f}" if mean > 0 else "—"), inline=True)
-
-        e.add_field(name="✅ Completed", value=fmt_int(completed), inline=True)
-        e.add_field(name="📺 En cours", value=fmt_int(current), inline=True)
-        e.add_field(name="📚 Total", value=fmt_int(total), inline=True)
-
-        e.add_field(
-            name="Progression",
-            value=(
-                f"{bar_txt(completed, total)}  **{done_pct}%**\n"
-                "_(proportion d’animes que tu as déjà finis dans ta liste AniList)_"
-            ),
-            inline=False
-        )
-        e.add_field(name="🎭 Genre favori", value=(f"**{fav}**" if fav != "—" else "—"), inline=False)
-
-        if not approx:
-            try:
-                g = profile.get("genres") or []
-                g_sorted = sorted(g, key=lambda x: int(x.get("count") or 0), reverse=True)[:5]
-                if g_sorted:
-                    total_g = sum(int(x.get("count") or 0) for x in g_sorted) or 1
-                    lines = []
-                    for x in g_sorted:
-                        name = x.get("genre") or "—"
-                        c = int(x.get("count") or 0)
-                        p = int(round(100 * c / total_g))
-                        lines.append(f"• **{name}** — {fmt_int(c)} ({p}%)")
-                    e.add_field(name="🏷️ Top genres", value="\n".join(lines), inline=False)
-            except Exception:
-                pass
-
-        if brief.get("avatar"):
-            e.set_thumbnail(url=brief["avatar"])
-        e.set_footer(text=f"Demandé par {ctx.author.display_name}")
-
+        e = build_anilist_stats_embed(ctx, brief, target, profile, total_entries, completed, current)
         await self._send(ctx, embed=e)
 
 

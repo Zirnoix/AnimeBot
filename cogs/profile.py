@@ -9,7 +9,13 @@ from discord.ext import commands
 
 from modules import core
 from modules.badges import BADGES, evaluate_tier
+from modules.badge_helpers import badge_count_for_spec
 from modules.emoji_utils import get_emoji
+
+# Couleurs cohérentes (proche blurple Discord + or trophées)
+_EMBED_OVERVIEW = discord.Color.from_rgb(88, 101, 242)
+_EMBED_MINIS = discord.Color.from_rgb(52, 58, 64)
+_EMBED_BADGES = discord.Color.from_rgb(212, 168, 67)
 
 
 # ---------- HELPERS BADGES ----------
@@ -20,7 +26,6 @@ def _get_user_counts(user_id: int) -> dict:
     - streak:    via data/streaks.json
     - anilist:   via compte AniList lié
     - time:      via data/time_counters.json (facultatif)
-    - command:   via data/command_usage.json (facultatif)
     """
     counts = core.get_mini_scores(user_id) or {}
 
@@ -37,7 +42,7 @@ def _get_user_counts(user_id: int) -> dict:
     # --- ANILIST ---
     username = None
     try:
-        username = getattr(core, "get_linked_anilist", lambda _uid: None)(user_id)
+        username = core.get_linked_username(user_id)
     except Exception:
         username = None
     counts["anilist_linked"] = 1 if username else 0  # pour 'anilist:linked'
@@ -89,17 +94,6 @@ def _get_user_counts(user_id: int) -> dict:
         counts.setdefault("time_morning", 0)
         counts.setdefault("time_night", 0)
 
-    # --- COMMAND USAGE (facultatif)
-    try:
-        with open("data/command_usage.json", "r", encoding="utf-8") as f:
-            cdata = json.load(f)
-        u = cdata.get(str(user_id), {})
-        counts["command_planning"]   = int(u.get("planning", 0))
-        counts["command_decouverte"] = int(u.get("decouverte", 0))
-    except Exception:
-        counts.setdefault("command_planning", 0)
-        counts.setdefault("command_decouverte", 0)
-
     return counts
 
 
@@ -111,11 +105,23 @@ def _xp_bar(xp: int, next_xp: int, seg: int = 20) -> str:
     return "🟦" * progress + "⬛" * (seg - progress)
 
 
+def _pct_bar(cur: int, total: int, width: int = 14) -> str:
+    """Barre texte compacte (cur/total)."""
+    if total <= 0:
+        return "░" * width
+    p = max(0.0, min(1.0, cur / total))
+    filled = int(round(p * width))
+    return "█" * filled + "░" * (width - filled)
+
+
 def _fmt_number(n: int) -> str:
     return f"{n:,}".replace(",", " ")
 
 
 _MINI_LABELS: Dict[str, str] = {
+    "mission_completed": "Missions du jour",
+    "checkin": "Check-ins",
+    "mycard_visits": "Carte (/mycard)",
     "animequiz": "Anime quiz (solo)",
     "animequizmulti": "Anime quiz (multi)",
     "higherlower": "Higher / Lower",
@@ -154,6 +160,7 @@ def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str
         return []
 
     groups: list[tuple[str, str, frozenset[str]]] = [
+        ("📅", "Engagement", frozenset({"mission_completed", "checkin", "mycard_visits"})),
         ("🎯", "Quiz", frozenset({"animequiz", "animequizmulti"})),
         ("🎭", "Devinettes", frozenset({
             "guessyear", "guessepisodes", "guessgenre", "guesscharacter", "guessop",
@@ -210,24 +217,7 @@ def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
     visible_total = 0
 
     for _bid, spec in BADGES.items():
-        source = spec.get("source", "")
-        if source.startswith("mini:"):
-            key = source.split(":", 1)[1]
-            count = int(counts.get(key, 0))
-        elif source.startswith("streak:"):
-            key = source.split(":", 1)[1]
-            count = int(counts.get(f"streak_{key}", counts.get("streak_days", 0)))
-        elif source.startswith("anilist:"):
-            key = source.split(":", 1)[1]
-            count = int(counts.get(f"anilist_{key}", 0))
-        elif source.startswith("time:"):
-            key = source.split(":", 1)[1]
-            count = int(counts.get(f"time_{key}", 0))
-        elif source.startswith("command:"):
-            key = source.split(":", 1)[1]
-            count = int(counts.get(f"command_{key}", 0))
-        else:
-            count = 0
+        count = badge_count_for_spec(spec, counts)
 
         thresholds = spec["thresholds"]
         icon_list = spec["icons"]
@@ -271,17 +261,18 @@ def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
     }
 
 
-# ---------- VUE À ONGLETS ----------
-class MyCardTabs(discord.ui.View):
-    """Vue simplifiée : seulement les onglets (pas de boutons d'info badges)."""
-    def __init__(self, author: discord.abc.User, data: dict):
+# ---------- VUE À ONGLETS (menu déroulant : pas de saut de boutons) ----------
+class MyCardNavigator(discord.ui.View):
+    """Menu déroulant : reste aligné ; l’onglet actif est coché dans la liste."""
+
+    def __init__(self, ctx: commands.Context, author: discord.abc.User, data: dict, bot: commands.Bot, active: str = "overview"):
         super().__init__(timeout=120)
+        self.ctx = ctx
         self.author = author
         self.data = data
-        # Onglets
-        self.add_item(discord.ui.Button(label="Aperçu", style=discord.ButtonStyle.primary, custom_id="tab:overview"))
-        self.add_item(discord.ui.Button(label="Mini-jeux", style=discord.ButtonStyle.secondary, custom_id="tab:minis"))
-        self.add_item(discord.ui.Button(label="Trophées", style=discord.ButtonStyle.secondary, custom_id="tab:badges"))
+        self.bot = bot
+        self.active = active
+        self.add_item(MyCardTabSelect(self))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -291,37 +282,89 @@ class MyCardTabs(discord.ui.View):
 
     async def on_timeout(self) -> None:
         for c in self.children:
-            if isinstance(c, discord.ui.Button):
+            if isinstance(c, (discord.ui.Button, discord.ui.Select)):
                 c.disabled = True
+
+
+class MyCardTabSelect(discord.ui.Select):
+    def __init__(self, nav: MyCardNavigator):
+        self.nav = nav
+        act = nav.active
+        opts = [
+            discord.SelectOption(
+                label="Aperçu",
+                value="overview",
+                emoji="📋",
+                description="Niveau, XP, quiz, streak",
+                default=(act == "overview"),
+            ),
+            discord.SelectOption(
+                label="Mini-jeux",
+                value="minis",
+                emoji="🎮",
+                description="Scores par catégorie",
+                default=(act == "minis"),
+            ),
+            discord.SelectOption(
+                label="Trophées",
+                value="badges",
+                emoji="🏅",
+                description="Progression des trophées",
+                default=(act == "badges"),
+            ),
+        ]
+        ph = {
+            "overview": "📋 Aperçu — carte",
+            "minis": "🎮 Mini-jeux",
+            "badges": "🏅 Trophées",
+        }.get(act, "Choisir un onglet…")
+        super().__init__(placeholder=ph, min_values=1, max_values=1, options=opts, row=0)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        tab = self.values[0]
+        ctx = self.nav.ctx
+        d = self.nav.data
+        bot = self.nav.bot
+        if tab == "overview":
+            emb = _embed_overview(ctx, *d["overview"])
+        elif tab == "minis":
+            emb = _embed_minis(ctx, d["minis"])
+        else:
+            emb = _embed_badges(ctx, bot, d["counts"])
+        nv = MyCardNavigator(ctx, self.nav.author, d, bot, active=tab)
+        await interaction.response.edit_message(embed=emb, view=nv)
 
 
 # ---------- BUILD DES EMBEDS ----------
 def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days):
     bar = _xp_bar(xp, next_xp)
-    e = discord.Embed(title=f"🎴 Profil de {ctx.author.display_name}", color=discord.Color.blurple())
+    e = discord.Embed(
+        title=f"🎴 {ctx.author.display_name}",
+        description=f"**{title}** · Niveau **{level}**",
+        color=_EMBED_OVERVIEW,
+    )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
-    e.add_field(name="🎖️ Titre", value=title, inline=True)
-    e.add_field(name="🧬 Niveau", value=str(level), inline=True)
-    e.add_field(name="🧪 XP", value=f"{_fmt_number(xp)} / {_fmt_number(next_xp)}", inline=True)
-    e.add_field(name="📈 Progression", value=bar, inline=False)
-    e.add_field(name="🏆 Score Quiz", value=str(_fmt_number(quiz_score)), inline=True)
+    e.add_field(name="XP", value=f"{_fmt_number(xp)} / {_fmt_number(next_xp)}", inline=True)
+    e.add_field(name="Barre XP", value=bar, inline=True)
+    e.add_field(name="Quiz", value=str(_fmt_number(quiz_score)), inline=True)
 
     # Streak
     next_pal = None
-    for t in sorted(BADGES.get("streak", {}).get("thresholds", [])):
+    for t in sorted(BADGES.get("serie", {}).get("thresholds", [])):
         if streak_days < t:
             next_pal = t
             break
     streak_line = f"🔥 Série actuelle : **{streak_days}** jour(s)"
     if next_pal:
         streak_line += f" • Prochain palier : **{streak_days}/{next_pal}**"
-    e.add_field(name="🔥 Streak", value=streak_line, inline=False)
+    e.add_field(name="Streak", value=streak_line, inline=False)
     gg_pen = core.get_guess_genre_penalty_count(ctx.author.id)
     e.add_field(
-        name="⚠️ Sanctions Guess genre",
+        name="Sanctions Guess genre",
         value=str(gg_pen) if gg_pen else "0",
         inline=True,
     )
+    e.set_footer(text="Onglet : menu ci-dessous")
     return e
 
 
@@ -329,15 +372,15 @@ def _embed_minis(ctx, mini_scores):
     e = discord.Embed(
         title="🎮 Mini-jeux",
         description=(
-            "Temps forts par **catégorie** (barres relatives à ton meilleur score dans ce bloc). "
-            "Le détail brut reste disponible côté serveur si besoin."
+            "Barres **relatives** au meilleur score **dans chaque bloc** (pas des records globaux)."
         ),
-        color=discord.Color.dark_theme(),
+        color=_EMBED_MINIS,
     )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
     blocks = _mini_group_blocks(mini_scores)
     if not blocks:
         e.add_field(name="Stats", value="— Aucune partie enregistrée pour l’instant.", inline=False)
+        e.set_footer(text="Onglet : menu ci-dessous")
     else:
         total = sum(int(v) for v in mini_scores.values())
         for emoji, title, rows in blocks:
@@ -347,41 +390,280 @@ def _embed_minis(ctx, mini_scores):
             else:
                 # Discord embed field limit
                 e.add_field(name="\u200b", value=block_txt[:1020] + "…", inline=False)
-        e.set_footer(text=f"Total parties / actions comptées : {_fmt_number(total)}")
+        e.set_footer(text=f"Total compté : {_fmt_number(total)} · Onglet : menu ci-dessous")
     return e
 
 
 def _embed_badges(ctx, bot, counts):
     s = _badge_mycard_summary(bot, counts)
+    vt = max(1, int(s["visible_total"] or 1))
+    un = int(s["unlocked_n"] or 0)
+    pct = min(100, int(round(100 * un / vt))) if s["visible_total"] else 0
+    bar = _pct_bar(un, vt, 14)
     e = discord.Embed(
         title="🏅 Trophées",
         description=(
-            f"**{s['unlocked_n']}** débloqué(s) "
-            + (f"sur **{s['visible_total']}** pistes suivies.\n" if s["visible_total"] else ".\n")
-            + "_Les paliers récompensent régulièrement les mêmes activités (mini-jeux, série, etc.)._"
+            f"{bar} **{pct}%** · **{un}** / **{s['visible_total']}** pistes avec au moins un palier\n"
+            f"_Détail, paliers et secrets : **`/mybadges`**_"
         ),
-        color=discord.Color.gold(),
+        color=_EMBED_BADGES,
     )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
     if s["unlocked_lines"]:
-        body = "\n".join(s["unlocked_lines"])
+        body = "\n".join(f"• {line}" for line in s["unlocked_lines"])
         if s["unlocked_extra"] > 0:
-            body += f"\n_… et **{s['unlocked_extra']}** autre(s) — voir **`/mybadges`**._"
-        e.add_field(name="Obtenus", value=body[:1024], inline=False)
+            body += f"\n_… **+{s['unlocked_extra']}** autre(s) dans `/mybadges`_"
+        e.add_field(name="En poche", value=body[:1024], inline=False)
     else:
-        e.add_field(name="Obtenus", value="— Aucun pour l’instant. Joue aux mini-jeux ou garde ta série !", inline=False)
-
-    if s["next_lines"]:
         e.add_field(
-            name="Prochains paliers (les plus proches)",
-            value="\n".join(s["next_lines"])[:1024],
+            name="En poche",
+            value="— Aucun palier encore. Lance des mini-jeux ou entretiens ta série !",
             inline=False,
         )
-    else:
-        e.add_field(name="Prochains paliers", value="— Tout est débloqué côté pistes visibles, ou rien à suivre.", inline=False)
 
-    e.set_footer(text="Liste complète, descriptions et secrets : /mybadges")
+    if s["next_lines"]:
+        nxt = "\n".join(f"• {line}" for line in s["next_lines"])
+        e.add_field(name="Les plus proches", value=nxt[:1024], inline=False)
+    else:
+        e.add_field(
+            name="Les plus proches",
+            value="— Rien en attente côté pistes visibles (ou déjà au max).",
+            inline=False,
+        )
+
+    e.set_footer(text="Onglet : menu ci-dessous")
     return e
+
+
+def _build_mybadges_payload(bot: commands.Bot, counts: dict) -> dict[str, Any]:
+    """Données pour /mybadges : listes de lignes + résumé."""
+    unlocked: list[str] = []
+    locked: list[str] = []
+    mystery: list[str] = []
+
+    for _bid, spec in BADGES.items():
+        count = badge_count_for_spec(spec, counts)
+        thresholds = spec["thresholds"]
+        icon_list = spec["icons"]
+        tier, next_th = evaluate_tier(count, thresholds)
+
+        if spec.get("hidden", False) and (tier is None or tier < 0):
+            if thresholds:
+                need = int(thresholds[0])
+                rest = max(0, need - count)
+                mystery.append(f"🔒 **???** — {count}/{need} · reste **{rest}**")
+            continue
+
+        if tier is not None and tier >= 0:
+            icon = icon_list[tier] if tier < len(icon_list) else "🎖️"
+            custom = spec.get("icons_custom")
+            if custom and tier < len(custom):
+                resolved = get_emoji(bot, custom[tier], fallback=None)
+                if resolved:
+                    icon = resolved
+            paliers = len(thresholds)
+            prog = f"{count}/{next_th}" if next_th else "MAX"
+            unlocked.append(
+                f"{icon} **{spec['name']}** · palier **{tier + 1}/{paliers}** ({prog})\n"
+                f"_{spec['desc']}_"
+            )
+        elif thresholds:
+            need = int(thresholds[0])
+            rest = max(0, need - count)
+            pct = min(100, int(round(100 * count / need))) if need else 0
+            bar = _pct_bar(count, need, 10)
+            locked.append(
+                f"{bar} **{spec['name']}** — {count}/{need} ({pct}%) · reste **{rest}**\n"
+                f"_{spec['desc']}_"
+            )
+
+    s = _badge_mycard_summary(bot, counts)
+    return {
+        "unlocked": unlocked,
+        "locked": locked,
+        "mystery": mystery,
+        "summary": s,
+    }
+
+
+def _chunk_text_blocks(lines: list[str], max_len: int = 950) -> list[str]:
+    """Découpe une liste de paragraphes en blocs < max_len caractères."""
+    if not lines:
+        return []
+    chunks: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for line in lines:
+        add = len(line) + (1 if cur else 0)
+        if cur_len + add > max_len and cur:
+            chunks.append("\n".join(cur))
+            cur = [line]
+            cur_len = len(line)
+        else:
+            cur.append(line)
+            cur_len += add
+    if cur:
+        chunks.append("\n".join(cur))
+    return chunks
+
+
+def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str, Any], section: str) -> discord.Embed:
+    """section: summary | unlocked | locked | mystery"""
+    s = payload["summary"]
+    vt = max(1, int(s["visible_total"] or 1))
+    un = int(s["unlocked_n"] or 0)
+    pct = min(100, int(round(100 * un / vt))) if s["visible_total"] else 0
+    bar = _pct_bar(un, vt, 14)
+
+    if section == "summary":
+        e = discord.Embed(
+            title=f"🏅 Trophées — {ctx.author.display_name}",
+            description=(
+                f"{bar} **{pct}%** · **{un}** pistes avec au moins un palier sur **{s['visible_total']}** visibles\n"
+                f"_Utilise le menu pour le détail._"
+            ),
+            color=_EMBED_BADGES,
+        )
+        e.set_thumbnail(url=ctx.author.display_avatar.url)
+        if s["next_lines"]:
+            e.add_field(
+                name="Prochains paliers (les plus proches)",
+                value="\n".join(f"• {x}" for x in s["next_lines"])[:1024],
+                inline=False,
+            )
+        else:
+            e.add_field(name="Prochains paliers", value="— Rien en attente.", inline=False)
+        if s["unlocked_lines"]:
+            snap = "\n".join(f"• {x}" for x in s["unlocked_lines"][:6])
+            if s["unlocked_extra"] > 0:
+                snap += f"\n_… **+{s['unlocked_extra']}** dans l’onglet « Débloqués »_"
+            e.add_field(name="Aperçu des obtenus", value=snap[:1024], inline=False)
+        e.set_footer(text="Menu : changer de section sans nouvelle commande")
+        return e
+
+    if section == "unlocked":
+        lines = payload["unlocked"]
+        chunks = _chunk_text_blocks(lines)
+        e = discord.Embed(
+            title=f"✅ Débloqués — {ctx.author.display_name}",
+            description=f"**{len(lines)}** trophée(s) avec au moins un palier.",
+            color=_EMBED_BADGES,
+        )
+        e.set_thumbnail(url=ctx.author.display_avatar.url)
+        if not chunks:
+            e.add_field(name="—", value="Aucun pour l’instant.", inline=False)
+        else:
+            for i, ch in enumerate(chunks[:6]):
+                name = "Liste" if i == 0 else f"Suite ({i + 1})"
+                e.add_field(name=name, value=ch[:1024], inline=False)
+            if len(chunks) > 6:
+                e.add_field(name="…", value="Trop de texte — affichage tronqué.", inline=False)
+        e.set_footer(text="Menu : section « Résumé » pour la vue d’ensemble")
+        return e
+
+    if section == "locked":
+        lines = payload["locked"]
+        chunks = _chunk_text_blocks(lines)
+        e = discord.Embed(
+            title=f"🎯 À débloquer — {ctx.author.display_name}",
+            description=f"**{len(lines)}** piste(s) en cours.",
+            color=_EMBED_BADGES,
+        )
+        e.set_thumbnail(url=ctx.author.display_avatar.url)
+        if not chunks:
+            e.add_field(name="—", value="Rien à afficher (ou tout est déjà débloqué côté visible).", inline=False)
+        else:
+            for i, ch in enumerate(chunks[:6]):
+                name = "Progression" if i == 0 else f"Suite ({i + 1})"
+                e.add_field(name=name, value=ch[:1024], inline=False)
+        e.set_footer(text="Les badges secrets apparaissent dans « Mystères » tant qu’ils sont cachés.")
+        return e
+
+    # mystery
+    lines = payload["mystery"]
+    e = discord.Embed(
+        title=f"🔒 Badges secrets — {ctx.author.display_name}",
+        description="Tant que le palier n’est pas atteint, le nom reste masqué.",
+        color=discord.Color.dark_gray(),
+    )
+    e.set_thumbnail(url=ctx.author.display_avatar.url)
+    if not lines:
+        e.add_field(name="—", value="Aucun secret en attente (ou déjà révélé).", inline=False)
+    else:
+        e.add_field(name="Indices", value="\n".join(lines)[:1024], inline=False)
+    e.set_footer(text="Après déblocage, le trophée apparaît dans « Débloqués ».")
+    return e
+
+
+class MyBadgesNavigator(discord.ui.View):
+    def __init__(self, ctx: commands.Context, author: discord.abc.User, bot: commands.Bot, payload: dict[str, Any], section: str = "summary"):
+        super().__init__(timeout=180)
+        self.ctx = ctx
+        self.author = author
+        self.bot = bot
+        self.payload = payload
+        self.section = section
+        self.add_item(MyBadgesSectionSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Ce panneau n’est pas pour toi.", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for c in self.children:
+            if isinstance(c, (discord.ui.Button, discord.ui.Select)):
+                c.disabled = True
+
+
+class MyBadgesSectionSelect(discord.ui.Select):
+    def __init__(self, nav: MyBadgesNavigator):
+        self.nav = nav
+        sec = nav.section
+        opts = [
+            discord.SelectOption(
+                label="Résumé",
+                value="summary",
+                emoji="📊",
+                description="Vue d’ensemble et prochains paliers",
+                default=(sec == "summary"),
+            ),
+            discord.SelectOption(
+                label="Débloqués",
+                value="unlocked",
+                emoji="✅",
+                description="Tous les trophées obtenus",
+                default=(sec == "unlocked"),
+            ),
+            discord.SelectOption(
+                label="À débloquer",
+                value="locked",
+                emoji="🎯",
+                description="Pistes en cours avec barres",
+                default=(sec == "locked"),
+            ),
+            discord.SelectOption(
+                label="Mystères",
+                value="mystery",
+                emoji="🔒",
+                description="Badges cachés non obtenus",
+                default=(sec == "mystery"),
+            ),
+        ]
+        ph = {
+            "summary": "📊 Résumé",
+            "unlocked": "✅ Débloqués",
+            "locked": "🎯 À débloquer",
+            "mystery": "🔒 Mystères",
+        }.get(sec, "Choisir une section…")
+        super().__init__(placeholder=ph, min_values=1, max_values=1, options=opts, row=0)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        sec = self.values[0]
+        emb = _embed_mybadges(self.nav.ctx, self.nav.bot, self.nav.payload, sec)
+        nv = MyBadgesNavigator(self.nav.ctx, self.nav.author, self.nav.bot, self.nav.payload, section=sec)
+        await interaction.response.edit_message(embed=emb, view=nv)
 
 
 # ---------- COG ----------
@@ -394,6 +676,11 @@ class Profile(commands.Cog):
     async def mycard(self, ctx: commands.Context) -> None:
         user_id = ctx.author.id
         user_id_str = str(user_id)
+
+        try:
+            core.add_mini_score(user_id, "mycard_visits", 1)
+        except Exception:
+            pass
 
         # Données globales
         levels = core.load_levels()
@@ -412,28 +699,17 @@ class Profile(commands.Cog):
 
         # Page 1 par défaut
         embed = _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days)
-        view = MyCardTabs(ctx.author, {
-            "overview": (level, xp, next_xp, title, quiz_score, streak_days),
-            "minis": mini_scores,
-            "counts": counts,
-        })
-
-        # Routeur d’onglets
-        async def on_interaction(inter: discord.Interaction):
-            cid = inter.data.get("custom_id", "")
-            if cid == "tab:overview":
-                e = _embed_overview(ctx, *view.data["overview"])
-                await inter.response.edit_message(embed=e, view=view)
-            elif cid == "tab:minis":
-                e = _embed_minis(ctx, view.data["minis"])
-                await inter.response.edit_message(embed=e, view=view)
-            elif cid == "tab:badges":
-                e = _embed_badges(ctx, self.bot, view.data["counts"])
-                await inter.response.edit_message(embed=e, view=view)
-
-        for c in view.children:
-            if isinstance(c, discord.ui.Button) and c.custom_id and c.custom_id.startswith("tab:"):
-                c.callback = on_interaction
+        view = MyCardNavigator(
+            ctx,
+            ctx.author,
+            {
+                "overview": (level, xp, next_xp, title, quiz_score, streak_days),
+                "minis": mini_scores,
+                "counts": counts,
+            },
+            self.bot,
+            active="overview",
+        )
 
         await ctx.send(embed=embed, view=view)
 
@@ -441,57 +717,10 @@ class Profile(commands.Cog):
     async def mybadges(self, ctx: commands.Context) -> None:
         user_id = ctx.author.id
         counts = _get_user_counts(user_id)
-        unlocked_lines = []
-        locked_lines = []
-
-        for _bid, spec in BADGES.items():
-            source = spec.get("source", "")
-            # compteur
-            if source.startswith("mini:"):
-                key = source.split(":", 1)[1]; count = int(counts.get(key, 0))
-            elif source.startswith("streak:"):
-                key = source.split(":", 1)[1]; count = int(counts.get(f"streak_{key}", counts.get("streak_days", 0)))
-            elif source.startswith("anilist:"):
-                key = source.split(":", 1)[1]; count = int(counts.get(f"anilist_{key}", 0))
-            elif source.startswith("time:"):
-                key = source.split(":", 1)[1]; count = int(counts.get(f"time_{key}", 0))
-            elif source.startswith("command:"):
-                key = source.split(":", 1)[1]; count = int(counts.get(f"command_{key}", 0))
-            else:
-                count = 0
-
-            thresholds = spec["thresholds"]
-            icon_list = spec["icons"]
-            tier, next_th = evaluate_tier(count, thresholds)
-
-            if spec.get("hidden", False) and (tier is None or tier < 0):
-                # hidden non débloqué → afficher ??? côté mybadges
-                if thresholds:
-                    need = thresholds[0]
-                    locked_lines.append(f"• ??? — {count}/{need} (reste {need - count})")
-                continue
-
-            if tier is not None and tier >= 0:
-                icon = icon_list[tier] if tier < len(icon_list) else "🎖️"
-                custom = spec.get("icons_custom")
-                if custom and tier < len(custom):
-                    resolved = get_emoji(self.bot, custom[tier], fallback=None)
-                    if resolved:
-                        icon = resolved
-                prog = f"{count}/{next_th}" if next_th else "MAX"
-                unlocked_lines.append(f"{icon} **{spec['name']}** — palier **{tier+1}** · {prog}\n_{spec['desc']}_")
-            else:
-                if thresholds:
-                    need = thresholds[0]
-                    # badge visible non débloqué → avec description
-                    locked_lines.append(f"• **{spec['name']}** — {count}/{need} (reste {need - count})\n_{spec['desc']}_")
-
-        e = discord.Embed(title=f"🎖️ Badges de {ctx.author.display_name}", color=discord.Color.gold())
-        e.set_thumbnail(url=ctx.author.display_avatar.url)
-        e.add_field(name="Débloqués", value=("\n".join(unlocked_lines) if unlocked_lines else "— Aucun pour l’instant"), inline=False)
-        if locked_lines:
-            e.add_field(name="À venir", value="\n".join(locked_lines[:20]), inline=False)
-        await ctx.send(embed=e)
+        payload = _build_mybadges_payload(self.bot, counts)
+        embed = _embed_mybadges(ctx, self.bot, payload, "summary")
+        view = MyBadgesNavigator(ctx, ctx.author, self.bot, payload, section="summary")
+        await ctx.send(embed=embed, view=view)
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -116,7 +116,6 @@ DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 ANILIST_USERNAME = os.getenv("ANILIST_USERNAME", "Zirnoixdcoco")
 _ANILIST_USERNAME_RE = re.compile(r"^[A-Za-z0-9_][-A-Za-z0-9_]{1,31}$")
 TIMEZONE = pytz.timezone(os.getenv("BOT_TIMEZONE", "Europe/Paris"))
-OWNER_ID = 180389173985804288
 
 # Constantes pour les dates
 JOURS_FR = {
@@ -1751,6 +1750,21 @@ def load_user_settings() -> dict:
 
 def save_user_settings(settings: dict) -> None:
     save_json(FileConfig.USER_SETTINGS, settings)
+
+
+def get_mission_dm_notify(user_id: int) -> bool:
+    """MP quand une mission se termine via événement (hors salon). Défaut : True."""
+    st = (load_user_settings() or {}).get(str(user_id), {}) or {}
+    return bool(st.get("mission_dm_notify", True))
+
+
+def set_mission_dm_notify(user_id: int, enabled: bool) -> None:
+    data = load_user_settings() or {}
+    uid = str(user_id)
+    data.setdefault(uid, {})
+    data[uid]["mission_dm_notify"] = bool(enabled)
+    save_user_settings(data)
+
 
 def load_tracker() -> dict:
     return load_json(FileConfig.TRACKER, {})

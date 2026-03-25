@@ -1,18 +1,8 @@
 """Tests unitaires (sans Discord) pour la logique titres / normalisation."""
 from __future__ import annotations
 
-import os
-import sys
-
-# Racine du projet
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-
-os.environ.setdefault("DISCORD_BOT_TOKEN", "0" * 50)
-
-from cogs.quiz import TitleMatcher  # noqa: E402
-from modules import core  # noqa: E402
+from cogs.quiz import TitleMatcher
+from modules import core
 
 
 def test_emoji_only_does_not_match_any_title() -> None:

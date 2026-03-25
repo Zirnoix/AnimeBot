@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import discord
+from aiohttp import web
 from discord.ext import commands, tasks
 from discord import app_commands
 
@@ -31,7 +32,14 @@ LOG = logging.getLogger("AnimeBot")
 # ========= ENV =========
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # requis
 APPLICATION_ID = os.getenv("APPLICATION_ID")  # optionnel
-OWNER_ID = int(os.getenv("OWNER_ID", "180389173985804288"))  # défaut
+_owner_raw = os.getenv("OWNER_ID", "").strip()
+if not _owner_raw.isdigit():
+    LOG.critical(
+        "OWNER_ID manquant ou invalide. Définis l’ID Discord numérique du propriétaire "
+        "(Paramètres développeur → clic droit sur ton profil → Copier l’identifiant). Voir .env.example."
+    )
+    raise SystemExit(1)
+OWNER_ID = int(_owner_raw)
 DEV_GUILD_IDS = {
     int(x.strip())
     for x in os.getenv("DEV_GUILD_IDS", "").split(",")
@@ -61,6 +69,7 @@ class AnimeBot(commands.Bot):
             application_id=int(APPLICATION_ID) if (APPLICATION_ID and APPLICATION_ID.isdigit()) else None,
             help_command=None,
             case_insensitive=True,
+            owner_id=OWNER_ID,
         )
         self.uptime_start = datetime.now(timezone.utc)
         self.anilist_online = True
@@ -534,15 +543,52 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     except Exception:
         pass
 
+# ========= Healthcheck HTTP (Railway / hébergeurs qui exposent PORT) =========
+_health_runner: web.AppRunner | None = None
+
+
+async def _start_health_server_if_configured() -> None:
+    """Répond 200 sur / et /health si PORT ou HEALTHCHECK_PORT est défini (ex. Railway)."""
+    global _health_runner
+    port_s = (os.getenv("PORT") or os.getenv("HEALTHCHECK_PORT") or "").strip()
+    if not port_s:
+        return
+    try:
+        port = int(port_s)
+    except ValueError:
+        LOG.warning("PORT/HEALTHCHECK_PORT invalide (%r) — healthcheck HTTP désactivé.", port_s)
+        return
+
+    async def _ok(_: web.Request) -> web.Response:
+        return web.Response(text="ok")
+
+    app = web.Application()
+    app.router.add_get("/", _ok)
+    app.router.add_get("/health", _ok)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    _health_runner = runner
+    LOG.info("Healthcheck HTTP sur 0.0.0.0:%s (/ et /health)", port)
+
+
 # ========= RUN =========
+async def _amain() -> None:
+    await _start_health_server_if_configured()
+    async with bot:
+        await bot.start(TOKEN)
+
+
 def main() -> None:
     try:
         LOG.info("Démarrage du bot…")
-        bot.run(TOKEN, log_handler=None)  # basicConfig gère console + fichier
+        asyncio.run(_amain())
     except KeyboardInterrupt:
         LOG.info("Arrêt demandé (Ctrl+C).")
     except Exception as e:
         LOG.error("Erreur fatale: %s", e)
+
 
 if __name__ == "__main__":
     main()

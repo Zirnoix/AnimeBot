@@ -1,139 +1,143 @@
 from __future__ import annotations
 from typing import Dict, List, Tuple, Optional
 
-# Badges à paliers
+# Badges à paliers — sources : mini:* (mini_scores.json), streak:*, anilist:*, time:*, mini_sum:* (somme de clés mini)
 BADGES: Dict[str, Dict] = {
-    # === Mini-jeux existants ===
-    "guessgenre": {
-        "name": "GuessGenre",
-        "desc": "Bonnes réponses au mini-jeu GuessGenre.",
-        "thresholds": [25, 50, 100, 200],
-        "icons": ["🎭", "🎭⭐", "🎭💠", "🎭👑"],
-        "icons_custom": ["ab_guessgenre_1","ab_guessgenre_2","ab_guessgenre_3","ab_guessgenre_4"],
-        "source": "mini:guessgenre",
-    },
-    "guessyear": {
-        "name": "GuessYear",
-        "desc": "Bonnes réponses au mini-jeu GuessYear.",
-        "thresholds": [25, 50, 100, 200],
-        "icons": ["📅", "📅⭐", "📅💠", "📅👑"],
-        "source": "mini:guessyear",
-    },
-    "animequiz": {
-        "name": "AnimeQuiz (Solo)",
-        "desc": "Bonnes réponses au quiz image solo.",
-        "thresholds": [50, 100, 250, 500],
-        "icons": ["🔰", "🎖️", "🏆", "👑"],
-        "source": "mini:animequiz",
-    },
-    "animequizmulti": {
-        "name": "AnimeQuiz (Multi)",
-        "desc": "Parties terminées en quiz multi.",
-        "thresholds": [25, 75, 150, 300],
-        "icons": ["🎯", "🥉", "🥈", "🥇"],
-        "source": "mini:animequizmulti",
-    },
-    "streak": {
-        "name": "Streak",
-        "desc": "Série de check-ins quotidiens.",
+    # --- Engagement & profil ---
+    "serie": {
+        "name": "Rythme quotidien",
+        "desc": "Jours consécutifs avec /checkin (série active).",
         "thresholds": [7, 30, 100, 365],
         "icons": ["🔥", "💥", "⚡", "🌟"],
         "source": "streak:days",
     },
+    "checkins_total": {
+        "name": "Fidèle au bot",
+        "desc": "Nombre total de check-ins /checkin effectués.",
+        "thresholds": [10, 50, 150, 400],
+        "icons": ["📅", "📅⭐", "📅💠", "📅👑"],
+        "source": "mini:checkin",
+    },
+    "missions": {
+        "name": "Missionnaire",
+        "desc": "Missions quotidiennes terminées (récompense XP).",
+        "thresholds": [5, 15, 40, 80, 150],
+        "icons": ["🎯", "🎯⭐", "🎯💠", "🎯👑", "🏅"],
+        "source": "mini:mission_completed",
+    },
+    "carte": {
+        "name": "Carte de membre",
+        "desc": "Fois où tu as ouvert ta /mycard.",
+        "thresholds": [5, 25, 75, 200],
+        "icons": ["🪪", "🪪⭐", "🪪💠", "🪪👑"],
+        "source": "mini:mycard_visits",
+    },
 
-    # === Nouveaux badges (validés ensemble) ===
+    # --- Quiz & duels ---
+    "quiz_solo": {
+        "name": "Œil d’aigle",
+        "desc": "Bonnes réponses au quiz image solo (/animequiz).",
+        "thresholds": [50, 100, 250, 500],
+        "icons": ["🔰", "🎖️", "🏆", "👑"],
+        "source": "mini:animequiz",
+    },
+    "quiz_multi": {
+        "name": "Salle d’arcade",
+        "desc": "Parties de quiz multi terminées (/animequizmulti).",
+        "thresholds": [10, 25, 75, 150, 300],
+        "icons": ["🎯", "🥉", "🥈", "🥇", "👑"],
+        "source": "mini:animequizmulti",
+    },
+    "duelliste": {
+        "name": "Duelliste",
+        "desc": "Duels lancés avec /duel.",
+        "thresholds": [5, 15, 30, 50],
+        "icons": ["⚔️", "⚔️⭐", "⚔️💠", "⚔️👑"],
+        "source": "mini:duel",
+    },
+    "vainqueur": {
+        "name": "Vainqueur",
+        "desc": "Manches de duel remportées.",
+        "thresholds": [5, 15, 30, 50],
+        "icons": ["🏅", "🏅⭐", "🏅💠", "🏅👑"],
+        "source": "mini:duel_victory",
+    },
+    "podium_mois": {
+        "name": "Podium du mois",
+        "desc": "Podiums sur le classement mensuel du quiz (1ʳᵉ, 2ᵉ ou 3ᵉ place).",
+        "thresholds": [1, 3, 6, 12, 24],
+        "icons": ["🥇", "🥇⭐", "🥇💠", "🥇👑", "💎"],
+        "source": "mini_sum:quiz_month_1st,quiz_month_2nd,quiz_month_3rd",
+    },
+
+    # --- Devinettes ---
+    "guess_genre": {
+        "name": "Connaisseur de genres",
+        "desc": "Bonnes réponses au Guess genre.",
+        "thresholds": [25, 50, 100, 200],
+        "icons": ["🎭", "🎭⭐", "🎭💠", "🎭👑"],
+        "source": "mini:guessgenre",
+    },
+    "guess_annee": {
+        "name": "Chronologue",
+        "desc": "Bonnes réponses au Guess année.",
+        "thresholds": [25, 50, 100, 200],
+        "icons": ["📅", "📅⭐", "📅💠", "📅👑"],
+        "source": "mini:guessyear",
+    },
+    "guess_episodes": {
+        "name": "Compteur d’épisodes",
+        "desc": "Bonnes réponses au Guess nombre d’épisodes.",
+        "thresholds": [25, 50, 100, 200],
+        "icons": ["🔢", "🔢⭐", "🔢💠", "🔢👑"],
+        "source": "mini:guessepisodes",
+    },
+    "guess_perso": {
+        "name": "Tête chercheuse",
+        "desc": "Bonnes réponses au Guess personnage.",
+        "thresholds": [15, 40, 80, 150],
+        "icons": ["🧩", "🧩⭐", "🧩💠", "🧩👑"],
+        "source": "mini:guesscharacter",
+    },
+    "higher_lower": {
+        "name": "Popularité",
+        "desc": "Parties gagnées au Higher / Lower.",
+        "thresholds": [20, 50, 100, 200],
+        "icons": ["📊", "📊⭐", "📊💠", "📊👑"],
+        "source": "mini:higherlower",
+    },
+    "guess_op": {
+        "name": "Oreille musicale",
+        "desc": "Victoires au Guess opening.",
+        "thresholds": [10, 30, 60, 120],
+        "icons": ["🎵", "🎵⭐", "🎵💠", "🎵👑"],
+        "source": "mini:guessop",
+    },
+
+    # --- AniList & horaires ---
+    "collection": {
+        "name": "Collectionneur",
+        "desc": "Animes marqués comme complétés sur AniList (compte lié).",
+        "thresholds": [50, 150, 300, 600, 1000],
+        "icons": ["📚", "📚⭐", "📚💠", "📚👑", "📚💎"],
+        "source": "anilist:completed",
+    },
     "earlybird": {
-        "name": "Early Bird",
-        "desc": "A joué tôt le matin (6h-10h).",
+        "name": "Lève-tôt",
+        "desc": "Parties lancées entre 6h et 10h (heure du bot).",
         "thresholds": [15, 50, 150],
         "icons": ["🌅", "🌅⭐", "🌅💠"],
         "source": "time:morning",
     },
     "nightowl": {
-        "name": "Night Owl",
-        "desc": "A joué tard dans la nuit (0h-4h).",
+        "name": "Oiseau de nuit",
+        "desc": "Parties lancées entre minuit et 4h (heure du bot).",
         "thresholds": [15, 50, 150],
         "icons": ["🌙", "🌙⭐", "🌙💠"],
         "source": "time:night",
     },
-    "opchallenger": {
-        "name": "OP Challenger",
-        "desc": "Victoires au mini-jeu GuessOP.",
-        "thresholds": [10, 30, 60, 120],
-        "icons": ["🎵", "🎵⭐", "🎵💠", "🎵👑"],
-        "source": "mini:guessop",
-    },
-    "versusmaster": {
-        "name": "Versus Master",
-        "desc": "A battu plusieurs joueurs différents en duel quiz.",
-        "thresholds": [5, 15, 30, 50],
-        "icons": ["⚔️", "⚔️⭐", "⚔️💠", "⚔️👑"],
-        "source": "mini:duel",
-    },
-    "quizmonthgold": {
-        "name": "Champion du mois",
-        "desc": "Podiums en 1ʳᵉ place du classement mensuel du quiz.",
-        "thresholds": [1, 2, 4, 8],
-        "icons": ["🥇", "🥇⭐", "🥇💠", "🥇👑"],
-        "source": "mini:quiz_month_1st",
-    },
-    "quizmonthsilver": {
-        "name": "Dauphin du mois",
-        "desc": "Podiums en 2ᵉ place du classement mensuel du quiz.",
-        "thresholds": [1, 2, 4, 8],
-        "icons": ["🥈", "🥈⭐", "🥈💠", "🥈👑"],
-        "source": "mini:quiz_month_2nd",
-    },
-    "quizmonthbronze": {
-        "name": "Podium du mois",
-        "desc": "Podiums en 3ᵉ place du classement mensuel du quiz.",
-        "thresholds": [1, 2, 4, 8],
-        "icons": ["🥉", "🥉⭐", "🥉💠", "🥉👑"],
-        "source": "mini:quiz_month_3rd",
-    },
-
-    # === AniList et commandes ===
-    "planningaddict": {
-        "name": "Planning Addict",
-        "desc": "A consulté le planning des sorties.",
-        "thresholds": [10, 50, 100],
-        "icons": ["🗓️", "🗓️⭐", "🗓️💠"],
-        "source": "command:planning",
-        "hidden": True,  # Badge caché
-    },
-    "decouvreur": {
-        "name": "Découvreur",
-        "desc": "A utilisé la commande Découverte.",
-        "thresholds": [10, 50, 100],
-        "icons": ["🔍", "🔍⭐", "🔍💠"],
-        "source": "command:decouverte",
-        "hidden": True,  # Badge caché
-    },
-    "mylistcollector": {
-        "name": "MyList Collector",
-        "desc": "A atteint un nombre d’animes dans sa liste AniList.",
-        "thresholds": [100, 300, 500, 1000],
-        "icons": ["📚", "📚⭐", "📚💠","📚👑"],
-        "source": "anilist:completed",
-        "hidden": True,  # Badge caché
-    },
-
-    # === Spéciaux ===
-    "betatester": {
-        "name": "Beta Tester",
-        "desc": "A participé à la bêta du bot.",
-        "thresholds": [1],
-        "icons": ["🧪"],
-        "source": "special:time",
-    },
-    "devotedotaku": {
-        "name": "Devoted Otaku",
-        "desc": "A été actif 365 jours dans l’année.",
-        "thresholds": [365],
-        "icons": ["🔥"],
-        "source": "streak:year",
-    },
 }
+
 
 def evaluate_tier(count: int, thresholds: List[int]) -> Tuple[int, Optional[int]]:
     """
