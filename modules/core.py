@@ -241,7 +241,8 @@ def save_levels(data: dict) -> None:
 async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True):
     """
     Ajoute de l'XP, gère le level-up (avec XP "reste" après passage),
-    annonce optionnelle dans le salon, et DISPATCH l'événement 'level_up'.
+    annonce optionnelle quand le **titre global** change (pas à chaque niveau intermédiaire),
+    et DISPATCH l'événement 'level_up' si au moins un niveau a été gagné.
     """
     levels = load_levels()
     key = str(user_id)
@@ -270,11 +271,20 @@ async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True)
     new_level = int(data["level"])
     new_title = get_title_for_global_level(new_level)
 
-    # 🔔 annonce optionnelle (si channel fourni)
-    if announce and (new_title != old_title) and channel is not None:
+    # 🔔 annonce : salon dédié serveur si configuré, sinon salon où l’XP a été gagnée
+    announce_ch = channel
+    if announce and channel is not None:
+        g = getattr(channel, "guild", None)
+        if g is not None:
+            lid = get_guild_levelup_channel_id(g.id)
+            if lid:
+                alt = bot.get_channel(lid)
+                if isinstance(alt, discord.TextChannel):
+                    announce_ch = alt
+    if announce and announce_ch is not None and new_title != old_title:
         try:
-            await channel.send(
-                f"🎉 **<@{user_id}>** atteint le rang **{new_title}** (niv. {new_level}) !"
+            await announce_ch.send(
+                f"🎉 **<@{user_id}>** débloque un **nouveau titre** : **{new_title}** _(niveau **{new_level}**)_ !"
             )
         except Exception:
             pass
@@ -293,6 +303,46 @@ async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True)
         "old_title": old_title,
         "new_title": new_title,
     }
+
+
+async def announce_quiz_title_if_changed(
+    bot,
+    channel,
+    user_id: int,
+    old_score: int,
+    new_score: int,
+) -> None:
+    """
+    Annonce un **nouveau titre quiz** (paliers LEVEL_TITLES_QUIZ) dans le salon `/setlevelupchannel`
+    s’il est défini, sinon dans le salon où le score a été mis à jour.
+    Uniquement en cas de **progression** (score strictement supérieur) et si le titre change.
+    """
+    old_score = int(old_score)
+    new_score = int(new_score)
+    if new_score <= old_score:
+        return
+    old_t = get_title_for_quiz_score(old_score)
+    new_t = get_title_for_quiz_score(new_score)
+    if old_t == new_t:
+        return
+    announce_ch = channel
+    if channel is not None:
+        g = getattr(channel, "guild", None)
+        if g is not None:
+            lid = get_guild_levelup_channel_id(g.id)
+            if lid:
+                alt = bot.get_channel(lid)
+                if isinstance(alt, discord.TextChannel):
+                    announce_ch = alt
+    if announce_ch is None:
+        return
+    try:
+        await announce_ch.send(
+            f"📚 **<@{user_id}>** débloque un **nouveau titre quiz** : **{new_t}** _(score **{new_score}** pts)_ !"
+        )
+    except Exception:
+        pass
+
 
 def get_title_for_global_level(level: int) -> str:
     current_title = LEVEL_TITLES_GLOBAL[0][1]
@@ -2473,6 +2523,35 @@ def set_guild_alert_channel(guild_id: int, channel_id: int) -> None:
     cfg = get_config()
     cfg.setdefault("guild_alert_channels", {})[str(int(guild_id))] = int(channel_id)
     cfg["channel_id"] = int(channel_id)
+    save_config(cfg)
+
+
+def get_guild_levelup_channel_id(guild_id: int) -> Optional[int]:
+    """Salon des annonces de **montée de niveau XP** (optionnel, `/setlevelupchannel`)."""
+    cfg = get_config()
+    m = cfg.get("guild_levelup_channels") or {}
+    v = m.get(str(int(guild_id)))
+    if v is not None and v != "":
+        try:
+            return int(v)
+        except Exception:
+            return None
+    return None
+
+
+def set_guild_levelup_channel(guild_id: int, channel_id: int) -> None:
+    """Définit le salon où poster les messages « niveau XP augmenté » pour ce serveur."""
+    cfg = get_config()
+    cfg.setdefault("guild_levelup_channels", {})[str(int(guild_id))] = int(channel_id)
+    save_config(cfg)
+
+
+def clear_guild_levelup_channel(guild_id: int) -> None:
+    """Revient au comportement par défaut : annonce dans le salon où l’XP a été gagnée."""
+    cfg = get_config()
+    m = cfg.get("guild_levelup_channels") or {}
+    m.pop(str(int(guild_id)), None)
+    cfg["guild_levelup_channels"] = m
     save_config(cfg)
 
 

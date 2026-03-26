@@ -93,7 +93,7 @@ RAID_MODE_LABEL_FR: dict[str, str] = {
     "guessgenre": "Genre",
     "higherlower": "Plus populaire (2 animés)",
     "animequiz": "Anime — affiche",
-    "guesswho": "Qui est-ce ? (flou)",
+    "guesswho": "Qui est-ce ? (flou + nom)",
 }
 # Ajustement gameplay : facile = plus de pistes / logique simple ; difficile = guesswho / affiche
 RAID_MODE_DIFFICULTY_FR: dict[str, str] = {
@@ -105,6 +105,17 @@ RAID_MODE_DIFFICULTY_FR: dict[str, str] = {
     "animequiz": "Difficile",
     "guesswho": "Difficile",
 }
+
+# Ordre du menu d’inscription : facile → moyen → difficile (pas l’ordre arbitraire du dict).
+RAID_MODE_SELECT_ORDER: tuple[str, ...] = (
+    "guesscharacter",
+    "guessgenre",
+    "guessyear",
+    "guessepisodes",
+    "higherlower",
+    "animequiz",
+    "guesswho",
+)
 
 
 def _raid_max_hp_for_players(n: int) -> int:
@@ -143,6 +154,7 @@ class RaidBattleState:
     # Timer de manche indépendant du View (évite le reset du timeout à chaque edit du message)
     round_timer_task: Optional[asyncio.Task] = field(default=None)
     round_timer_generation: int = 0
+    raid_start_ts: float = 0.0
 
 
 def _load_raid_cfg() -> dict[str, Any]:
@@ -207,7 +219,9 @@ class RaidModeSelect(Select):
     def __init__(self, host: "RaidModeSelectView") -> None:
         self.host = host
         opts = []
-        for k in RAID_DAMAGE_BY_MODE.keys():
+        for k in RAID_MODE_SELECT_ORDER:
+            if k not in RAID_DAMAGE_BY_MODE:
+                continue
             tier = RAID_MODE_DIFFICULTY_FR.get(k, "")
             lbl = RAID_MODE_LABEL_FR.get(k, k)
             label = f"{tier} · {lbl}"[:100]
@@ -262,6 +276,8 @@ class RaidJoinView(View):
         self.channel_id = channel_id
         self.joined: set[int] = set()
         self.mode_by_user: dict[int, str] = {}
+        self.message: Optional[discord.Message] = None
+        self.promo_message: Optional[discord.Message] = None
 
     @discord.ui.button(label="✅ S'inscrire au raid", style=discord.ButtonStyle.success)
     async def join(self, interaction: discord.Interaction, button: Button) -> None:
@@ -349,26 +365,82 @@ class RaidRoundHubView(View):
         async with self.state.lock:
             self.state.open_challenge_users.add(uid)
 
-        pv = PersonalRaidChallengeView(
-            cog=self.cog,
-            state=self.state,
-            hub=self,
-            user_id=uid,
-            quiz=quiz,
-            damage=damage,
-            raid_mode=mode,
+        try:
+            if str(quiz.get("kind") or "") == "guesswho_text":
+                emb = discord.Embed(
+                    title="🕵️ Qui est-ce ? (raid)",
+                    description=quiz.get("prompt", "").strip() or "Tape le nom du personnage dans ce salon.",
+                    color=discord.Color.dark_red(),
+                )
+                if quiz.get("image_url"):
+                    emb.set_image(url=quiz["image_url"])
+                send_kw: dict[str, Any] = {"embed": emb, "ephemeral": True}
+                if attach is not None:
+                    send_kw["file"] = attach
+                await interaction.response.send_message(**send_kw)
+                asyncio.create_task(
+                    self.cog._raid_run_guesswho_text(
+                        interaction,
+                        self.state,
+                        self,
+                        uid,
+                        quiz,
+                        damage,
+                        mode,
+                    )
+                )
+                return
+
+            pv = PersonalRaidChallengeView(
+                cog=self.cog,
+                state=self.state,
+                hub=self,
+                user_id=uid,
+                quiz=quiz,
+                damage=damage,
+                raid_mode=mode,
+            )
+            emb = discord.Embed(
+                title="🎭 Ton défi (personnel)",
+                description=quiz.get("prompt", "").strip() or "Réponds correctement pour infliger des dégâts.",
+                color=discord.Color.dark_red(),
+            )
+            if quiz.get("image_url"):
+                emb.set_image(url=quiz["image_url"])
+            send_kw = {"embed": emb, "view": pv, "ephemeral": True}
+            if attach is not None:
+                send_kw["file"] = attach
+            await interaction.response.send_message(**send_kw)
+        except Exception:
+            async with self.state.lock:
+                self.state.open_challenge_users.discard(uid)
+            raise
+
+
+class RaidMancheNextView(View):
+    """Après la manche 1 : rappel public + bouton → réponse éphémère avec lien vers le hub."""
+
+    def __init__(self, state: RaidBattleState, hub_jump_url: str) -> None:
+        super().__init__(timeout=600.0)
+        self.state = state
+        self.hub_jump_url = hub_jump_url
+
+    @discord.ui.button(
+        label="📌 Rappel privé (éphémère) + lien vers le hub",
+        style=discord.ButtonStyle.primary,
+    )
+    async def rappel(self, interaction: discord.Interaction, button: Button) -> None:
+        if interaction.user.id not in self.state.participants:
+            await interaction.response.send_message(
+                "❌ Tu n’es pas inscrit(e) à ce raid.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            f"**Manche {self.state.round_n}/{self.state.max_rounds}** — Boss **{self.state.hp}** HP.\n"
+            f"Clique **Recevoir ma manche** sur le message du bot dans le salon :\n{self.hub_jump_url}",
+            ephemeral=True,
         )
-        emb = discord.Embed(
-            title="🎭 Ton défi (personnel)",
-            description=quiz.get("prompt", "").strip() or "Réponds correctement pour infliger des dégâts.",
-            color=discord.Color.dark_red(),
-        )
-        if quiz.get("image_url"):
-            emb.set_image(url=quiz["image_url"])
-        send_kw: dict[str, Any] = {"embed": emb, "view": pv, "ephemeral": True}
-        if attach is not None:
-            send_kw["file"] = attach
-        await interaction.response.send_message(**send_kw)
 
 
 class PersonalRaidChallengeView(View):
@@ -452,22 +524,30 @@ class PersonalRaidChallengeView(View):
 
         dt_ms = int((monotonic() - self.t0) * 1000)
         self.resolved = True
-        for c in self.children:
-            if isinstance(c, Button):
-                c.disabled = True
-        await interaction.response.edit_message(
-            content=self._success_lines(dt_ms),
-            embed=None,
-            view=self,
-            attachments=[],
-        )
-        await self.cog._raid_register_hit(
+        applied = await self.cog._raid_register_hit(
             interaction.user,
             self.state,
             self.damage,
             dt_ms,
             self.hub,
             self.raid_mode,
+        )
+        for c in self.children:
+            if isinstance(c, Button):
+                c.disabled = True
+        if not applied:
+            await interaction.response.edit_message(
+                content="🏆 Le boss est déjà vaincu — cette réponse n’a pas été comptée.",
+                embed=None,
+                view=self,
+                attachments=[],
+            )
+            return
+        await interaction.response.edit_message(
+            content=self._success_lines(dt_ms),
+            embed=None,
+            view=self,
+            attachments=[],
         )
 
     async def on_timeout(self) -> None:
@@ -806,7 +886,7 @@ class CommunityGames(commands.Cog):
             page = random.randint(1, 100)
             query = """
             query ($page: Int) {
-              Page(page: $page, perPage: 4) {
+              Page(page: $page, perPage: 1) {
                 characters(sort: FAVOURITES_DESC) {
                   name { full }
                   image { large }
@@ -819,37 +899,29 @@ class CommunityGames(commands.Cog):
             if not data or "data" not in data:
                 return None, None
             chars = data["data"]["Page"]["characters"]
-            if len(chars) < 4:
+            if not chars:
                 return None, None
-            correct = random.choice(chars)
+            correct = chars[0]
             correct_name = correct["name"]["full"]
             url = (correct.get("image") or {}).get("large")
             nodes = (correct.get("media") or {}).get("nodes") or []
             anime_hint = (nodes[0]["title"]["romaji"] if nodes else "—")
-            options = [c["name"]["full"] for c in chars]
-            random.shuffle(options)
-            try:
-                correct_index = options.index(correct_name)
-            except ValueError:
-                correct_index = 0
+            div, blur_r, _gw_to, _xp = GUESSWHO_MODES.get("medium", GUESSWHO_MODES["medium"])
             quiz = {
-                "kind": "guesswho",
-                "options": options,
-                "correct_index": correct_index,
+                "kind": "guesswho_text",
                 "correct_name": correct_name,
                 "anime_hint": anime_hint,
                 "image_url": "attachment://raid_guesswho.png",
                 "prompt": (
-                    f"Manche **{rn}/{mr}** — **qui est-ce** sur l’image floutée ?\n"
-                    f"Indice anime : _{anime_hint}_\n"
-                    "*(Flou raid — même principe que /guesswho normal.)*"
+                    f"Manche **{rn}/{mr}** — **tape le nom du personnage dans ce salon** (comme **`/guesswho`**).\n"
+                    f"Indice anime : _{anime_hint}_ · **Une tentative** — ~{int(RAID_ROUND_SECONDS)} s.\n"
+                    "_Ta réponse sera **supprimée** du salon dès envoi (si le bot a « Gérer les messages »), pour limiter les spoilers._"
                 ),
             }
             if not url:
                 quiz["image_url"] = None
                 return quiz, None
             try:
-                div, blur_r = 8, 6.0
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                         raw = await resp.read()
@@ -876,14 +948,13 @@ class CommunityGames(commands.Cog):
         total_dmg = sum(state.damage_by_user.values())
         lines = [
             f"❤️ **{state.hp}** / **{state.max_hp}** HP ({pct}%)  `{bar}`",
-            f"⚔️ Dégâts cumulés (raid) : **{total_dmg}** · Inscrits : **{len(state.participants)}**",
+            f"⚔️ Dégâts cumulés : **{total_dmg}** · Inscrits : **{len(state.participants)}**",
             "",
-            "**Chaque joueur inscrit** : une **question différente** (message éphémère) — pas de spam sur les mêmes boutons.",
-            f"**Manche {state.round_n}/{state.max_rounds}** — ~{int(RAID_ROUND_SECONDS)} s par manche.",
+            f"**Manche {state.round_n}/{state.max_rounds}** — ~{int(RAID_ROUND_SECONDS)} s · clique **Recevoir ma manche** ci-dessous.",
         ]
         if state.log_lines:
             lines.append("")
-            lines.append("**Journal (derniers coups)**")
+            lines.append("**Derniers coups**")
             lines.extend(state.log_lines[-8:])
         return discord.Embed(
             title=f"👹 Boss Raid — Manche {state.round_n}/{state.max_rounds}",
@@ -941,6 +1012,16 @@ class CommunityGames(commands.Cog):
         n = len(joined)
         max_hp = _raid_max_hp_for_players(n)
         player_modes = {uid: join_view.mode_by_user.get(uid, RAID_MODE_DEFAULT) for uid in joined}
+        try:
+            if getattr(join_view, "promo_message", None):
+                await join_view.promo_message.delete()
+        except Exception:
+            pass
+        try:
+            if getattr(join_view, "message", None):
+                await join_view.message.delete()
+        except Exception:
+            pass
         state = RaidBattleState(
             guild_id=guild_id,
             channel_id=channel.id,
@@ -950,6 +1031,7 @@ class CommunityGames(commands.Cog):
             max_rounds=RAID_MAX_ROUNDS,
             participants=set(joined),
             player_modes=player_modes,
+            raid_start_ts=monotonic(),
         )
         await channel.send(
             f"✅ **{n}** participant(s) — le boss a **{max_hp}** HP "
@@ -980,6 +1062,24 @@ class CommunityGames(commands.Cog):
         state.round_timer_task = asyncio.create_task(
             self._raid_round_timer_worker(state, channel, gen)
         )
+        if state.round_n >= 2:
+            prev = state.round_n - 1
+            try:
+                nv = RaidMancheNextView(state, msg.jump_url)
+                await channel.send(
+                    embed=discord.Embed(
+                        title=f"⏭️ Fin de la manche {prev} — manche {state.round_n}/{state.max_rounds}",
+                        description=(
+                            f"La **manche {prev}** est terminée. La **manche {state.round_n}** est ouverte "
+                            f"(boss **{state.hp}** HP). Utilise le bouton **Recevoir ma manche** sur le message du bot "
+                            f"ci-dessus, ou clique le bouton ci-dessous pour un **rappel privé** (éphémère) avec le lien."
+                        ),
+                        color=discord.Color.dark_red(),
+                    ),
+                    view=nv,
+                )
+            except Exception:
+                pass
 
     async def _raid_register_hit(
         self,
@@ -989,15 +1089,17 @@ class CommunityGames(commands.Cog):
         dt_ms: int,
         hub: RaidRoundHubView,
         raid_mode: str,
-    ) -> None:
+    ) -> bool:
         uid = user.id
         name = user.display_name if hasattr(user, "display_name") else str(user)
 
         ch = self.bot.get_channel(state.channel_id)
         if not isinstance(ch, discord.TextChannel):
-            return
+            return False
 
         async with state.lock:
+            if state.hp <= 0:
+                return False
             state.hp = max(0, state.hp - damage)
             state.damage_by_user[uid] = state.damage_by_user.get(uid, 0) + damage
             state.hits_by_user[uid] = state.hits_by_user.get(uid, 0) + 1
@@ -1031,14 +1133,132 @@ class CommunityGames(commands.Cog):
                 ch,
                 state,
                 extra_intro=(
-                    f"Coup final : **{name}** (mode **{mode_lbl}**) — "
-                    f"bonus XP coup final : **+{fin_xp}** (voir détail ci-dessous)."
+                    f"**Coup final** : **{name}** ({mode_lbl}) — **+{fin_xp}** XP bonus."
                 ),
             )
-            return
+            return True
 
         if len(state.answered_this_round) >= len(state.participants):
             await self._raid_complete_round_early(state, ch, hub)
+        return True
+
+    async def _raid_run_guesswho_text(
+        self,
+        interaction: discord.Interaction,
+        state: RaidBattleState,
+        hub: RaidRoundHubView,
+        uid: int,
+        quiz: dict[str, Any],
+        damage: int,
+        raid_mode: str,
+    ) -> None:
+        """Attend un message dans le salon du raid (même logique que /guesswho : flou + nom tapé)."""
+        ch = interaction.channel
+        if not isinstance(ch, discord.TextChannel):
+            async with state.lock:
+                state.open_challenge_users.discard(uid)
+            return
+
+        correct_name = str(quiz.get("correct_name") or "?")
+        anime_hint = str(quiz.get("anime_hint") or "")
+        started_round = state.round_n
+        t0 = monotonic()
+
+        def _check(m: discord.Message) -> bool:
+            return m.author.id == uid and m.channel.id == ch.id and not m.author.bot
+
+        try:
+            msg = await self.bot.wait_for(
+                "message",
+                timeout=RAID_ROUND_SECONDS,
+                check=_check,
+            )
+        except asyncio.TimeoutError:
+            async with state.lock:
+                if state.round_n != started_round or uid not in state.open_challenge_users:
+                    return
+                state.open_challenge_users.discard(uid)
+            emb = discord.Embed(
+                title="⏰ Temps écoulé",
+                description=f"C’était **{correct_name}**.",
+                color=discord.Color.orange(),
+            )
+            try:
+                await interaction.edit_original_response(embed=emb, content=None, attachments=[])
+            except Exception:
+                pass
+            return
+
+        try:
+            await msg.delete()
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+        async with state.lock:
+            if state.round_n != started_round or uid not in state.open_challenge_users:
+                return
+
+        g = (msg.content or "").strip()
+        qz = self.bot.get_cog("Quiz")
+        ok = False
+        if qz:
+            ok = bool(qz.title_matcher.find_matches(g, {correct_name}))  # type: ignore[attr-defined]
+        if not ok:
+            ok = normalize(g) == normalize(correct_name)
+
+        if not ok:
+            async with state.lock:
+                if state.round_n != started_round or uid not in state.open_challenge_users:
+                    return
+                state.wrong_by_user[uid] = state.wrong_by_user.get(uid, 0) + 1
+                state.open_challenge_users.discard(uid)
+            emb = discord.Embed(
+                title="❌ Pas la bonne réponse",
+                description=f"La réponse était **{correct_name}**.",
+                color=discord.Color.dark_red(),
+            )
+            try:
+                await interaction.edit_original_response(embed=emb, content=None, attachments=[])
+            except Exception:
+                pass
+            return
+
+        async with state.lock:
+            if state.round_n != started_round or uid not in state.open_challenge_users:
+                return
+
+        dt_ms = int((monotonic() - t0) * 1000)
+        applied = await self._raid_register_hit(
+            interaction.user,
+            state,
+            damage,
+            dt_ms,
+            hub,
+            raid_mode,
+        )
+        lines = [f"**{correct_name}**", f"**+{damage}** dégâts au boss · **{dt_ms}** ms"]
+        if anime_hint and anime_hint != "—":
+            lines.insert(1, f"Indice anime : _{anime_hint}_")
+        desc = "\n".join(lines)
+        if applied:
+            desc += "\n\n_Le hub du raid dans ce salon a été mis à jour (manche suivante si tout le monde a répondu)._"
+        try:
+            if not applied:
+                emb = discord.Embed(
+                    title="🏆 Boss déjà vaincu",
+                    description="Cette réponse n’a pas été comptée.",
+                    color=discord.Color.gold(),
+                )
+                await interaction.edit_original_response(embed=emb, content=None, attachments=[])
+            else:
+                emb = discord.Embed(
+                    title="✅ Bonne réponse !",
+                    description=desc,
+                    color=discord.Color.green(),
+                )
+                await interaction.edit_original_response(embed=emb, content=None, attachments=[])
+        except Exception:
+            pass
 
     async def _raid_complete_round_early(
         self,
@@ -1144,18 +1364,18 @@ class CommunityGames(commands.Cog):
         if state.final_blow:
             fin_uid, fin_mode = state.final_blow[0], state.final_blow[1]
 
-        lines = []
+        elapsed = int(monotonic() - state.raid_start_ts) if state.raid_start_ts else 0
+        emin, esec = divmod(max(0, elapsed), 60)
+        dur_str = f"{emin}m {esec}s" if emin else f"{esec}s"
+
+        summary_parts: list[str] = []
         if extra_intro:
-            lines.append(extra_intro)
-        lines.append(
-            "_Chaque coup inflige des dégâts **aléatoires** dans une fourchette qui dépend **uniquement** "
-            "du mode choisi — pas de la « notoriété » du personnage ou de l’anime._"
+            summary_parts.append(extra_intro.strip())
+        summary_parts.append(
+            f"**{len(participants)}** joueur(s) · **{state.round_n}** manche(s) · durée **~{dur_str}** · "
+            f"dégâts infligés **{total_dmg}** (boss **{state.max_hp}** HP)"
         )
-        lines.append(
-            "_**Meilleur temps** = ta réponse correcte **la plus rapide** sur **une seule** manche pendant tout le raid "
-            "(pas une moyenne, pas forcément la dernière manche)._"
-        )
-        lines.append("**Récap XP (événement hebdo)** — merci à tous !")
+        lines = ["\n".join(summary_parts), "", "**XP par participant**"]
 
         xp_lines: list[str] = []
         for uid in participants:
@@ -1199,15 +1419,16 @@ class CommunityGames(commands.Cog):
         if mvp_uid and channel.guild:
             mv = channel.guild.get_member(mvp_uid)
             if mv:
-                ft.append(f"MVP dégâts : {mv.display_name}")
+                ft.append(f"MVP : {mv.display_name}")
         if fastest_uid is not None and fastest_uid in state.best_time_ms:
-            ft.append(f"Record rapidité (1 manche) : {state.best_time_ms[fastest_uid]} ms")
+            fu = channel.guild.get_member(fastest_uid) if channel.guild else None
+            nm = fu.display_name if fu else "?"
+            ft.append(f"Plus rapide : {nm} ({state.best_time_ms[fastest_uid]} ms)")
         if fin_uid is not None and fin_mode and channel.guild:
             fm = channel.guild.get_member(fin_uid)
             if fm:
                 ft.append(
-                    f"Coup final : {fm.display_name} ({RAID_MODE_LABEL_FR.get(fin_mode, fin_mode)}) "
-                    f"+{RAID_XP_FINISHER_BY_MODE.get(fin_mode, 0)} XP"
+                    f"Coup final : {fm.display_name} (+{RAID_XP_FINISHER_BY_MODE.get(fin_mode, 0)} XP)"
                 )
         if ft:
             emb.set_footer(text=" · ".join(ft))
@@ -1232,19 +1453,20 @@ class CommunityGames(commands.Cog):
             cfg[gk]["raid_started_for_week"] = week_key
             _save_raid_cfg(cfg)
 
-        await channel.send(
+        promo = await channel.send(
             "⚔️ **BOSS RAID (hebdo)** — Inscription ouverte **~{0} s**.\n"
-            "• Chaque inscrit aura **son propre** quiz (message **éphémère**).\n"
-            "• Le salon affiche **HP + journal** ; jusqu’à **{1}** manches. "
-            "Les **PV du boss** dépendent du **nombre d’inscrits** (annoncés juste après l’inscription).\n"
-            "• Dès que **tout le monde** a validé sa manche, on enchaîne **sans attendre** la fin du timer.\n"
-            "• À la **dernière** manche, si le boss a encore des PV : **salve finale** puis victoire.\n"
-            "• XP **généreuse** (base + part des dégâts + bonus MVP / plus rapide).".format(
+            "• Chaque inscrit a **son propre** défi (boutons en **message privé au salon**).\n"
+            "• **Dégâts aléatoires** par bonne réponse : fourchette selon le **mode** choisi à l’inscription.\n"
+            "• Jusqu’à **{1}** manches ; PV du boss = **nombre d’inscrits** × {2}.\n"
+            "• Tout le monde a répondu → manche suivante sans attendre la fin du timer.\n"
+            "• XP : base + part des dégâts + MVP + meilleur temps sur une manche + coup final.".format(
                 int(RAID_JOIN_SECONDS),
                 RAID_MAX_ROUNDS,
+                RAID_HP_PER_PLAYER,
             )
         )
         join_view = RaidJoinView(self, guild.id, channel.id)
+        join_view.promo_message = promo
         msg = await channel.send(
             embed=discord.Embed(
                 title="📋 Inscription",

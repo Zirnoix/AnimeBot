@@ -24,7 +24,10 @@ INTRO_ADMIN = (
     "(même liste que `/airings`).\n\n"
     "**3) Raid boss (optionnel) — `/raidconfig`**\n"
     "Salon du raid, **jour/heure**, lancement automatique ou non. "
-    "Pour un essai : **`/raidstart`** (admins)."
+    "Pour un essai : **`/raidstart`** (admins).\n\n"
+    "**4) Annonces de niveaux XP (optionnel) — `/setlevelupchannel`**\n"
+    "Dans le salon où tu veux centraliser les messages **« niveau atteint »** (sinon : salon de la partie). "
+    "Voir aussi **`/guide_admin`** (MP) pour tout le setup staff."
 )
 
 INTRO_MINIGAMES = (
@@ -35,8 +38,8 @@ INTRO_MINIGAMES = (
 )
 
 EXTRA_TIPS = (
-    "Tape **`/guide`** pour recevoir le **tutoriel complet en MP** : "
-    "**XP & niveaux**, badges, lien AniList, rappels, détail du raid, etc."
+    "Tape **`/guide`** pour le tutoriel **joueurs** en MP ; **`/guide_admin`** (admins) pour "
+    "airings, salons d’annonces, niveaux, raid, etc."
 )
 
 CONTACT = (
@@ -84,7 +87,7 @@ class Onboarding(commands.Cog):
                         "Je t’ai envoyé un **récap config** en MP, mais tes MP sont fermés.\n"
                         "**En bref :** remplis **`/airings`** (liste du serveur), puis **`/setchannel`** "
                         "dans le salon d’annonces — optionnel : **`/raidconfig`** pour le raid boss.\n"
-                        "Ouvre tes MP ou tape **`/guide`** pour le tutoriel détaillé (XP, badges, AniList…)."
+                        "Ouvre tes MP ou tape **`/guide`** (joueurs) / **`/guide_admin`** (staff) pour les tutoriels."
                     )
         except Exception:
             # ne pas casser le flux de démarrage si un DM échoue
@@ -93,7 +96,7 @@ class Onboarding(commands.Cog):
     # ---- /guide : détaillé, pensé pour **MP**. Utilisable depuis un serveur -> redirige en MP. ----
     @app_commands.command(
         name="guide",
-        description="(MP) Tutoriel : config serveur (/airings, /setchannel, raid), XP, mini-jeux, AniList, rappels.",
+        description="(MP) Tutoriel joueur : XP, mini-jeux, AniList, rappels — pas la config serveur.",
     )
     async def guide(self, interaction: discord.Interaction):
         try:
@@ -109,25 +112,6 @@ class Onboarding(commands.Cog):
 
             user = interaction.user
 
-            e_server = discord.Embed(
-                title="⚙️ Serveur — ce que configurent les admins",
-                color=discord.Color.blurple(),
-                description=(
-                    "**1) Liste des animés suivis — `/airings`**\n"
-                    "Utilise **`all`** (parcourir les sorties AniList) ou ajoute/retire des titres. "
-                    "C’est la **whitelist** pour **`/next`** et **`/planning`** en mode **serveur**.\n"
-                    "**Sans titre dans cette liste**, ces commandes restent vides côté serveur et **aucune annonce** "
-                    "« épisode sorti » ne sera postée.\n\n"
-                    "**2) Salon des annonces — `/setchannel`**\n"
-                    "À lancer **dans le salon** où tu veux les **cartes** quand un épisode sort "
-                    "(uniquement pour les animés de la liste `/airings`).\n\n"
-                    "**3) Raid boss (optionnel) — `/raidconfig`**\n"
-                    "Salon du combat, **jour et heure** (fuseau du bot), lancement auto oui/non. "
-                    "Pour tester sans attendre : **`/raidstart`** (admins). "
-                    "Les joueurs s’inscrivent puis reçoivent un **défi perso** par manche."
-                ),
-            )
-
             e_xp = discord.Embed(
                 title="📈 XP, niveaux et badges",
                 color=discord.Color.orange(),
@@ -136,7 +120,8 @@ class Onboarding(commands.Cog):
                     "• Tu en gagnes en jouant (**`/animequiz`**, devinettes, **`/duel`**, **raid boss**, etc.), "
                     "avec **`/checkin`** (quotidien + streak) et **`/mission`** (objectif du jour).\n"
                     "• **`/mybadges`** — progression par activité · **`/animetop`** / **`/quiztop`** — classements.\n"
-                    "• **`/mystats`** — stats AniList détaillées une fois le compte lié."
+                    "• **`/mystats`** — stats AniList détaillées une fois le compte lié.\n"
+                    "• **Nouveaux titres** (global XP ou quiz) : annoncés dans le salon de la partie, ou dans un salon dédié avec **`/setlevelupchannel`** (pas une ligne par niveau intermédiaire pour l’XP)."
                 ),
             )
 
@@ -179,7 +164,8 @@ class Onboarding(commands.Cog):
                 description=(
                     "• **`/stats @membre`** — carte AniList d’un membre (si lié)\n"
                     "• **`/botinfo`** · **`/ping`** — version du bot, latence\n"
-                    "• **`/help`** — liste des commandes ; **`/help <nom>`** — détail"
+                    "• **`/help`** — liste des commandes ; **`/help <nom>`** — détail\n"
+                    "• **Admins** : configuration serveur en MP avec **`/guide_admin`**."
                 ),
             )
 
@@ -192,7 +178,7 @@ class Onboarding(commands.Cog):
                 ),
             )
 
-            await user.send(embeds=[e_server, e_xp, e_mini, e_anilist, e_reminders, e_misc, e_support])
+            await user.send(embeds=[e_xp, e_mini, e_anilist, e_reminders, e_misc, e_support])
 
             if not interaction.guild:
                 await interaction.followup.send("✅ Guide envoyé ci-dessus.", ephemeral=False)
@@ -213,6 +199,71 @@ class Onboarding(commands.Cog):
                 await interaction.followup.send(f"❌ Erreur: {type(e).__name__}", ephemeral=bool(interaction.guild))
             else:
                 await interaction.response.send_message(f"❌ Erreur: {type(e).__name__}", ephemeral=bool(interaction.guild))
+
+    @app_commands.command(
+        name="guide_admin",
+        description="(MP) Réglages serveur : airings, salons d’annonces, niveaux XP, raid (admins).",
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def guide_admin(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message(
+                "❌ Utilise cette commande dans un serveur.",
+                ephemeral=True,
+            )
+            return
+        try:
+            await interaction.response.send_message(
+                "📬 Guide **admin** envoyé en **MP**.",
+                ephemeral=True,
+            )
+            user = interaction.user
+
+            e_srv = discord.Embed(
+                title="⚙️ Configuration serveur (staff)",
+                color=discord.Color.blurple(),
+                description=(
+                    "**1) Liste `/airings`** — `all`, ajout/retrait ; base de **`/next`** et **`/planning`** serveur "
+                    "et des cartes « épisode sorti ».\n"
+                    "**2) `/setchannel`** — salon des **sorties d’épisode** (cartes image).\n"
+                    "**3) `/setlevelupchannel`** — salon des **annonces** : **nouveau titre global** (XP) et **nouveau titre quiz** "
+                    "(score du mois, `/animequiz` / `/animequizmulti`) ; sinon dans le salon où la partie a lieu. "
+                    "**`/clearlevelupchannel`** pour réinitialiser.\n"
+                    "**4) `/raidconfig`** — salon du raid, horaire hebdo, auto ; **`/raidstart`** test immédiat."
+                ),
+            )
+            e_note = discord.Embed(
+                title="📌 À savoir",
+                color=discord.Color.dark_teal(),
+                description=(
+                    "• Les **titres quiz** (paliers sur le score du mois, `/quiztop`) sont **séparés** des titres XP globaux ; les deux peuvent être annoncés dans le salon **`/setlevelupchannel`**.\n"
+                    "• Le **raid** annonce l’XP en fin d’événement avec `announce=False` sur le salon du raid "
+                    "(pas de spam de niveaux pendant le recap)."
+                ),
+            )
+            e_sup = discord.Embed(
+                title="🆘 Support",
+                color=discord.Color.dark_teal(),
+                description=f"**{SUPPORT_DISCORD}** — ID `{SUPPORT_ID}`",
+            )
+            await user.send(embeds=[e_srv, e_note, e_sup])
+        except discord.Forbidden:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ MP fermés — ouvre tes messages privés pour recevoir le guide admin.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ MP fermés — ouvre tes messages privés.",
+                    ephemeral=True,
+                )
+        except Exception as e:
+            if interaction.response.is_done():
+                await interaction.followup.send(f"❌ Erreur: {type(e).__name__}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ Erreur: {type(e).__name__}", ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Onboarding(bot))

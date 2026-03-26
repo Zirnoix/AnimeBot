@@ -76,6 +76,9 @@ DESC_OVERRIDE: Dict[str, str] = {
 
     # Utils
     "setchannel": "Salon des annonces « sortie d’épisode » pour ce serveur (même liste que /airings).",
+    "setlevelupchannel": "Salon des annonces : nouveau titre global (XP) et nouveau titre quiz (sinon : salon de la partie).",
+    "clearlevelupchannel": "Retire le salon dédié aux annonces de niveau XP (comportement par défaut).",
+    "guide_admin": "(MP, admins) Configuration serveur : airings, setchannel, niveaux XP, raid.",
     "botinfo": "Infos sur le bot (versions, créateur, etc.).",
     "ping": "Latence du bot.",
     "reminder": "Récap quotidien en MP (/reminder + /setalert), basé sur ton AniList si lié. Indépendant du récap « préférences ».",
@@ -97,6 +100,7 @@ DESC_OVERRIDE: Dict[str, str] = {
 
     # Help
     "help": "Aide du bot. /help [commande] pour le détail.",
+    "guide": "(MP) Tutoriel joueur : XP, mini-jeux, AniList — pas la config serveur (voir /guide_admin).",
 
     # Owner — /admin (bot.py)
     "admin": "Owner uniquement : debug slash, sync globale, cogs, test d’alerte, salon /setchannel.",
@@ -133,7 +137,10 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "track", "track add", "track list", "track remove", "track clear"
     ]),
     ("🧰 Pages Utils", [
-        "setchannel", "botinfo", "ping", "reminder", "setalert", "source", "uptime"
+        "setchannel", "setlevelupchannel", "clearlevelupchannel", "botinfo", "ping", "reminder", "setalert", "source", "uptime"
+    ]),
+    ("🛠️ Pages Admin (guide)", [
+        "guide_admin",
     ]),
 ]
 

@@ -59,6 +59,45 @@ class Utils(commands.Cog):
         except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
 
+    @commands.hybrid_command(
+        name="setlevelupchannel",
+        description="Salon des annonces : nouveau titre global (XP) et nouveau titre quiz (paliers score).",
+    )
+    @commands.has_permissions(administrator=True)
+    async def setlevelupchannel(self, ctx: commands.Context) -> None:
+        """Les messages « niveau X atteint » vont dans ce salon au lieu du salon où le joueur a gagné l’XP."""
+        try:
+            if not ctx.guild:
+                await ctx.send("❌ Cette commande doit être utilisée dans un serveur.")
+                return
+            core.set_guild_levelup_channel(ctx.guild.id, ctx.channel.id)
+            await ctx.send(
+                "✅ Ce salon recevra les **annonces** suivantes (au lieu du salon où la partie a lieu) :\n"
+                "• **Nouveau titre global** (XP `/mycard`, `/myrank`) — une annonce par **palier de titre**, pas à chaque niveau.\n"
+                "• **Nouveau titre quiz** (score des quiz solo `/animequiz`, `/animequizmulti`) — mêmes paliers que sur la carte.\n"
+                "• Pour revenir au comportement par défaut : **`/clearlevelupchannel`**."
+            )
+        except Exception:
+            await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
+
+    @commands.hybrid_command(
+        name="clearlevelupchannel",
+        description="Supprime le salon dédié aux annonces de niveau XP (comportement par défaut).",
+    )
+    @commands.has_permissions(administrator=True)
+    async def clearlevelupchannel(self, ctx: commands.Context) -> None:
+        try:
+            if not ctx.guild:
+                await ctx.send("❌ Cette commande doit être utilisée dans un serveur.")
+                return
+            core.clear_guild_levelup_channel(ctx.guild.id)
+            await ctx.send(
+                "✅ Les montées de niveau XP seront à nouveau annoncées **dans le salon où la partie a lieu** "
+                "(ou pas annoncées si l’XP est donnée sans salon)."
+            )
+        except Exception:
+            await ctx.send("❌ Une erreur s'est produite.")
+
 
 class BotAdmin(commands.Cog):
     def __init__(self, bot: commands.Bot):

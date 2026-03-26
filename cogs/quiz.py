@@ -200,10 +200,8 @@ class DuelInviteView(discord.ui.View):
 class QuizLevelsSelect(discord.ui.Select):
     """Menu : titres quiz (score du mois) ou rangs XP globaux (/mycard)."""
 
-    def __init__(self, parent_view: "QuizLevelsView") -> None:
-        self._parent = parent_view
+    def __init__(self) -> None:
         super().__init__(
-            custom_id="quizlevels_kind",
             placeholder="Choisir quel palier afficher…",
             options=[
                 discord.SelectOption(
@@ -221,9 +219,16 @@ class QuizLevelsSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        parent = self.view
+        if not isinstance(parent, QuizLevelsView):
+            await interaction.response.send_message(
+                "Ce menu a expiré — refais **`/quizlevels`**.",
+                ephemeral=True,
+            )
+            return
         key = (self.values[0] if self.values else "quiz") or "quiz"
-        emb = self._parent._quiz_embed if key == "quiz" else self._parent._xp_embed
-        await interaction.response.edit_message(embed=emb, view=self._parent)
+        emb = parent._quiz_embed if key == "quiz" else parent._xp_embed
+        await interaction.response.edit_message(embed=emb, view=parent)
 
 
 class QuizLevelsView(discord.ui.View):
@@ -232,7 +237,7 @@ class QuizLevelsView(discord.ui.View):
         self.author_id = author_id
         self._quiz_embed = quiz_embed
         self._xp_embed = xp_embed
-        self.add_item(QuizLevelsSelect(self))
+        self.add_item(QuizLevelsSelect())
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -417,8 +422,11 @@ class Quiz(commands.Cog):
                     # scoreboard + xp
                     scores = core.load_scores()
                     uid_str = str(ctx.author.id)
-                    scores[uid_str] = scores.get(uid_str, 0) + 1
+                    old_q = int(scores.get(uid_str, 0))
+                    scores[uid_str] = old_q + 1
+                    new_q = scores[uid_str]
                     core.save_scores(scores)
+                    await core.announce_quiz_title_if_changed(self.bot, ctx.channel, ctx.author.id, old_q, new_q)
 
                     xp_amount = 5 if difficulty == "easy" else 10 if difficulty == "medium" else 15
                     await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_amount)
@@ -529,13 +537,16 @@ class Quiz(commands.Cog):
             # scoreboard global
             scores = core.load_scores()
             uid_str = str(ctx.author.id)
+            old_q = int(scores.get(uid_str, 0))
             if score < (nb_questions / 2):
                 penalty = 1
-                scores[uid_str] = max(0, scores.get(uid_str, 0) - penalty)
+                scores[uid_str] = max(0, old_q - penalty)
                 await ctx.send(f"⚠️ Moins de 50% de bonnes réponses, -{penalty} point retiré.")
             else:
-                scores[uid_str] = scores.get(uid_str, 0) + score
+                scores[uid_str] = old_q + score
+            new_q = int(scores[uid_str])
             core.save_scores(scores)
+            await core.announce_quiz_title_if_changed(self.bot, ctx.channel, ctx.author.id, old_q, new_q)
 
             total_xp += combo_bonus_total
             if total_xp > 0:
