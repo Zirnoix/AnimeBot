@@ -95,6 +95,16 @@ RAID_MODE_LABEL_FR: dict[str, str] = {
     "animequiz": "Anime — affiche",
     "guesswho": "Qui est-ce ? (flou)",
 }
+# Ajustement gameplay : facile = plus de pistes / logique simple ; difficile = guesswho / affiche
+RAID_MODE_DIFFICULTY_FR: dict[str, str] = {
+    "guesscharacter": "Facile",
+    "guessyear": "Moyen",
+    "guessepisodes": "Moyen",
+    "guessgenre": "Moyen",
+    "higherlower": "Moyen",
+    "animequiz": "Difficile",
+    "guesswho": "Difficile",
+}
 
 
 def _raid_max_hp_for_players(n: int) -> int:
@@ -196,14 +206,15 @@ class RaidModeSelect(Select):
 
     def __init__(self, host: "RaidModeSelectView") -> None:
         self.host = host
-        opts = [
-            discord.SelectOption(
-                label=RAID_MODE_LABEL_FR[k][:100],
-                value=k,
-                description=f"Dégâts ~{RAID_DAMAGE_BY_MODE[k][0]}–{RAID_DAMAGE_BY_MODE[k][1]}",
-            )
-            for k in RAID_DAMAGE_BY_MODE.keys()
-        ]
+        opts = []
+        for k in RAID_DAMAGE_BY_MODE.keys():
+            tier = RAID_MODE_DIFFICULTY_FR.get(k, "")
+            lbl = RAID_MODE_LABEL_FR.get(k, k)
+            label = f"{tier} · {lbl}"[:100]
+            lo, hi = RAID_DAMAGE_BY_MODE[k]
+            fin = RAID_XP_FINISHER_BY_MODE.get(k, 0)
+            desc = f"~{lo}–{hi} dmg · coup final +{fin} XP"[:100]
+            opts.append(discord.SelectOption(label=label, value=k, description=desc))
         super().__init__(
             placeholder="🎯 Type de mini-jeu pour ce raid…",
             min_values=1,
@@ -218,11 +229,12 @@ class RaidModeSelect(Select):
         mode = (self.values[0] if self.values else RAID_MODE_DEFAULT) or RAID_MODE_DEFAULT
         self.host.join_view.mode_by_user[self.host.picker_id] = mode
         label = RAID_MODE_LABEL_FR.get(mode, mode)
+        tier = RAID_MODE_DIFFICULTY_FR.get(mode, "")
         lo, hi = RAID_DAMAGE_BY_MODE.get(mode, (400, 720))
         fin = RAID_XP_FINISHER_BY_MODE.get(mode, 12)
         await interaction.response.edit_message(
             content=(
-                f"✅ Mode enregistré : **{label}**\n"
+                f"✅ Mode enregistré : **{label}** ({tier})\n"
                 f"• Dégâts par bonne réponse (tirage) : **~{lo}–{hi}**\n"
                 f"• Bonus **XP coup final** si tu achèves le boss : **+{fin}** (hors répartition dégâts / MVP / temps)."
             ),
@@ -267,7 +279,9 @@ class RaidJoinView(View):
             title="🎮 Choix du mini-jeu (visible par toi seul)",
             description=(
                 "Sélectionne le **type de défi** pour **toutes** tes manches.\n"
-                "• Modes **plus durs** → dégâts plus élevés et **bonus XP** plus gros si tu portes le **coup final**.\n"
+                "• **Facile** = personnage (4 choix). **Moyen** = année, épisodes, genre, plus populaire. "
+                "**Difficile** = affiche (anime quiz) et qui est-ce flou.\n"
+                "• Modes plus durs → **dégâts** et **bonus coup final** plus élevés.\n"
                 "• _Sans choix avant la fin du timer d’inscription → mode **"
                 + RAID_MODE_LABEL_FR.get(RAID_MODE_DEFAULT, "Personnage")
                 + "**._"

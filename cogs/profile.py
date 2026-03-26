@@ -1,8 +1,9 @@
 # cogs/profile.py — mycard en onglets + mybadges
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Dict, Any
+from typing import Any, Dict, Iterable, Optional
 
 import discord
 from discord import app_commands
@@ -17,6 +18,48 @@ from modules.emoji_utils import get_emoji
 _EMBED_OVERVIEW = discord.Color.from_rgb(88, 101, 242)
 _EMBED_MINIS = discord.Color.from_rgb(52, 58, 64)
 _EMBED_BADGES = discord.Color.from_rgb(212, 168, 67)
+
+# Ordre d’affichage pour /animetop aperçu (clé mini_scores.json → libellé)
+_ANITOP_GAME_LABELS: list[tuple[str, str]] = [
+    ("animequiz", "Anime quiz"),
+    ("guessyear", "Guess année"),
+    ("guessepisodes", "Guess épisodes"),
+    ("guesscharacter", "Guess personnage"),
+    ("guesswho", "Guess who"),
+    ("guessgenre", "Guess genre"),
+    ("higherlower", "Higher / Lower"),
+    ("chainquiz", "Chain quiz"),
+    ("bossraid", "Boss raid (coups)"),
+    ("duel", "Duel"),
+    ("guessop", "Guess OP"),
+]
+
+
+async def _animetop_names_map(
+    bot: commands.Bot,
+    guild: Optional[discord.Guild],
+    uids: Iterable[int],
+) -> dict[int, str]:
+    """Pseudo affiché : membre du serveur si présent, sinon nom Discord global (fetch_user)."""
+    uniq = {int(u) for u in uids}
+    out: dict[int, str] = {}
+
+    async def one(uid: int) -> None:
+        if guild:
+            m = guild.get_member(uid)
+            if m:
+                out[uid] = m.display_name
+                return
+        try:
+            u = await bot.fetch_user(uid)
+            out[uid] = ((u.global_name or u.name or "")).strip() or str(uid)
+        except discord.NotFound:
+            out[uid] = f"Compte supprimé ({uid})"
+        except Exception:
+            out[uid] = f"Utilisateur {uid}"
+
+    await asyncio.gather(*(one(u) for u in uniq))
+    return out
 
 
 # ---------- HELPERS BADGES ----------
@@ -733,6 +776,7 @@ class Profile(commands.Cog):
     @app_commands.choices(
         classement=[
             app_commands.Choice(name="Toute activité (tous mini-jeux)", value="all"),
+            app_commands.Choice(name="Aperçu : total + top 3 par jeu", value="overview"),
             app_commands.Choice(name="Anime quiz", value="animequiz"),
             app_commands.Choice(name="Guess année", value="guessyear"),
             app_commands.Choice(name="Guess épisodes", value="guessepisodes"),
@@ -747,8 +791,16 @@ class Profile(commands.Cog):
         ]
     )
     async def animetop(self, ctx: commands.Context, classement: str = "all") -> None:
-        n = 10
         key = (classement or "all").strip().lower()
+        is_slash = bool(getattr(ctx, "interaction", None))
+        if is_slash and ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer()
+
+        if key == "overview":
+            await self._animetop_overview(ctx, is_slash)
+            return
+
+        n = 10
         if key == "all":
             rows = core.mini_game_activity_leaderboard(n=n)
             title = "🏆 Top activité mini-jeux (somme des compteurs)"
@@ -756,28 +808,86 @@ class Profile(commands.Cog):
             rows = core.mini_game_leaderboard(key, n=n)
             title = f"🏆 Top **{key}**"
         if not rows:
-            await ctx.send(
-                "Pas encore de données pour ce classement (personne n’a enregistré de parties sur cette clé)."
-            )
+            msg = "Pas encore de données pour ce classement (personne n’a enregistré de parties sur cette clé)."
+            if is_slash and ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.send(msg)
             return
+        names = await _animetop_names_map(self.bot, ctx.guild, (u for u, _ in rows))
         lines = []
-        g = ctx.guild
         for i, (uid, score) in enumerate(rows, start=1):
-            name = f"`<@{uid}>`"
-            if g:
-                m = g.get_member(uid)
-                if m:
-                    name = m.display_name
-            lines.append(f"**{i}.** {name} — **{_fmt_number(int(score))}**")
+            nm = names.get(uid, str(uid))
+            lines.append(f"**{i}.** {nm} — **{_fmt_number(int(score))}**")
         emb = discord.Embed(
             title=title,
             description="\n".join(lines),
             color=_EMBED_MINIS,
         )
         emb.set_footer(
-            text="Basé sur data/mini_scores.json — les défaites ne sont pas toujours stockées par jeu."
+            text="Basé sur data/mini_scores.json · noms : serveur ou profil Discord. "
+            "Les défaites ne sont pas toujours comptées par jeu."
         )
-        await ctx.send(embed=emb)
+        if is_slash and ctx.interaction:
+            await ctx.interaction.followup.send(embed=emb)
+        else:
+            await ctx.send(embed=emb)
+
+    async def _animetop_overview(self, ctx: commands.Context, is_slash: bool) -> None:
+        """Top global + tops 3 pour chaque mini-jeu référencé dans la liste (si activité > 0)."""
+        rows = core.mini_game_activity_leaderboard(n=8)
+        if not rows:
+            msg = "Pas encore de scores dans data/mini_scores.json."
+            if is_slash and ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.send(msg)
+            return
+
+        uid_collect: list[int] = [u for u, _ in rows]
+        sections: list[tuple[str, list[tuple[int, int]]]] = [("__total__", rows)]
+        for gk, _lbl in _ANITOP_GAME_LABELS:
+            sub = core.mini_game_leaderboard(gk, n=3)
+            if sub:
+                uid_collect.extend(u for u, _ in sub)
+                sections.append((gk, sub))
+
+        names = await _animetop_names_map(self.bot, ctx.guild, uid_collect)
+        parts: list[str] = []
+
+        tot_rows = sections[0][1]
+        tot_lines = [
+            f"**{i}.** {names.get(uid, str(uid))} — **{_fmt_number(int(sc))}**"
+            for i, (uid, sc) in enumerate(tot_rows, start=1)
+        ]
+        parts.append("**Total (tous mini-jeux)**\n" + "\n".join(tot_lines))
+
+        label_by_key = dict(_ANITOP_GAME_LABELS)
+        for gk, sub in sections[1:]:
+            glabel = label_by_key.get(gk, gk)
+            slines = [
+                f"{i}. **{names.get(uid, str(uid))}** — {_fmt_number(int(sc))}"
+                for i, (uid, sc) in enumerate(sub, start=1)
+            ]
+            parts.append(f"**{glabel}**\n" + "\n".join(slines))
+
+        body = "\n\n".join(parts)
+        if len(body) > 4090:
+            body = body[:4087] + "…"
+
+        emb = discord.Embed(
+            title="🏆 Aperçu mini-jeux",
+            description=body,
+            color=_EMBED_MINIS,
+        )
+        emb.set_footer(
+            text="Les sections « par jeu » n’apparaissent que s’il y a au moins un score. "
+            "Données : data/mini_scores.json"
+        )
+        if is_slash and ctx.interaction:
+            await ctx.interaction.followup.send(embed=emb)
+        else:
+            await ctx.send(embed=emb)
 
     @commands.hybrid_command(name="mybadges", description="Liste tes badges et ta progression")
     async def mybadges(self, ctx: commands.Context) -> None:
