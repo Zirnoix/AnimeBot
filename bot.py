@@ -123,6 +123,22 @@ class AnimeBot(commands.Bot):
         self._synced_once = True
         # Ping AniList une fois
         asyncio.create_task(self._check_anilist_status_once())
+        try:
+            core.owner_telemetry_refresh_peaks(self)
+        except Exception:
+            pass
+
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        if interaction.type is discord.InteractionType.application_command:
+            try:
+                cmd = interaction.command
+                qn = cmd.qualified_name if cmd and getattr(cmd, "qualified_name", None) else None
+                if not qn and interaction.data:
+                    qn = str(interaction.data.get("name") or "?")
+                core.record_owner_slash_command(qn or "?")
+                core.owner_telemetry_refresh_peaks(self)
+            except Exception:
+                pass
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         LOG.info("Nouveau serveur: %s (%s) — membres: %s", guild.name, guild.id, guild.member_count)
@@ -510,6 +526,50 @@ class AnimeBot(commands.Bot):
                     "❌ Impossible de lire la config. Réessaie ou refais **`/setchannel`**.",
                     ephemeral=True,
                 )
+
+        @self.admin_group.command(
+            name="recap_mensuel",
+            description="(Owner) Stats internes : mois en cours / précédent, usages slash, pics serveurs & membres.",
+        )
+        @app_commands.check(_owner_only)
+        async def admin_recap_mensuel(itx: discord.Interaction):
+            await itx.response.defer(ephemeral=True)
+            try:
+                core.owner_telemetry_refresh_peaks(itx.client)
+            except Exception:
+                pass
+            data = core.owner_telemetry_summary()
+            cur_m = data.get("current_month", "?")
+            cur = data.get("current") or {}
+            cmds_cur = cur.get("commands") or {}
+            top_cur = sorted(cmds_cur.items(), key=lambda x: (-x[1], x[0]))[:15]
+            lines = [
+                f"**Mois courant** `{cur_m}`",
+                f"· Pic **serveurs** : **{cur.get('peak_guilds', 0)}**",
+                f"· Pic **membres** (somme des guilds, max vu) : **{cur.get('peak_members', 0)}**",
+            ]
+            if top_cur:
+                lines.append("· **Top commandes slash** (comptage local, depuis la dernière rotation de mois) :")
+                for k, v in top_cur:
+                    lines.append(f"  – `{k}` — **{v}**")
+            else:
+                lines.append(
+                    "· Aucun usage slash enregistré pour ce mois (le compteur démarre après mise à jour ; "
+                    "les membres rejoignent une guilde où le bot voit du trafic)."
+                )
+            prev_m = data.get("previous_month")
+            prev = data.get("previous") or {}
+            if prev_m and prev:
+                pc = prev.get("commands") or {}
+                ptop = sorted(pc.items(), key=lambda x: (-x[1], x[0]))[:10]
+                lines.append("")
+                lines.append(
+                    f"**Mois précédent** `{prev_m}` — pic serveurs **{prev.get('peak_guilds', 0)}**, "
+                    f"membres **{prev.get('peak_members', 0)}**"
+                )
+                if ptop:
+                    lines.append("· Top : " + " · ".join(f"`{a}`×{b}" for a, b in ptop))
+            await itx.followup.send("\n".join(lines)[:1950], ephemeral=True)
 
 
 # ========= INSTANCE =========

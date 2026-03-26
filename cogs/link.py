@@ -13,6 +13,8 @@ sont récupérées en temps réel depuis l'API AniList.
 
 from __future__ import annotations
 
+import secrets
+import time
 from typing import Any, Dict, List, Tuple
 
 import discord
@@ -121,17 +123,95 @@ class Link(commands.Cog):
                 await ctx.reply(msg, mention_author=False)
             return
 
-        # 2) Écrire le lien en DB (source unique)
-        core.set_linked_username(ctx.author.id, resolved)
+        other = core.discord_id_for_linked_anilist_username(resolved)
+        if other is not None and other != ctx.author.id:
+            msg = (
+                "❌ Ce pseudo AniList est **déjà lié** à un autre compte Discord.\n"
+                "Si c’est bien ton profil, contacte le support du bot : le lien doit être libéré."
+            )
+            if ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.reply(msg, mention_author=False)
+            return
 
-        # 3) Confirmer
-        ok = f"✅ Ton compte AniList **{resolved}** est maintenant lié."
+        token = f"ANBOT-{secrets.token_hex(4).upper()}"
+        core.anilist_set_link_pending(ctx.author.id, resolved, token)
+
+        msg = (
+            f"**Étape 1/2** — pseudo **{resolved}** reconnu sur AniList.\n\n"
+            f"1. Ouvre ton profil AniList → **Paramètres** → colle exactement ce code dans "
+            f"**« About » / « À propos »** (bio publique) :\n```{token}```\n"
+            "2. Enregistre, puis lance **`/verifyanilist`** ici.\n\n"
+            "_Le code expire après **30 minutes**. Tu peux le retirer de ta bio une fois lié._"
+        )
+        if ctx.interaction:
+            await ctx.interaction.followup.send(msg, ephemeral=True)
+        else:
+            await ctx.reply(msg, mention_author=False)
+
+    @commands.hybrid_command(
+        name="verifyanilist",
+        description="Après /linkanilist : confirme que la bio AniList contient le code.",
+    )
+    async def verify_anilist(self, ctx: commands.Context) -> None:
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=True, ephemeral=True)
+
+        pending = core.anilist_get_link_pending(ctx.author.id)
+        if not pending:
+            msg = "❌ Aucune vérification en cours. Commence par **`/linkanilist <pseudo>`**."
+            if ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.reply(msg, mention_author=False)
+            return
+
+        username, token, created = pending
+
+        if time.time() - created > 1800:
+            core.anilist_clear_link_pending(ctx.author.id)
+            msg = "❌ Code expiré (30 min). Relance **`/linkanilist`** avec ton pseudo."
+            if ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.reply(msg, mention_author=False)
+            return
+
+        about = core.fetch_anilist_user_about(username) or ""
+        if token not in about:
+            msg = (
+                f"❌ Je ne vois pas encore le code **`{token}`** sur le profil **{username}**.\n"
+                "Vérifie la section **About** (publique), enregistre, attends quelques secondes, réessaie."
+            )
+            if ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.reply(msg, mention_author=False)
+            return
+
+        try:
+            core.set_linked_username(ctx.author.id, username)
+        except ValueError as e:
+            code = str(e)
+            if "anilist_username_taken" in code or "taken" in code.lower():
+                msg = "❌ Ce pseudo AniList vient d’être lié ailleurs. Réessaie ou contacte un admin."
+            else:
+                msg = "❌ Impossible d’enregistrer le lien pour le moment."
+            core.anilist_clear_link_pending(ctx.author.id)
+            if ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.reply(msg, mention_author=False)
+            return
+
+        core.anilist_clear_link_pending(ctx.author.id)
+        ok = f"✅ **Étape 2/2** — compte **{username}** confirmé et lié à ton Discord !"
         if ctx.interaction:
             await ctx.interaction.followup.send(ok, ephemeral=True)
         else:
             await ctx.reply(ok, mention_author=False)
 
-    
     @commands.hybrid_command(name="unlink")
     async def unlink(self, ctx: commands.Context) -> None:
         """Supprime la liaison entre le compte Discord et AniList.
@@ -143,6 +223,7 @@ class Link(commands.Cog):
         Args:
             ctx: Le contexte de la commande
         """
+        core.anilist_clear_link_pending(ctx.author.id)
         if core.unlink_linked_username(ctx.author.id):
             await ctx.send("🔗 Ton lien AniList a bien été supprimé.")
         else:

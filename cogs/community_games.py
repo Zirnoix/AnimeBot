@@ -22,7 +22,7 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from discord.ui import Button, View
+from discord.ui import Button, Select, View
 from PIL import Image, ImageFilter
 
 from modules import core
@@ -60,20 +60,48 @@ GUESSWHO_MODES: dict[str, tuple[int, float, float, int]] = {
 _active_raids: dict[int, bool] = {}  # guild_id -> running
 
 # ---------- Raid boss v2 (inscription + défis perso + journal) ----------
-RAID_JOIN_SECONDS = 90.0
+RAID_JOIN_SECONDS = 120.0
 RAID_ROUND_SECONDS = 95.0
 RAID_MAX_ROUNDS = 12
 # PV du boss = nombre d’inscrits × ce coefficient (ex. 2 joueurs → 12 000 HP)
 RAID_HP_PER_PLAYER = 6000
-RAID_DAMAGE_MIN = 550
-RAID_DAMAGE_MAX = 980
+# Dégâts par coup selon le mode choisi à l’inscription (min, max) — tirage aléatoire chaque manche
+RAID_DAMAGE_BY_MODE: dict[str, tuple[int, int]] = {
+    "guesscharacter": (400, 720),
+    "guessyear": (520, 880),
+    "guessepisodes": (520, 880),
+    "guessgenre": (500, 860),
+    "higherlower": (540, 900),
+    "animequiz": (640, 1000),
+    "guesswho": (660, 1020),
+}
+RAID_MODE_DEFAULT = "guesscharacter"
+# XP bonus « coup final » (s’ajoute à la part dégâts / MVP / temps), selon difficulté du mode choisi
+RAID_XP_FINISHER_BY_MODE: dict[str, int] = {
+    "guesscharacter": 12,
+    "guessyear": 22,
+    "guessepisodes": 22,
+    "guessgenre": 20,
+    "higherlower": 24,
+    "animequiz": 38,
+    "guesswho": 40,
+}
+RAID_MODE_LABEL_FR: dict[str, str] = {
+    "guesscharacter": "Personnage (4 choix)",
+    "guessyear": "Année de diffusion",
+    "guessepisodes": "Nombre d’épisodes",
+    "guessgenre": "Genre",
+    "higherlower": "Plus populaire (2 animés)",
+    "animequiz": "Anime — affiche",
+    "guesswho": "Qui est-ce ? (flou)",
+}
 
 
 def _raid_max_hp_for_players(n: int) -> int:
     """Échelle les PV selon l’équipe (minimum 1 joueur)."""
     n = max(1, int(n))
     return RAID_HP_PER_PLAYER * n
-# XP hebdo : base + bonus dégâts + MVP + plus rapide
+# XP hebdo : base + bonus dégâts + MVP + meilleur temps sur une manche + coup final
 RAID_XP_BASE_EACH = 110
 RAID_XP_DAMAGE_POOL = 320
 RAID_XP_MVP_BONUS = 55
@@ -89,10 +117,12 @@ class RaidBattleState:
     round_n: int
     max_rounds: int
     participants: set[int]
+    player_modes: dict[int, str] = field(default_factory=dict)
     damage_by_user: dict[int, int] = field(default_factory=dict)
     hits_by_user: dict[int, int] = field(default_factory=dict)
     wrong_by_user: dict[int, int] = field(default_factory=dict)
     best_time_ms: dict[int, int] = field(default_factory=dict)
+    final_blow: Optional[tuple[int, str]] = None
     answered_this_round: set[int] = field(default_factory=set)
     open_challenge_users: set[int] = field(default_factory=set)
     log_lines: list[str] = field(default_factory=list)
@@ -100,6 +130,9 @@ class RaidBattleState:
     hub_view: Any = None
     round_start_ts: float = 0.0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Timer de manche indépendant du View (évite le reset du timeout à chaque edit du message)
+    round_timer_task: Optional[asyncio.Task] = field(default=None)
+    round_timer_generation: int = 0
 
 
 def _load_raid_cfg() -> dict[str, Any]:
@@ -158,6 +191,55 @@ def _raid_hp_bar(hp: int, max_hp: int, width: int = 14) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+class RaidModeSelect(Select):
+    """Menu : mode de défi pour tout le raid (une fois choisi, inchangé)."""
+
+    def __init__(self, host: "RaidModeSelectView") -> None:
+        self.host = host
+        opts = [
+            discord.SelectOption(
+                label=RAID_MODE_LABEL_FR[k][:100],
+                value=k,
+                description=f"Dégâts ~{RAID_DAMAGE_BY_MODE[k][0]}–{RAID_DAMAGE_BY_MODE[k][1]}",
+            )
+            for k in RAID_DAMAGE_BY_MODE.keys()
+        ]
+        super().__init__(
+            placeholder="🎯 Type de mini-jeu pour ce raid…",
+            min_values=1,
+            max_values=1,
+            options=opts,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.host.picker_id:
+            await interaction.response.send_message("❌ Ce menu n’est pas pour toi.", ephemeral=True)
+            return
+        mode = (self.values[0] if self.values else RAID_MODE_DEFAULT) or RAID_MODE_DEFAULT
+        self.host.join_view.mode_by_user[self.host.picker_id] = mode
+        label = RAID_MODE_LABEL_FR.get(mode, mode)
+        lo, hi = RAID_DAMAGE_BY_MODE.get(mode, (400, 720))
+        fin = RAID_XP_FINISHER_BY_MODE.get(mode, 12)
+        await interaction.response.edit_message(
+            content=(
+                f"✅ Mode enregistré : **{label}**\n"
+                f"• Dégâts par bonne réponse (tirage) : **~{lo}–{hi}**\n"
+                f"• Bonus **XP coup final** si tu achèves le boss : **+{fin}** (hors répartition dégâts / MVP / temps)."
+            ),
+            embed=None,
+            view=None,
+        )
+        self.host.stop()
+
+
+class RaidModeSelectView(View):
+    def __init__(self, join_view: "RaidJoinView", picker_id: int) -> None:
+        super().__init__(timeout=RAID_JOIN_SECONDS)
+        self.join_view = join_view
+        self.picker_id = picker_id
+        self.add_item(RaidModeSelect(self))
+
+
 class RaidJoinView(View):
     """Inscription avant le combat (salon public)."""
 
@@ -167,30 +249,49 @@ class RaidJoinView(View):
         self.guild_id = guild_id
         self.channel_id = channel_id
         self.joined: set[int] = set()
+        self.mode_by_user: dict[int, str] = {}
 
     @discord.ui.button(label="✅ S'inscrire au raid", style=discord.ButtonStyle.success)
     async def join(self, interaction: discord.Interaction, button: Button) -> None:
         if not interaction.guild or interaction.guild.id != self.guild_id:
             await interaction.response.send_message("❌ Mauvais serveur.", ephemeral=True)
             return
-        self.joined.add(interaction.user.id)
+        uid = interaction.user.id
+        self.joined.add(uid)
         n = len(self.joined)
         await interaction.response.send_message(
             f"Tu es enregistré(e) pour ce raid. **{n}** participants pour l’instant.",
+            ephemeral=True,
+        )
+        em = discord.Embed(
+            title="🎮 Choix du mini-jeu (visible par toi seul)",
+            description=(
+                "Sélectionne le **type de défi** pour **toutes** tes manches.\n"
+                "• Modes **plus durs** → dégâts plus élevés et **bonus XP** plus gros si tu portes le **coup final**.\n"
+                "• _Sans choix avant la fin du timer d’inscription → mode **"
+                + RAID_MODE_LABEL_FR.get(RAID_MODE_DEFAULT, "Personnage")
+                + "**._"
+            ),
+            color=discord.Color.dark_red(),
+        )
+        await interaction.followup.send(
+            embed=em,
+            view=RaidModeSelectView(self, uid),
             ephemeral=True,
         )
 
     async def on_timeout(self) -> None:
         ch = self.cog.bot.get_channel(self.channel_id)
         if isinstance(ch, discord.TextChannel):
-            await self.cog._raid_after_join(self.guild_id, ch, self.joined)
+            await self.cog._raid_after_join(self.guild_id, ch, self)
 
 
 class RaidRoundHubView(View):
     """Message public : bouton pour recevoir un défi perso (éphemeral)."""
 
     def __init__(self, cog: "CommunityGames", state: RaidBattleState) -> None:
-        super().__init__(timeout=RAID_ROUND_SECONDS)
+        # Pas de timeout sur le View : le délai de manche est géré par asyncio (voir _raid_round_timer)
+        super().__init__(timeout=None)
         self.cog = cog
         self.state = state
         self.ended = False
@@ -223,12 +324,14 @@ class RaidRoundHubView(View):
             )
             return
 
-        quiz = await self.cog._raid_fetch_char_quiz()
+        mode = self.state.player_modes.get(uid, RAID_MODE_DEFAULT)
+        quiz, attach = await self.cog._raid_build_challenge(mode, self.state.round_n, self.state.max_rounds)
         if not quiz:
-            await interaction.response.send_message("❌ Impossible de charger un personnage. Réessaie.", ephemeral=True)
+            await interaction.response.send_message("❌ Impossible de charger un défi. Réessaie.", ephemeral=True)
             return
 
-        damage = random.randint(RAID_DAMAGE_MIN, RAID_DAMAGE_MAX)
+        lo, hi = RAID_DAMAGE_BY_MODE.get(mode, RAID_DAMAGE_BY_MODE[RAID_MODE_DEFAULT])
+        damage = random.randint(lo, hi)
         async with self.state.lock:
             self.state.open_challenge_users.add(uid)
 
@@ -239,39 +342,23 @@ class RaidRoundHubView(View):
             user_id=uid,
             quiz=quiz,
             damage=damage,
+            raid_mode=mode,
         )
         emb = discord.Embed(
             title="🎭 Ton défi (personnel)",
-            description=(
-                f"Manche **{self.state.round_n}/{self.state.max_rounds}** — clique sur le **bon** personnage.\n"
-                f"Indice anime : _{quiz['anime_hint']}_\n"
-                f"*(Mauvais choix = ce bouton disparaît pour toi seul.)*"
-            ),
+            description=quiz.get("prompt", "").strip() or "Réponds correctement pour infliger des dégâts.",
             color=discord.Color.dark_red(),
         )
         if quiz.get("image_url"):
             emb.set_image(url=quiz["image_url"])
-        await interaction.response.send_message(embed=emb, view=pv, ephemeral=True)
-
-    async def on_timeout(self) -> None:
-        self.ended = True
-        for c in self.children:
-            if isinstance(c, Button):
-                c.disabled = True
-        if self.message:
-            try:
-                await self.message.edit(view=self)
-            except Exception:
-                pass
-        if self.state.hp <= 0:
-            return
-        ch = self.cog.bot.get_channel(self.state.channel_id)
-        if isinstance(ch, discord.TextChannel):
-            await self.cog._raid_after_round_timeout(self.state, ch)
+        send_kw: dict[str, Any] = {"embed": emb, "view": pv, "ephemeral": True}
+        if attach is not None:
+            send_kw["file"] = attach
+        await interaction.response.send_message(**send_kw)
 
 
 class PersonalRaidChallengeView(View):
-    """4 boutons — uniquement sur le message éphémère du joueur."""
+    """Boutons de choix — message éphémère du joueur (mode raid variable)."""
 
     def __init__(
         self,
@@ -282,22 +369,25 @@ class PersonalRaidChallengeView(View):
         user_id: int,
         quiz: dict[str, Any],
         damage: int,
+        raid_mode: str,
     ) -> None:
         super().__init__(timeout=RAID_ROUND_SECONDS)
         self.cog = cog
         self.state = state
         self.hub = hub
         self.user_id = user_id
-        self.options = quiz["options"]
-        self.correct_index = quiz["correct_index"]
-        self.correct_name = quiz["correct_name"]
-        self.anime_hint = quiz["anime_hint"]
+        self.quiz = quiz
+        self.options = list(quiz.get("options") or [])
+        self.correct_index = int(quiz.get("correct_index", 0))
+        self.correct_name = str(quiz.get("correct_name", "?"))
+        self.anime_hint = str(quiz.get("anime_hint", ""))
         self.damage = damage
+        self.raid_mode = raid_mode
         self.t0 = monotonic()
         self.resolved = False
 
         for i, label in enumerate(self.options):
-            b = Button(label=label[:79], style=discord.ButtonStyle.primary, row=i // 2)
+            b = Button(label=str(label)[:79], style=discord.ButtonStyle.primary, row=i // 2)
             b.callback = self._make_cb(i)
             self.add_item(b)
 
@@ -306,6 +396,24 @@ class PersonalRaidChallengeView(View):
             await self._handle(interaction, idx)
 
         return _cb
+
+    def _success_lines(self, dt_ms: int) -> str:
+        extra = str(self.quiz.get("success_extra") or "").strip()
+        kind = str(self.quiz.get("kind") or "")
+        if kind == "higherlower" and not extra:
+            t1 = self.quiz.get("hl_title1", "?")
+            t2 = self.quiz.get("hl_title2", "?")
+            p1 = self.quiz.get("hl_pop1", 0)
+            p2 = self.quiz.get("hl_pop2", 0)
+            extra = f"**{t1}** ({p1}) vs **{t2}** ({p2})"
+        head = f"✅ **{self.correct_name}**"
+        if self.anime_hint and self.anime_hint != "—":
+            head += f" — _{self.anime_hint}_"
+        lines = [head]
+        if extra:
+            lines.append(extra)
+        lines.append(f"**+{self.damage}** dégâts au boss · **{dt_ms}** ms")
+        return "\n".join(lines)
 
     async def _handle(self, interaction: discord.Interaction, idx: int) -> None:
         if interaction.user.id != self.user_id:
@@ -328,17 +436,16 @@ class PersonalRaidChallengeView(View):
             await interaction.response.edit_message(view=self)
             return
 
-        # Bonne réponse
         dt_ms = int((monotonic() - self.t0) * 1000)
         self.resolved = True
         for c in self.children:
             if isinstance(c, Button):
                 c.disabled = True
         await interaction.response.edit_message(
-            content=f"✅ **{self.correct_name}** — {self.anime_hint}\n"
-            f"**+{self.damage}** dégâts au boss · **{dt_ms}** ms",
+            content=self._success_lines(dt_ms),
             embed=None,
             view=self,
+            attachments=[],
         )
         await self.cog._raid_register_hit(
             interaction.user,
@@ -346,6 +453,7 @@ class PersonalRaidChallengeView(View):
             self.damage,
             dt_ms,
             self.hub,
+            self.raid_mode,
         )
 
     async def on_timeout(self) -> None:
@@ -398,12 +506,355 @@ class CommunityGames(commands.Cog):
         except ValueError:
             correct_index = 0
         return {
+            "kind": "guesscharacter",
             "options": options,
             "correct_index": correct_index,
             "correct_name": correct_name,
             "anime_hint": anime_hint,
             "image_url": img,
         }
+
+    def _raid_pick_wrong_years(self, correct: int, n: int = 3) -> list[int]:
+        out: set[int] = set()
+        guard = 0
+        while len(out) < n and guard < 80:
+            guard += 1
+            delta = random.randint(-28, 28)
+            y = correct + delta
+            if y != correct and 1960 <= y <= datetime.now().year + 1:
+                out.add(y)
+        while len(out) < n:
+            out.add(correct + 7 + len(out))
+        return list(out)[:n]
+
+    async def _raid_build_challenge(
+        self,
+        mode: str,
+        round_n: int,
+        max_rounds: int,
+    ) -> tuple[Optional[dict[str, Any]], Optional[discord.File]]:
+        m = mode if mode in RAID_DAMAGE_BY_MODE else RAID_MODE_DEFAULT
+        rn, mr = int(round_n), int(max_rounds)
+
+        if m == "guesscharacter":
+            q = await self._raid_fetch_char_quiz()
+            if not q:
+                return None, None
+            q["prompt"] = (
+                f"Manche **{rn}/{mr}** — clique sur le **bon** personnage.\n"
+                f"Indice anime : _{q.get('anime_hint', '—')}_\n"
+                "*(Mauvais choix = ce bouton disparaît pour toi seul.)*"
+            )
+            return q, None
+
+        if m == "guessyear":
+            page = random.randint(1, 400)
+            query = """
+            query ($page: Int) {
+              Page(perPage: 1, page: $page) {
+                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                  title { romaji }
+                  startDate { year }
+                  coverImage { extraLarge }
+                }
+              }
+            }
+            """
+            data = core.query_anilist(query, {"page": page})
+            try:
+                anime = data["data"]["Page"]["media"][0]
+                title = (anime.get("title") or {}).get("romaji") or "?"
+                year = (anime.get("startDate") or {}).get("year")
+            except Exception:
+                return None, None
+            if not year:
+                return None, None
+            year = int(year)
+            wrong = self._raid_pick_wrong_years(year, 3)
+            options = [year] + wrong
+            random.shuffle(options)
+            quiz = {
+                "kind": "guessyear",
+                "options": [str(x) for x in options],
+                "correct_index": options.index(year),
+                "correct_name": str(year),
+                "anime_hint": title,
+                "image_url": (anime.get("coverImage") or {}).get("extraLarge"),
+                "prompt": (
+                    f"Manche **{rn}/{mr}** — en quelle année **{title}** a-t-il commencé ?\n"
+                    "*(Mauvais choix = bouton désactivé.)*"
+
+                ),
+            }
+            return quiz, None
+
+        if m == "guessepisodes":
+            anime = None
+            for _ in range(6):
+                page = random.randint(1, 400)
+                query = """
+                query ($page: Int) {
+                  Page(perPage: 1, page: $page) {
+                    media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                      title { romaji }
+                      episodes
+                      coverImage { extraLarge }
+                    }
+                  }
+                }
+                """
+                data = core.query_anilist(query, {"page": page})
+                try:
+                    cand = data["data"]["Page"]["media"][0]
+                    ep = cand.get("episodes")
+                    if ep and isinstance(ep, int):
+                        anime = cand
+                        break
+                except Exception:
+                    continue
+            if not anime:
+                return None, None
+            title = (anime.get("title") or {}).get("romaji") or "?"
+            episodes = int(anime["episodes"])
+            candidates: list[int] = [episodes]
+            guard = 0
+            while len(candidates) < 4 and guard < 80:
+                guard += 1
+                alt = max(1, episodes + random.randint(-22, 22))
+                if alt not in candidates:
+                    candidates.append(alt)
+            options = candidates[:4]
+            random.shuffle(options)
+            quiz = {
+                "kind": "guessepisodes",
+                "options": [str(x) for x in options],
+                "correct_index": options.index(episodes),
+                "correct_name": str(episodes),
+                "anime_hint": title,
+                "image_url": (anime.get("coverImage") or {}).get("extraLarge"),
+                "prompt": (
+                    f"Manche **{rn}/{mr}** — combien d’épisodes pour **{title}** ?\n"
+                    "*(Mauvais choix = bouton désactivé.)*"
+                ),
+            }
+            return quiz, None
+
+        if m == "guessgenre":
+            anime = None
+            for _ in range(6):
+                page = random.randint(1, 400)
+                query = """
+                query ($page: Int) {
+                  Page(perPage: 1, page: $page) {
+                    media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                      title { romaji }
+                      genres
+                      coverImage { extraLarge }
+                    }
+                  }
+                }
+                """
+                data = core.query_anilist(query, {"page": page})
+                try:
+                    cand = data["data"]["Page"]["media"][0]
+                    if cand.get("genres"):
+                        anime = cand
+                        break
+                except Exception:
+                    continue
+            if not anime:
+                return None, None
+            title = (anime.get("title") or {}).get("romaji") or "?"
+            genres = list(anime.get("genres") or [])
+            correct = random.choice(genres)
+            pool_extra = [
+                "Psychological", "Sports", "Music", "Mecha", "Military",
+                "Historical", "Samurai", "Thriller", "Horror", "Mystery",
+            ]
+            wrong: list[str] = []
+            for g in pool_extra:
+                if g not in genres and g != correct:
+                    wrong.append(g)
+                if len(wrong) >= 3:
+                    break
+            for g in genres:
+                if g != correct and len(wrong) < 3:
+                    wrong.append(g)
+            options = [correct] + wrong[:3]
+            filler = [
+                "Isekai", "Mystery", "School", "Supernatural", "Kids",
+                "Shounen", "Shoujo", "Seinen", "Josei", "Dementia",
+            ]
+            for g in filler:
+                if len(options) >= 4:
+                    break
+                if g not in options and g not in genres:
+                    options.append(g)
+            options = options[:4]
+            random.shuffle(options)
+            quiz = {
+                "kind": "guessgenre",
+                "options": options,
+                "correct_index": options.index(correct),
+                "correct_name": correct,
+                "anime_hint": title,
+                "image_url": (anime.get("coverImage") or {}).get("extraLarge"),
+                "prompt": (
+                    f"Manche **{rn}/{mr}** — quel genre parmi ces choix correspond à **{title}** ?\n"
+                    "*(Un seul est valide ici — format liste AniList.)*"
+                ),
+            }
+            return quiz, None
+
+        if m == "higherlower":
+            page = random.randint(1, 20)
+            query = """
+            query ($page: Int) {
+              Page(perPage: 50, page: $page) {
+                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                  title { romaji }
+                  popularity
+                  coverImage { extraLarge }
+                }
+              }
+            }
+            """
+            data = core.query_anilist(query, {"page": page})
+            try:
+                medias = data["data"]["Page"]["media"]
+            except Exception:
+                return None, None
+            if not medias or len(medias) < 2:
+                return None, None
+            a, b = random.sample(medias, 2)
+            t1 = (a.get("title") or {}).get("romaji") or "?"
+            t2 = (b.get("title") or {}).get("romaji") or "?"
+            p1 = int(a.get("popularity") or 0)
+            p2 = int(b.get("popularity") or 0)
+            correct_index = 0 if p1 >= p2 else 1
+            winner = t1 if correct_index == 0 else t2
+            quiz = {
+                "kind": "higherlower",
+                "options": [f"1️⃣ {t1[:60]}", f"2️⃣ {t2[:60]}"],
+                "correct_index": correct_index,
+                "correct_name": f"Le plus populaire : {winner}",
+                "anime_hint": "Popularité AniList",
+                "image_url": None,
+                "hl_title1": t1,
+                "hl_title2": t2,
+                "hl_pop1": p1,
+                "hl_pop2": p2,
+                "prompt": (
+                    f"Manche **{rn}/{mr}** — lequel est le **plus populaire** sur AniList ?\n"
+                    f"**1️⃣** {t1}\n**2️⃣** {t2}"
+                ),
+            }
+            return quiz, None
+
+        if m == "animequiz":
+            page = random.randint(1, 80)
+            query = """
+            query ($page: Int) {
+              Page(page: $page, perPage: 4) {
+                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                  title { romaji }
+                  coverImage { extraLarge }
+                }
+              }
+            }
+            """
+            data = core.query_anilist(query, {"page": page})
+            try:
+                medias = data["data"]["Page"]["media"]
+            except Exception:
+                return None, None
+            if not medias or len(medias) < 4:
+                return None, None
+            correct = random.choice(medias)
+            ctitle = (correct.get("title") or {}).get("romaji") or "?"
+            options = [(m.get("title") or {}).get("romaji") or "?" for m in medias]
+            random.shuffle(options)
+            quiz = {
+                "kind": "animequiz",
+                "options": options,
+                "correct_index": options.index(ctitle),
+                "correct_name": ctitle,
+                "anime_hint": "—",
+                "image_url": (correct.get("coverImage") or {}).get("extraLarge"),
+                "prompt": (
+                    f"Manche **{rn}/{mr}** — quel est cet anime **d’après l’affiche** ?\n"
+                    "*(Mauvais choix = bouton désactivé.)*"
+                ),
+            }
+            return quiz, None
+
+        if m == "guesswho":
+            page = random.randint(1, 100)
+            query = """
+            query ($page: Int) {
+              Page(page: $page, perPage: 4) {
+                characters(sort: FAVOURITES_DESC) {
+                  name { full }
+                  image { large }
+                  media(type: ANIME) { nodes { title { romaji } } }
+                }
+              }
+            }
+            """
+            data = core.query_anilist(query, {"page": page})
+            if not data or "data" not in data:
+                return None, None
+            chars = data["data"]["Page"]["characters"]
+            if len(chars) < 4:
+                return None, None
+            correct = random.choice(chars)
+            correct_name = correct["name"]["full"]
+            url = (correct.get("image") or {}).get("large")
+            nodes = (correct.get("media") or {}).get("nodes") or []
+            anime_hint = (nodes[0]["title"]["romaji"] if nodes else "—")
+            options = [c["name"]["full"] for c in chars]
+            random.shuffle(options)
+            try:
+                correct_index = options.index(correct_name)
+            except ValueError:
+                correct_index = 0
+            quiz = {
+                "kind": "guesswho",
+                "options": options,
+                "correct_index": correct_index,
+                "correct_name": correct_name,
+                "anime_hint": anime_hint,
+                "image_url": "attachment://raid_guesswho.png",
+                "prompt": (
+                    f"Manche **{rn}/{mr}** — **qui est-ce** sur l’image floutée ?\n"
+                    f"Indice anime : _{anime_hint}_\n"
+                    "*(Flou raid — même principe que /guesswho normal.)*"
+                ),
+            }
+            if not url:
+                quiz["image_url"] = None
+                return quiz, None
+            try:
+                div, blur_r = 8, 6.0
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        raw = await resp.read()
+                im = Image.open(io.BytesIO(raw)).convert("RGB")
+                d = max(3, int(div))
+                im = im.resize((max(32, im.width // d), max(32, im.height // d)), Image.Resampling.LANCZOS)
+                im = im.resize((im.width * d, im.height * d), Image.Resampling.NEAREST)
+                im = im.filter(ImageFilter.GaussianBlur(radius=float(blur_r)))
+                buf = io.BytesIO()
+                im.save(buf, format="PNG")
+                buf.seek(0)
+                return quiz, discord.File(buf, filename="raid_guesswho.png")
+            except Exception:
+                LOG.warning("raid guesswho blur failed", exc_info=True)
+                quiz["image_url"] = (correct.get("image") or {}).get("large")
+                return quiz, None
+
+        q = await self._raid_fetch_char_quiz()
+        return (q, None) if q else (None, None)
 
     def _raid_hub_embed(self, state: RaidBattleState) -> discord.Embed:
         bar = _raid_hp_bar(state.hp, state.max_hp)
@@ -426,15 +877,48 @@ class CommunityGames(commands.Cog):
             color=discord.Color.dark_red(),
         )
 
+    async def _raid_cancel_round_timer_async(self, state: RaidBattleState) -> None:
+        t = state.round_timer_task
+        if t is not None and not t.done():
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+        state.round_timer_task = None
+
+    async def _raid_round_timer_worker(
+        self,
+        state: RaidBattleState,
+        channel: discord.TextChannel,
+        gen: int,
+    ) -> None:
+        """Fin de manche si le délai est écoulé (non réinitialisé par les edits du message hub)."""
+        try:
+            await asyncio.sleep(RAID_ROUND_SECONDS)
+        except asyncio.CancelledError:
+            return
+        if state.round_timer_generation != gen:
+            return
+        if not _active_raids.get(state.guild_id):
+            return
+        if state.hp <= 0:
+            return
+        if len(state.answered_this_round) >= len(state.participants):
+            return
+        await self._raid_after_round_timeout(state, channel)
+
     async def _raid_refresh_hub(self, state: RaidBattleState) -> None:
         if not state.hub_message:
             return
         try:
-            await state.hub_message.edit(embed=self._raid_hub_embed(state), view=state.hub_view)
+            # Ne pas repasser `view=` : sinon discord.py peut réinitialiser le délai interne du View à chaque edit.
+            await state.hub_message.edit(embed=self._raid_hub_embed(state))
         except Exception:
             pass
 
-    async def _raid_after_join(self, guild_id: int, channel: discord.TextChannel, joined: set[int]) -> None:
+    async def _raid_after_join(self, guild_id: int, channel: discord.TextChannel, join_view: RaidJoinView) -> None:
+        joined = set(join_view.joined)
         if not joined:
             await channel.send("❌ **Raid annulé** — aucun participant inscrit.")
             _active_raids.pop(guild_id, None)
@@ -442,6 +926,7 @@ class CommunityGames(commands.Cog):
 
         n = len(joined)
         max_hp = _raid_max_hp_for_players(n)
+        player_modes = {uid: join_view.mode_by_user.get(uid, RAID_MODE_DEFAULT) for uid in joined}
         state = RaidBattleState(
             guild_id=guild_id,
             channel_id=channel.id,
@@ -450,15 +935,15 @@ class CommunityGames(commands.Cog):
             round_n=1,
             max_rounds=RAID_MAX_ROUNDS,
             participants=set(joined),
+            player_modes=player_modes,
         )
         await channel.send(
             f"✅ **{n}** participant(s) — le boss a **{max_hp}** HP "
             f"(_{RAID_HP_PER_PLAYER} × {n} selon l’équipe_).\n"
             f"• Jusqu’à **{RAID_MAX_ROUNDS}** manches — timer **~{int(RAID_ROUND_SECONDS)} s** max **par manche** "
             "si quelqu’un n’a pas encore répondu.\n"
-            "• Chaque **bonne réponse** (défi perso) inflige **~{0}–{1}** dégâts.".format(
-                RAID_DAMAGE_MIN, RAID_DAMAGE_MAX
-            )
+            "• Les **dégâts par bonne réponse** dépendent du **mode** choisi à l’inscription (voir ton message éphémère) "
+            "— les modes plus difficiles frappent plus fort."
         )
         await self._raid_open_round(channel, state)
 
@@ -466,6 +951,7 @@ class CommunityGames(commands.Cog):
         if state.hp <= 0:
             await self._raid_conclude_victory(channel, state, extra_intro="")
             return
+        await self._raid_cancel_round_timer_async(state)
         state.answered_this_round.clear()
         state.open_challenge_users.clear()
         state.round_start_ts = monotonic()
@@ -475,6 +961,11 @@ class CommunityGames(commands.Cog):
         hub.message = msg
         state.hub_message = msg
         state.hub_view = hub
+        state.round_timer_generation += 1
+        gen = state.round_timer_generation
+        state.round_timer_task = asyncio.create_task(
+            self._raid_round_timer_worker(state, channel, gen)
+        )
 
     async def _raid_register_hit(
         self,
@@ -483,6 +974,7 @@ class CommunityGames(commands.Cog):
         damage: int,
         dt_ms: int,
         hub: RaidRoundHubView,
+        raid_mode: str,
     ) -> None:
         uid = user.id
         name = user.display_name if hasattr(user, "display_name") else str(user)
@@ -506,6 +998,8 @@ class CommunityGames(commands.Cog):
         await self._raid_refresh_hub(state)
 
         if state.hp <= 0:
+            state.final_blow = (uid, raid_mode if raid_mode in RAID_DAMAGE_BY_MODE else RAID_MODE_DEFAULT)
+            await self._raid_cancel_round_timer_async(state)
             hub.ended = True
             hub.stop()
             try:
@@ -517,7 +1011,16 @@ class CommunityGames(commands.Cog):
                     )
             except Exception:
                 pass
-            await self._raid_conclude_victory(ch, state, extra_intro=f"Coup final : **{name}**.")
+            mode_lbl = RAID_MODE_LABEL_FR.get(state.final_blow[1], state.final_blow[1])
+            fin_xp = RAID_XP_FINISHER_BY_MODE.get(state.final_blow[1], 0)
+            await self._raid_conclude_victory(
+                ch,
+                state,
+                extra_intro=(
+                    f"Coup final : **{name}** (mode **{mode_lbl}**) — "
+                    f"bonus XP coup final : **+{fin_xp}** (voir détail ci-dessous)."
+                ),
+            )
             return
 
         if len(state.answered_this_round) >= len(state.participants):
@@ -534,6 +1037,7 @@ class CommunityGames(commands.Cog):
             return
         if state.hp <= 0:
             return
+        await self._raid_cancel_round_timer_async(state)
         hub.ended = True
         hub.stop()
         try:
@@ -559,8 +1063,30 @@ class CommunityGames(commands.Cog):
             return
         if state.hp <= 0:
             return
+        state.round_timer_task = None
+        hv = state.hub_view
+        if hv is not None and not getattr(hv, "ended", True):
+            hv.ended = True
+            for c in hv.children:
+                if isinstance(c, Button):
+                    c.disabled = True
+            try:
+                if state.hub_message:
+                    await state.hub_message.edit(embed=self._raid_hub_embed(state), view=hv)
+            except Exception:
+                pass
+            try:
+                hv.stop()
+            except Exception:
+                pass
         await channel.send(
             f"⏰ **Fin de la manche {state.round_n}** — le boss tient encore (**{state.hp}** HP)."
+        )
+        LOG.info(
+            "raid: timeout manche %s/%s (guild %s)",
+            state.round_n,
+            state.max_rounds,
+            state.guild_id,
         )
         if state.round_n >= state.max_rounds:
             await self._raid_force_finish(channel, state)
@@ -569,6 +1095,7 @@ class CommunityGames(commands.Cog):
         await self._raid_open_round(channel, state)
 
     async def _raid_force_finish(self, channel: discord.TextChannel, state: RaidBattleState) -> None:
+        await self._raid_cancel_round_timer_async(state)
         extra = []
         if state.hp > 0:
             extra.append(
@@ -585,6 +1112,7 @@ class CommunityGames(commands.Cog):
         *,
         extra_intro: str = "",
     ) -> None:
+        await self._raid_cancel_round_timer_async(state)
         guild_id = state.guild_id
         participants = list(state.participants)
         total_dmg = sum(state.damage_by_user.values())
@@ -597,9 +1125,22 @@ class CommunityGames(commands.Cog):
         if state.best_time_ms:
             fastest_uid = min(state.best_time_ms, key=lambda u: state.best_time_ms[u])
 
+        fin_uid: Optional[int] = None
+        fin_mode: Optional[str] = None
+        if state.final_blow:
+            fin_uid, fin_mode = state.final_blow[0], state.final_blow[1]
+
         lines = []
         if extra_intro:
             lines.append(extra_intro)
+        lines.append(
+            "_Chaque coup inflige des dégâts **aléatoires** dans une fourchette qui dépend **uniquement** "
+            "du mode choisi — pas de la « notoriété » du personnage ou de l’anime._"
+        )
+        lines.append(
+            "_**Meilleur temps** = ta réponse correcte **la plus rapide** sur **une seule** manche pendant tout le raid "
+            "(pas une moyenne, pas forcément la dernière manche)._"
+        )
         lines.append("**Récap XP (événement hebdo)** — merci à tous !")
 
         xp_lines: list[str] = []
@@ -610,6 +1151,10 @@ class CommunityGames(commands.Cog):
                 xp += RAID_XP_MVP_BONUS
             if uid == fastest_uid and fastest_uid is not None:
                 xp += RAID_XP_FASTEST_BONUS
+            fin_bonus = 0
+            if fin_uid is not None and uid == fin_uid and fin_mode:
+                fin_bonus = int(RAID_XP_FINISHER_BY_MODE.get(fin_mode, 0))
+                xp += fin_bonus
             try:
                 await core.add_xp(self.bot, channel, uid, xp, announce=False)
             except Exception:
@@ -625,7 +1170,9 @@ class CommunityGames(commands.Cog):
             if uid == mvp_uid:
                 badges.append("MVP dégâts")
             if uid == fastest_uid:
-                badges.append("réflexe")
+                badges.append("meilleur temps (1 manche)")
+            if fin_uid is not None and uid == fin_uid:
+                badges.append(f"coup final (+{fin_bonus} XP)")
             b = f" ({', '.join(badges)})" if badges else ""
             xp_lines.append(f"• **{uname}** — **+{xp}** XP{b} — {state.damage_by_user.get(uid, 0)} dégâts")
 
@@ -640,7 +1187,14 @@ class CommunityGames(commands.Cog):
             if mv:
                 ft.append(f"MVP dégâts : {mv.display_name}")
         if fastest_uid is not None and fastest_uid in state.best_time_ms:
-            ft.append(f"Meilleur temps : {state.best_time_ms[fastest_uid]} ms")
+            ft.append(f"Record rapidité (1 manche) : {state.best_time_ms[fastest_uid]} ms")
+        if fin_uid is not None and fin_mode and channel.guild:
+            fm = channel.guild.get_member(fin_uid)
+            if fm:
+                ft.append(
+                    f"Coup final : {fm.display_name} ({RAID_MODE_LABEL_FR.get(fin_mode, fin_mode)}) "
+                    f"+{RAID_XP_FINISHER_BY_MODE.get(fin_mode, 0)} XP"
+                )
         if ft:
             emb.set_footer(text=" · ".join(ft))
         try:
@@ -762,17 +1316,28 @@ class CommunityGames(commands.Cog):
         _save_raid_cfg(cfg)
         await interaction.response.send_message(f"✅ Salon de raid : {ch.mention}", ephemeral=True)
 
-    @raidconfig.command(name="horaire", description="Jour et heure du raid (fuseau du bot : BOT_TIMEZONE).")
+    @raidconfig.command(name="horaire", description="Jour et heure du raid (fuseau du bot, voir BOT_TIMEZONE).")
     @app_commands.describe(
-        weekday="0 = lundi … 6 = dimanche",
+        weekday="Jour de la semaine",
         hour="0–23",
         minute="0–59",
+    )
+    @app_commands.choices(
+        weekday=[
+            app_commands.Choice(name="Lundi", value=0),
+            app_commands.Choice(name="Mardi", value=1),
+            app_commands.Choice(name="Mercredi", value=2),
+            app_commands.Choice(name="Jeudi", value=3),
+            app_commands.Choice(name="Vendredi", value=4),
+            app_commands.Choice(name="Samedi", value=5),
+            app_commands.Choice(name="Dimanche", value=6),
+        ]
     )
     @app_commands.default_permissions(administrator=True)
     async def raid_horaire(
         self,
         interaction: discord.Interaction,
-        weekday: app_commands.Range[int, 0, 6],
+        weekday: int,
         hour: app_commands.Range[int, 0, 23],
         minute: app_commands.Range[int, 0, 59],
     ) -> None:
@@ -785,12 +1350,24 @@ class CommunityGames(commands.Cog):
         cfg[str(interaction.guild.id)]["hour"] = int(hour)
         cfg[str(interaction.guild.id)]["minute"] = int(minute)
         _save_raid_cfg(cfg)
+        tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
+        jname = core.JOURS_SEMAINE_FR[int(weekday) % 7]
         await interaction.response.send_message(
-            f"✅ Raid planifié : **jour {weekday}** à **{hour:02d}:{minute:02d}** (voir `BOT_TIMEZONE`).",
+            f"✅ Raid planifié : **{jname}** à **{hour:02d}:{minute:02d}** "
+            f"(fuseau **{tzname}**, variable d’environnement **`BOT_TIMEZONE`** sur l’hébergeur).",
             ephemeral=True,
         )
 
-    @raidconfig.command(name="activer", description="Activer ou désactiver le raid automatique.")
+    @raidconfig.command(
+        name="activer",
+        description="Lancer le raid automatiquement chaque semaine (sinon uniquement avec /raidstart).",
+    )
+    @app_commands.describe(
+        actif=(
+            "**Oui** : le bot ouvre l’inscription **chaque semaine** à l’horaire + rappel ~1 h avant. "
+            "**Non** : pas de lancement auto (admins utilisent **`/raidstart`**)."
+        ),
+    )
     @app_commands.default_permissions(administrator=True)
     async def raid_activer(self, interaction: discord.Interaction, actif: bool) -> None:
         if not interaction.guild:
@@ -800,7 +1377,10 @@ class CommunityGames(commands.Cog):
         cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
         cfg[str(interaction.guild.id)]["enabled"] = actif
         _save_raid_cfg(cfg)
-        await interaction.response.send_message(f"✅ Raid auto : **{'activé' if actif else 'désactivé'}**.", ephemeral=True)
+        await interaction.response.send_message(
+            f"✅ Lancement **hebdomadaire automatique** : **{'oui' if actif else 'non'}**.",
+            ephemeral=True,
+        )
 
     @raidconfig.command(name="statut", description="Afficher la config actuelle du raid.")
     @app_commands.default_permissions(administrator=True)
@@ -816,13 +1396,16 @@ class CommunityGames(commands.Cog):
         h = int(cfg.get("hour", 20))
         m = int(cfg.get("minute", 0))
         nxt = _next_raid_moment(now, wd, h, m)
+        tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
+        jname = core.JOURS_SEMAINE_FR[wd % 7]
+        auto = bool(cfg.get("enabled", False))
         await interaction.response.send_message(
             f"**Raid boss**\n"
             f"• Salon : {ch_txt}\n"
-            f"• Horaire : jour **{wd}** à **{h:02d}:{m:02d}**\n"
-            f"• Actif : **{cfg.get('enabled', False)}**\n"
+            f"• Horaire : **{jname}** à **{h:02d}:{m:02d}** (fuseau **{tzname}**)\n"
+            f"• Lancement auto chaque semaine : **{'oui' if auto else 'non (utilise /raidstart)'}**\n"
             f"• Prochain créneau (calcul) : <t:{int(nxt.timestamp())}:F>\n"
-            f"_Alerte ~1 h avant dans le salon._",
+            f"_Alerte ~1 h avant dans le salon du raid._",
             ephemeral=True,
         )
 

@@ -35,8 +35,8 @@ DESC_OVERRIDE: Dict[str, str] = {
     "chainquiz": "Enchaîne des quiz solo : la difficulté monte à chaque bonne réponse.",
     "raidconfig": "Groupe admin : salon, horaire hebdo, activer/désactiver le raid boss.",
     "raidconfig canal": "Définit le salon des alertes et du combat de raid boss.",
-    "raidconfig horaire": "Jour (0=lun…6=dim) et heure du raid automatique (fuseau BOT_TIMEZONE).",
-    "raidconfig activer": "Active ou désactive le lancement automatique du raid.",
+    "raidconfig horaire": "Jour (menu : lundi…dimanche) et heure du raid auto (fuseau BOT_TIMEZONE / Europe/Paris par défaut).",
+    "raidconfig activer": "Oui/Non : lancer le raid automatiquement chaque semaine à l’horaire (sinon seulement /raidstart).",
     "raidconfig statut": "Affiche la configuration du raid et le prochain créneau.",
     "raidstart": "Lance un raid boss tout de suite dans ce salon (admin).",
     "raidalerttest": "Envoie un message de test type « raid dans 1 h » (admin).",
@@ -49,7 +49,8 @@ DESC_OVERRIDE: Dict[str, str] = {
     "op": "Guess : deviner l’opening.",
 
     # Link / extra
-    "linkanilist": "Lie ton compte AniList : /linkanilist <pseudo> (pour changer : /unlink puis relier).",
+    "linkanilist": "Étape 1 : lie ton AniList avec un code à mettre dans la bio, puis /verifyanilist.",
+    "verifyanilist": "Étape 2 : confirme le lien après avoir collé le code dans « About » sur AniList.",
     "unlink": "Délie ton compte AniList.",
     "checkin": "Fais ton check-in quotidien (streak) et gagne de l’XP.",
     "streak": "Affiche ta série quotidienne (streak) et ton record.",
@@ -61,6 +62,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "mybadges": "Liste tes badges et ta progression.",
     "duelstats": "Duel d’engagement AniList : complétés, en cours, épisodes, temps (+ note si les deux notent).",
     "quiztop": "Top du classement quiz + podium du mois dernier et récompenses.",
+    "animetop": "Classement mini-jeux (activité totale ou un jeu précis, d’après les stats persistées).",
     "quizlevels": "Paliers quiz (score du mois) et rangs XP : **un menu** pour choisir quoi afficher.",
     "myrank": "Ton rang, ton XP et ton titre.",
     "stats": "Stats AniList d’un utilisateur spécifié.",
@@ -103,6 +105,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "admin cogs": "Liste des extensions chargées.",
     "admin test_alert": "Envoie une carte d’alerte test dans le salon courant.",
     "admin show_channel": "Affiche le salon enregistré pour les alertes (/setchannel).",
+    "admin recap_mensuel": "(Owner) Récap stats internes : usages slash, pics serveurs/membres, mois courant et précédent.",
 }
 
 # ===== Sections curatées (ordre d’affichage) =====
@@ -120,10 +123,10 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "raidstart", "raidalerttest",
     ]),
     ("🔗 Pages Link", [
-        "linkanilist", "unlink"
+        "linkanilist", "verifyanilist", "unlink"
     ]),
     ("📊 Pages Statistiques", [
-        "mycard", "mystats", "mybadges", "duelstats", "quiztop", "quizlevels", "myrank", "stats"
+        "mycard", "mystats", "mybadges", "duelstats", "quiztop", "animetop", "quizlevels", "myrank", "stats"
     ]),
     ("🧭 Pages Tracker", [
         "track", "track add", "track list", "track remove", "track clear"

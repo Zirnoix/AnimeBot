@@ -5,6 +5,7 @@ import json
 from typing import Dict, Any
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from modules import core
@@ -719,6 +720,64 @@ class Profile(commands.Cog):
         )
 
         await ctx.send(embed=embed, view=view)
+
+    @commands.hybrid_command(
+        name="animetop",
+        description="Classement des mini-jeux (participations enregistrées dans les stats du bot).",
+    )
+    @app_commands.describe(
+        classement=(
+            "« Toute activité » = somme de tous les compteurs ; sinon un jeu précis (même clé que dans /mycard)."
+        ),
+    )
+    @app_commands.choices(
+        classement=[
+            app_commands.Choice(name="Toute activité (tous mini-jeux)", value="all"),
+            app_commands.Choice(name="Anime quiz", value="animequiz"),
+            app_commands.Choice(name="Guess année", value="guessyear"),
+            app_commands.Choice(name="Guess épisodes", value="guessepisodes"),
+            app_commands.Choice(name="Guess genre", value="guessgenre"),
+            app_commands.Choice(name="Guess personnage", value="guesscharacter"),
+            app_commands.Choice(name="Guess who", value="guesswho"),
+            app_commands.Choice(name="Higher / Lower", value="higherlower"),
+            app_commands.Choice(name="Chain quiz", value="chainquiz"),
+            app_commands.Choice(name="Boss raid (coups)", value="bossraid"),
+            app_commands.Choice(name="Duel", value="duel"),
+            app_commands.Choice(name="Guess OP", value="guessop"),
+        ]
+    )
+    async def animetop(self, ctx: commands.Context, classement: str = "all") -> None:
+        n = 10
+        key = (classement or "all").strip().lower()
+        if key == "all":
+            rows = core.mini_game_activity_leaderboard(n=n)
+            title = "🏆 Top activité mini-jeux (somme des compteurs)"
+        else:
+            rows = core.mini_game_leaderboard(key, n=n)
+            title = f"🏆 Top **{key}**"
+        if not rows:
+            await ctx.send(
+                "Pas encore de données pour ce classement (personne n’a enregistré de parties sur cette clé)."
+            )
+            return
+        lines = []
+        g = ctx.guild
+        for i, (uid, score) in enumerate(rows, start=1):
+            name = f"`<@{uid}>`"
+            if g:
+                m = g.get_member(uid)
+                if m:
+                    name = m.display_name
+            lines.append(f"**{i}.** {name} — **{_fmt_number(int(score))}**")
+        emb = discord.Embed(
+            title=title,
+            description="\n".join(lines),
+            color=_EMBED_MINIS,
+        )
+        emb.set_footer(
+            text="Basé sur data/mini_scores.json — les défaites ne sont pas toujours stockées par jeu."
+        )
+        await ctx.send(embed=emb)
 
     @commands.hybrid_command(name="mybadges", description="Liste tes badges et ta progression")
     async def mybadges(self, ctx: commands.Context) -> None:

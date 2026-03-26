@@ -105,6 +105,7 @@ class FileConfig:
     GUESSOP_SCORES  = os.path.join(DATA_DIR, "guessop_scores.json")
     GUESSCHAR_SCORES = os.path.join(DATA_DIR, "guesschar_scores.json")
     GUESS_GENRE_SANCTIONS = os.path.join(DATA_DIR, "guess_genre_sanctions.json")
+    OWNER_TELEMETRY = os.path.join(DATA_DIR, "owner_telemetry.json")
 
 _AIRING_SORT_FIX = {
     "AIRING_AT": "TIME",
@@ -123,6 +124,11 @@ JOURS_FR = {
     "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi",
     "Sunday": "Dimanche"
 }
+
+# Aligné sur datetime.weekday() : 0 = lundi … 6 = dimanche
+JOURS_SEMAINE_FR = (
+    "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"
+)
 
 # Émojis pour les genres
 GENRE_EMOJIS = {
@@ -1562,6 +1568,46 @@ def get_mini_scores(user_id: int) -> dict:
     return data.get(str(user_id), {})
 
 
+def mini_game_leaderboard(game: str, n: int = 10) -> list[tuple[int, int]]:
+    """Top `n` joueurs pour un mini-jeu (`mini_scores.json`, compteur du jeu)."""
+    g = (game or "").strip().lower()
+    if not g:
+        return []
+    data = load_mini_scores()
+    rows: list[tuple[int, int]] = []
+    for uid_str, games in (data or {}).items():
+        try:
+            uid = int(uid_str)
+        except Exception:
+            continue
+        v = int((games or {}).get(g, 0))
+        if v > 0:
+            rows.append((uid, v))
+    rows.sort(key=lambda x: (-x[1], x[0]))
+    return rows[: max(1, int(n))]
+
+
+def mini_game_activity_leaderboard(*, n: int = 10) -> list[tuple[int, int]]:
+    """Top `n` par somme de toutes les entrées mini-jeux (activité globale)."""
+    data = load_mini_scores()
+    totals: dict[int, int] = {}
+    for uid_str, games in (data or {}).items():
+        try:
+            uid = int(uid_str)
+        except Exception:
+            continue
+        s = 0
+        for v in (games or {}).values():
+            try:
+                s += int(v)
+            except Exception:
+                pass
+        if s > 0:
+            totals[uid] = s
+    rows = sorted(totals.items(), key=lambda x: (-x[1], x[0]))
+    return rows[: max(1, int(n))]
+
+
 def get_guess_genre_penalty_count(user_id: int) -> int:
     """Nombre de pénalités anti-spam /guess genre enregistrées (affichage mycard)."""
     data = load_json(FileConfig.GUESS_GENRE_SANCTIONS, {})
@@ -1596,11 +1642,18 @@ def get_user_anilist(user_id: int) -> Optional[str]:
 
 
 def set_linked_username(user_id: int, username: str) -> None:
+    uid = int(user_id)
+    uname = (username or "").strip()
+    if not uname:
+        raise ValueError("empty_username")
+    taken = discord_id_for_linked_anilist_username(uname)
+    if taken is not None and taken != uid:
+        raise ValueError("anilist_username_taken")
     with _db_conn() as con:
         con.execute(
             "INSERT OR REPLACE INTO anilist_links (discord_id, username, linked_at) "
             "VALUES (?, ?, strftime('%s','now'))",
-            (int(user_id), username)
+            (uid, uname)
         )
 
 def get_linked_username(user_id: int) -> str | None:
@@ -1610,6 +1663,134 @@ def get_linked_username(user_id: int) -> str | None:
             (int(user_id),)
         ).fetchone()
         return row[0] if row else None
+
+
+def discord_id_for_linked_anilist_username(username: str) -> int | None:
+    """ID Discord déjà associé à ce pseudo AniList (casse ignorée), ou None."""
+    key = (username or "").strip().lower()
+    if not key:
+        return None
+    try:
+        with _db_conn() as con:
+            row = con.execute(
+                "SELECT discord_id FROM anilist_links WHERE lower(username) = ?",
+                (key,),
+            ).fetchone()
+            return int(row[0]) if row else None
+    except Exception:
+        return None
+
+
+def _ensure_anilist_link_pending_table(con: sqlite3.Connection) -> None:
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS anilist_link_pending (
+            discord_id INTEGER PRIMARY KEY,
+            username   TEXT NOT NULL,
+            token      TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+
+
+def anilist_set_link_pending(discord_id: int, username: str, token: str) -> None:
+    import time as _time
+
+    uid = int(discord_id)
+    with _db_conn() as con:
+        _ensure_anilist_link_pending_table(con)
+        con.execute(
+            "INSERT OR REPLACE INTO anilist_link_pending (discord_id, username, token, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (uid, (username or "").strip(), (token or "").strip(), int(_time.time())),
+        )
+
+
+def anilist_get_link_pending(discord_id: int) -> tuple[str, str, int] | None:
+    uid = int(discord_id)
+    try:
+        with _db_conn() as con:
+            _ensure_anilist_link_pending_table(con)
+            row = con.execute(
+                "SELECT username, token, created_at FROM anilist_link_pending WHERE discord_id = ?",
+                (uid,),
+            ).fetchone()
+            if not row:
+                return None
+            return str(row[0]), str(row[1]), int(row[2])
+    except Exception:
+        return None
+
+
+def anilist_clear_link_pending(discord_id: int) -> None:
+    uid = int(discord_id)
+    try:
+        with _db_conn() as con:
+            _ensure_anilist_link_pending_table(con)
+            con.execute("DELETE FROM anilist_link_pending WHERE discord_id = ?", (uid,))
+    except Exception:
+        pass
+
+
+def fetch_anilist_user_about(username: str) -> str | None:
+    """Texte « À propos » public du profil AniList (pour vérif de lien)."""
+    name = _normalize_name(username or "")
+    if not name:
+        return None
+    q = "query ($name: String){ User(name: $name) { about } }"
+    try:
+        data = query_anilist(q, {"name": name})
+        u = (data or {}).get("data", {}).get("User") if isinstance(data, dict) else None
+        if not u:
+            return None
+        ab = u.get("about")
+        return str(ab) if ab is not None else ""
+    except Exception:
+        return None
+
+
+def record_owner_slash_command(qualified_name: str) -> None:
+    """Comptage anonyme des usages slash (mois courant + mois précédent archivé)."""
+    now = datetime.now(timezone.utc)
+    month = now.strftime("%Y-%m")
+    path = FileConfig.OWNER_TELEMETRY
+    data = load_json(path, {})
+    cur_m = data.get("current_month")
+    if cur_m != month:
+        if cur_m and data.get("current"):
+            data["previous_month"] = cur_m
+            data["previous"] = data.get("current")
+        data["current_month"] = month
+        data["current"] = {"commands": {}, "peak_guilds": 0, "peak_members": 0}
+    cur = data.setdefault("current", {})
+    cmds = cur.setdefault("commands", {})
+    qn = (qualified_name or "?").lower()
+    cmds[qn] = cmds.get(qn, 0) + 1
+    save_json(path, data)
+
+
+def owner_telemetry_refresh_peaks(bot: discord.Client) -> None:
+    """Met à jour les pics serveurs / membres pour le mois déjà initialisé (voir comptage slash)."""
+    try:
+        path = FileConfig.OWNER_TELEMETRY
+        data = load_json(path, {})
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        if data.get("current_month") != month:
+            return
+        cur = data.setdefault("current", {})
+        guild_n = len(getattr(bot, "guilds", []) or [])
+        member_n = sum((g.member_count or 0) for g in (getattr(bot, "guilds", []) or []))
+        cur["peak_guilds"] = max(int(cur.get("peak_guilds", 0)), guild_n)
+        cur["peak_members"] = max(int(cur.get("peak_members", 0)), member_n)
+        save_json(path, data)
+    except Exception:
+        pass
+
+
+def owner_telemetry_summary() -> dict[str, Any]:
+    """Charge owner_telemetry.json pour affichage admin (sans dépendre de Discord)."""
+    return load_json(FileConfig.OWNER_TELEMETRY, {})
 
 
 def iter_discord_anilist_links() -> List[Tuple[int, str]]:
