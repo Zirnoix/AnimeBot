@@ -45,14 +45,16 @@ class Utils(commands.Cog):
     @commands.hybrid_command(name="setchannel")
     @commands.has_permissions(administrator=True)
     async def setchannel(self, ctx: commands.Context) -> None:
-        """Définit le salon de notifications (réservé au propriétaire)."""
+        """Définit le salon des annonces « sortie d’épisode » pour ce serveur."""
         try:
-            config = core.get_config()
-            config["channel_id"] = ctx.channel.id
-            core.save_config(config)
+            if not ctx.guild:
+                await ctx.send("❌ Cette commande doit être utilisée dans un serveur.")
+                return
+            core.set_guild_alert_channel(ctx.guild.id, ctx.channel.id)
             await ctx.send(
-                "✅ Ce salon est enregistré pour les **notifications** (alertes, etc.). "
-                "La **liste du serveur** pour `/next` se gère avec **`/airings`**."
+                "✅ Ce salon recevra les **annonces de sortie d’épisode** pour **ce serveur**.\n"
+                "Les titres suivis sont ceux de **`/airings`** (liste remplie par les admins, ex. **`/airings all`**). "
+                "Sans anime dans cette liste, aucune annonce ne part."
             )
         except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")

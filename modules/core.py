@@ -439,6 +439,98 @@ def get_airings_global(days: int = 14, limit: int = 200) -> List[dict]:
     out.sort(key=lambda x: x["airingAt"])
     return out
 
+
+def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: int) -> List[dict]:
+    """
+    Pour chaque media_id, interroge nextAiringEpisode : si la date est passée mais encore dans
+    `grace` secondes après la diffusion, l’épisode est « éligible » à une annonce sortie.
+    (Les grilles globales AniList ne garantissent pas les créneaux passés ; le détail Media est fiable.)
+    """
+    if not media_ids:
+        return []
+    parts: List[str] = []
+    for i, mid in enumerate(media_ids):
+        parts.append(
+            f"a{i}: Media(id: {int(mid)}, type: ANIME) {{ id siteUrl title {{ romaji english native }} "
+            f"coverImage {{ large }} genres nextAiringEpisode {{ episode airingAt }} }}"
+        )
+    query = "query { " + " ".join(parts) + " }"
+    data = query_anilist(query, {}) or {}
+    payload = (data.get("data") or {})
+    out: List[dict] = []
+    for i, _mid in enumerate(media_ids):
+        m = payload.get(f"a{i}")
+        if not m:
+            continue
+        nae = m.get("nextAiringEpisode") or {}
+        at = nae.get("airingAt")
+        if not isinstance(at, int):
+            continue
+        if at > now:
+            continue
+        if now > at + grace:
+            continue
+        t = m.get("title") or {}
+        out.append(
+            {
+                "airingAt": at,
+                "episode": nae.get("episode"),
+                "media": {
+                    "id": m.get("id"),
+                    "siteUrl": m.get("siteUrl"),
+                    "title": t,
+                    "cover": (m.get("coverImage") or {}).get("large"),
+                    "genres": m.get("genres") or [],
+                },
+            }
+        )
+    return out
+
+
+def get_recent_airings_for_guild(
+    guild_id: int,
+    *,
+    grace_sec: int = 18 * 3600,
+    chunk_size: int = 10,
+) -> List[dict]:
+    """Animes de la whitelist `/airings` dont le prochain épisode annoncé vient de passer (fenêtre de rattrapage)."""
+    ids: Set[int] = {int(x["media_id"]) for x in guild_whitelist_list(guild_id)}
+    ids |= {int(x) for x in guild_airings_ids(guild_id)}
+    if not ids:
+        return []
+    now = int(time.time())
+    id_list = sorted(ids)
+    out: List[dict] = []
+    cs = max(1, min(25, int(chunk_size)))
+    for i in range(0, len(id_list), cs):
+        chunk = id_list[i : i + cs]
+        out.extend(_fetch_media_alert_candidates_batch(chunk, now, int(grace_sec)))
+    return out
+
+
+def airing_item_to_card_dict(item: dict, *, tz_name: str = "Europe/Paris") -> dict:
+    """Uniformise un créneau `get_airings_*` pour `modules.image.generate_next_card` / alertes."""
+    m = item.get("media") or {}
+    t = m.get("title") or {}
+    ts = int(item.get("airingAt") or 0)
+    ep = item.get("episode")
+    try:
+        ep_disp: int | str = int(float(ep)) if ep is not None else "?"
+    except Exception:
+        ep_disp = ep if ep is not None else "?"
+    when_str = format_airing_datetime_fr(ts, tz_name) if ts else "date inconnue"
+    return {
+        "title_romaji": t.get("romaji"),
+        "title_english": t.get("english"),
+        "title_native": t.get("native"),
+        "episode": ep_disp,
+        "airingAt": ts,
+        "cover": m.get("cover"),
+        "genres": m.get("genres") or [],
+        "when": when_str,
+    }
+
+
 def get_airings_for_guild(guild_id: int, *, days: int = 7, limit: int = 200) -> List[dict]:
     """
     Retourne les sorties à venir filtrées par la whitelist du serveur.
@@ -2339,18 +2431,50 @@ def mark_posted(media_id: int, ep: int, channel_id: int, kind: str) -> None:
 # ================= CONFIG BOT / NOTIFS =================
 def get_config() -> dict:
     config = load_json(FileConfig.CONFIG, {})
+    defaults = {
+        "channel_id": None,
+        "guild_alert_channels": {},
+        "notification_delay": 10,  # minutes
+        "daily_summary": True,
+        "default_alert_time": "08:00",
+    }
     if not config:
-        config.update({
-            "channel_id": None,
-            "notification_delay": 10,  # minutes
-            "daily_summary": True,
-            "default_alert_time": "08:00"
-        })
+        config.update(defaults)
         save_config(config)
+    else:
+        changed = False
+        for k, v in defaults.items():
+            if k not in config:
+                config[k] = v
+                changed = True
+        if changed:
+            save_config(config)
     return config
 
 def save_config(config: dict) -> None:
     save_json(FileConfig.CONFIG, config)
+
+
+def get_guild_alert_channel_id(guild_id: int) -> Optional[int]:
+    """Salon d’annonces « sortie épisode » pour ce serveur (`/setchannel`)."""
+    cfg = get_config()
+    m = cfg.get("guild_alert_channels") or {}
+    v = m.get(str(int(guild_id)))
+    if v is not None and v != "":
+        try:
+            return int(v)
+        except Exception:
+            return None
+    return None
+
+
+def set_guild_alert_channel(guild_id: int, channel_id: int) -> None:
+    """Enregistre le salon d’alertes pour un serveur + conserve `channel_id` pour l’existant (ex. gagnant du mois)."""
+    cfg = get_config()
+    cfg.setdefault("guild_alert_channels", {})[str(int(guild_id))] = int(channel_id)
+    cfg["channel_id"] = int(channel_id)
+    save_config(cfg)
+
 
 def should_notify(ep: dict) -> bool:
     if not ep.get("airingAt"):

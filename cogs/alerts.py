@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import os
-import json
 import logging
+import os
 import tempfile
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, Optional
 
 import discord
 from discord.ext import commands, tasks
@@ -15,35 +14,19 @@ from modules.image import generate_next_card
 
 LOG = logging.getLogger(__name__)
 
-DATA_PATH = "data/sent_alerts.json"  # persistance anti-doublon
+ALERT_KIND = "airing_release"
 
-# ----------------- utilitaires -----------------
+
 def _now_ts() -> int:
     return int(datetime.now(timezone.utc).timestamp())
 
-def _load_sent() -> Dict[str, Dict[str, Any]]:
-    try:
-        with open(DATA_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def _save_sent(data: Dict[str, Dict[str, Any]]) -> None:
-    os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def _key(anime: Dict[str, Any], tag: str) -> str:
-    # clé unique par (titre/épisode/label)
-    t = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "?"
-    e = str(anime.get("episode") or "?")
-    return f"{t}|{e}|{tag}"
 
 def _fmt_when(anime: Dict[str, Any]) -> str:
     return core.format_airing_datetime_fr(anime.get("airingAt"), "Europe/Paris")
 
+
 def _episode_released_catchup(anime: Dict[str, Any], grace_after: int = 18 * 3600) -> bool:
-    """True si la diffusion a commencé et qu’on est encore dans la fenêtre de notification (une seule fois grâce à sent)."""
+    """True si la diffusion a commencé et qu’on est encore dans la fenêtre de notification."""
     airing = anime.get("airingAt")
     if not airing:
         return False
@@ -53,72 +36,64 @@ def _episode_released_catchup(anime: Dict[str, Any], grace_after: int = 18 * 360
     return now <= airing + grace_after
 
 
+def _episode_int(ep: Any) -> int:
+    try:
+        return int(float(ep))
+    except Exception:
+        return 0
+
+
 class Alerts(commands.Cog):
-    """Alertes image à la **sortie** de l’épisode dans le salon `/setchannel` (pas d’alerte « 30 min avant »). Compte bot + comptes liés — pas /airings."""
+    """
+    Alertes image à la **sortie** de l’épisode dans le salon **`/setchannel`** du serveur.
+    Source : **liste du serveur** (`/airings` / `airings all`), comme `/next` en mode serveur.
+    """
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.sent = _load_sent()
+        self._legacy_migrated = False
         self.check_airing.start()
 
     def cog_unload(self) -> None:
         self.check_airing.cancel()
-        _save_sent(self.sent)
 
-    # ----------- channel via config -----------
-    async def _get_alert_channel(self) -> Optional[discord.TextChannel]:
-        try:
-            cfg = core.get_config() or {}
-            cid = int(cfg.get("channel_id", 0)) if cfg.get("channel_id") else 0
-            if not cid:
-                LOG.warning("Aucun salon configuré (/setchannel).")
-                return None
+    def _migrate_legacy_channel_map(self) -> None:
+        """Anciennes configs : un seul `channel_id` global → associer au serveur du salon."""
+        cfg = core.get_config()
+        if cfg.get("guild_alert_channels"):
+            return
+        cid = cfg.get("channel_id")
+        if not cid:
+            return
+        ch = self.bot.get_channel(int(cid))
+        if isinstance(ch, discord.TextChannel) and ch.guild:
+            cfg.setdefault("guild_alert_channels", {})[str(ch.guild.id)] = int(cid)
+            core.save_config(cfg)
+            LOG.info("Alertes: migration salon %s → serveur %s", cid, ch.guild.id)
+
+    async def _get_guild_alert_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
+        cid = core.get_guild_alert_channel_id(guild.id)
+        if not cid:
+            return None
+        ch = guild.get_channel(cid)
+        if ch is None:
             ch = self.bot.get_channel(cid)
-            if ch is None:
-                await self.bot.wait_until_ready()
-                ch = self.bot.get_channel(cid)
-            return ch if isinstance(ch, discord.TextChannel) else None
-        except Exception as e:
-            LOG.exception("Lecture channel_id échouée: %s", e)
-            return None
+        return ch if isinstance(ch, discord.TextChannel) else None
 
-    # ----------- sources d’épisodes -----------
-    async def _my_next(self) -> Optional[Dict[str, Any]]:
-        try:
-            return core.get_my_next_airing_one()  # basé sur ANILIST_USERNAME
-        except Exception as e:
-            LOG.exception("get_my_next_airing_one failed: %s", e)
-            return None
-
-    async def _users_next(self) -> List[Dict[str, Any]]:
-        """Optionnel : alerter aussi les comptes AniList liés."""
-        out: List[Dict[str, Any]] = []
-        try:
-            links = core.iter_discord_anilist_links()
-        except Exception:
-            links = []
-        for _uid, username in links:
-            try:
-                item = core.get_user_next_airing_one(username)
-                if item:
-                    out.append(item)
-            except Exception as e:
-                LOG.warning("get_user_next_airing_one(%s) err: %s", username, e)
-        return out
-
-    # ----------- envoi image -----------
-    async def _send_card_alert(self, ch: discord.TextChannel, anime: Dict[str, Any], label: str, header: str) -> None:
-        """
-        label = identifiant anti-doublon ("0img" = sortie)
-        header = texte au-dessus de l’image (ex. sortie épisode)
-        """
-        k = _key(anime, label)
-        if self.sent.get(k):
+    async def _send_card_alert(
+        self,
+        ch: discord.TextChannel,
+        anime: Dict[str, Any],
+        header: str,
+        *,
+        media_id: int,
+        episode_key: int,
+    ) -> None:
+        if media_id and core.has_been_posted(media_id, episode_key, ch.id, ALERT_KIND):
             return
 
-        # on enrichit le dict pour la carte si besoin
         try:
-            anime = dict(anime)  # copie défensive
+            anime = dict(anime)
             anime["when"] = _fmt_when(anime)
         except Exception:
             pass
@@ -126,62 +101,79 @@ class Alerts(commands.Cog):
         try:
             out_path = os.path.join(
                 tempfile.gettempdir(),
-                f"alert_{label}_{anime.get('id', 'x')}_{anime.get('episode', 'x')}.png",
+                f"alert_{media_id}_{episode_key}_{ch.id}.png",
             )
             img_path = generate_next_card(
                 anime,
                 out_path=out_path,
                 scale=1.2,
-                padding=40
+                padding=40,
             )
             await ch.send(
                 content=header,
-                file=discord.File(img_path, filename=os.path.basename(img_path))
+                file=discord.File(img_path, filename=os.path.basename(img_path)),
             )
-            self.sent[k] = {"at": _now_ts()}
-            _save_sent(self.sent)
+            if media_id:
+                core.mark_posted(media_id, episode_key, ch.id, ALERT_KIND)
         except Exception as e:
             LOG.exception("Image alert failed, fallback texte: %s", e)
-            # fallback texte si la génération échoue
             title = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "Anime"
             ep = anime.get("episode") or "?"
             when = _fmt_when(anime)
             await ch.send(f"{header}\n**{title}** — Épisode **{ep}** • {when}")
-            self.sent[k] = {"at": _now_ts()}
-            _save_sent(self.sent)
+            if media_id:
+                core.mark_posted(media_id, episode_key, ch.id, ALERT_KIND)
 
-    # ----------- boucle: sortie uniquement (à l’heure + léger retard) -----------
     @tasks.loop(seconds=60)
     async def check_airing(self):
-        ch = await self._get_alert_channel()
-        if not ch:
-            return
-
-        # purge des entrées > 14 jours
-        now = _now_ts()
-        for k, v in list(self.sent.items()):
-            ts = int(v.get("at", 0))
-            if now - ts > 14 * 24 * 3600:
-                self.sent.pop(k, None)
+        if not self._legacy_migrated:
+            self._migrate_legacy_channel_map()
+            self._legacy_migrated = True
 
         header = "📺 **Sortie** — l’épisode est disponible !"
 
-        # 1) Planning du bot (global)
-        mine = await self._my_next()
-        if mine and _episode_released_catchup(mine):
-            await self._send_card_alert(ch, mine, "0img", header)
+        for guild in self.bot.guilds:
+            ch = await self._get_guild_alert_channel(guild)
+            if not ch:
+                continue
 
-        # 2) (Optionnel) Utilisateurs liés
-        users = await self._users_next()
-        for item in users:
-            if _episode_released_catchup(item):
-                await self._send_card_alert(ch, item, "0img", header)
+            wl = core.guild_whitelist_list(guild.id)
+            legacy_ids = core.guild_airings_ids(guild.id)
+            if not wl and not legacy_ids:
+                continue
 
+            try:
+                items = core.get_recent_airings_for_guild(guild.id, grace_sec=18 * 3600)
+            except Exception as e:
+                LOG.warning("get_recent_airings_for_guild(%s): %s", guild.id, e)
+                continue
+
+            for raw in items:
+                flat = core.airing_item_to_card_dict(raw)
+                mid = (raw.get("media") or {}).get("id")
+                if not mid:
+                    continue
+                media_id = int(mid)
+                flat["media_id"] = media_id
+                ep_key = _episode_int(raw.get("episode"))
+
+                if not _episode_released_catchup(flat):
+                    continue
+
+                await self._send_card_alert(
+                    ch,
+                    flat,
+                    header,
+                    media_id=media_id,
+                    episode_key=ep_key,
+                )
 
     @check_airing.before_loop
     async def before(self):
         await self.bot.wait_until_ready()
-        LOG.info("Alerte épisodes: boucle démarrée (sortie uniquement).")
+        LOG.info(
+            "Alerte épisodes: boucle démarrée (sortie — whitelist /airings, nextAiringEpisode, rattrapage 18 h)."
+        )
 
 
 async def setup(bot: commands.Bot):

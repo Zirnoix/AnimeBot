@@ -75,6 +75,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "clear": "Efface le suivi.",
 
     # Utils
+    "setchannel": "Salon des annonces « sortie d’épisode » pour ce serveur (même liste que /airings).",
     "botinfo": "Infos sur le bot (versions, créateur, etc.).",
     "ping": "Latence du bot.",
     "reminder": "Récap quotidien en MP (/reminder + /setalert), basé sur ton AniList si lié. Indépendant du récap « préférences ».",
@@ -132,7 +133,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "track", "track add", "track list", "track remove", "track clear"
     ]),
     ("🧰 Pages Utils", [
-        "botinfo", "ping", "reminder", "setalert", "source", "uptime"
+        "setchannel", "botinfo", "ping", "reminder", "setalert", "source", "uptime"
     ]),
 ]
 
