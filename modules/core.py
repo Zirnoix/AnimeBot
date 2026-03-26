@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 import re
 import unicodedata
@@ -65,6 +66,9 @@ if not logging.root.handlers:
     )
 logger = logging.getLogger(__name__)
 LOG = logger
+
+# Verrou global pour lectures/écritures JSON (évite courses read-modify-write entre coroutines).
+DATA_JSON_LOCK = threading.RLock()
 
 
 def anilist_error_user_message() -> str:
@@ -194,29 +198,35 @@ async def translate_text(text: str, target_lang: str = "FR") -> str:
         return text
 
 def load_titles():
-    if os.path.exists(TITLES_FILE):
-        with open(TITLES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+    return load_json(TITLES_FILE, {})
+
 
 def save_titles(titles):
-    with open(TITLES_FILE, "w", encoding="utf-8") as f:
-        json.dump(titles, f, ensure_ascii=False, indent=2)
+    save_json(TITLES_FILE, titles)
+
 
 def load_json(path: str, default: Any) -> Any:
-    if not os.path.exists(path):
-        return default
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Erreur lors du chargement de {path}: {e}")
-        return default
+    with DATA_JSON_LOCK:
+        if not os.path.exists(path):
+            return default
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Erreur lors du chargement de {path}: {e}")
+            return default
+
 
 def save_json(path: str, data: Any) -> None:
+    """Écriture atomique (fichier temporaire + replace) sous verrou pour éviter fichiers tronqués."""
     try:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        with DATA_JSON_LOCK:
+            d = os.path.dirname(path) or "."
+            os.makedirs(d, exist_ok=True)
+            tmp = f"{path}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, path)
     except Exception as e:
         logger.error(f"Erreur lors de la sauvegarde de {path}: {e}")
 
@@ -244,32 +254,30 @@ async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True)
     annonce optionnelle quand le **titre global** change (pas à chaque niveau intermédiaire),
     et DISPATCH l'événement 'level_up' si au moins un niveau a été gagné.
     """
-    levels = load_levels()
-    key = str(user_id)
-    data = levels.get(key, {"xp": 0, "level": 0})
+    with DATA_JSON_LOCK:
+        levels = load_levels()
+        key = str(user_id)
+        data = levels.get(key, {"xp": 0, "level": 0})
 
-    old_level = int(data.get("level", 0))
-    old_title = get_title_for_global_level(old_level)
+        old_level = int(data.get("level", 0))
+        old_title = get_title_for_global_level(old_level)
 
-    # maj xp
-    data["xp"] = int(data.get("xp", 0)) + int(amount)
+        data["xp"] = int(data.get("xp", 0)) + int(amount)
 
-    # calc level-up (ta logique: on dépense l'XP requise et on garde le reste)
-    leveled = False
-    while True:
-        need = xp_for_next_level(int(data["level"]))
-        if data["xp"] < need:
-            break
-        data["xp"] -= need
-        data["level"] = int(data["level"]) + 1
-        leveled = True
+        leveled = False
+        while True:
+            need = xp_for_next_level(int(data["level"]))
+            if data["xp"] < need:
+                break
+            data["xp"] -= need
+            data["level"] = int(data["level"]) + 1
+            leveled = True
 
-    # persist
-    levels[key] = data
-    save_levels(levels)
+        levels[key] = data
+        save_levels(levels)
 
-    new_level = int(data["level"])
-    new_title = get_title_for_global_level(new_level)
+        new_level = int(data["level"])
+        new_title = get_title_for_global_level(new_level)
 
     # 🔔 annonce : salon dédié serveur si configuré, sinon salon où l’XP a été gagnée
     announce_ch = channel
@@ -971,6 +979,8 @@ def get_list_total_entries(username: str, *, force: bool = False) -> int:
     return int(total)
     
 def _db_conn():
+    """Connexion SQLite unique (DB_PATH) : liens AniList + anti-doublon d’alertes épisode."""
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
     CREATE TABLE IF NOT EXISTS anilist_links (
@@ -978,6 +988,16 @@ def _db_conn():
         username   TEXT NOT NULL,
         linked_at  INTEGER DEFAULT (strftime('%s','now'))
     )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS posted_events (
+            media_id    INTEGER NOT NULL,
+            episode     INTEGER NOT NULL,
+            channel_id  INTEGER NOT NULL,
+            kind        TEXT    NOT NULL,
+            posted_at   INTEGER NOT NULL,
+            PRIMARY KEY (media_id, episode, channel_id, kind)
+        )
     """)
     return conn
     
@@ -1525,37 +1545,38 @@ def record_month_winner_and_reset(now: datetime | None = None, tz_name: str = "E
     Fige le top 3 du mois précédent dans FileConfig.WINNER puis remet les scores à zéro.
     Retourne le dict sauvegardé (récompenses XP/badges via grant_quiz_monthly_podium_rewards).
     """
-    scores = load_scores()
-    prev_m = _prev_month_key(now, tz_name)
-    ts = int(time.time())
+    with DATA_JSON_LOCK:
+        scores = load_scores()
+        prev_m = _prev_month_key(now, tz_name)
+        ts = int(time.time())
 
-    if not scores:
-        save_scores({})
+        if not scores:
+            save_scores({})
+            data = {
+                "month": prev_m,
+                "winner_user_id": None,
+                "winner_score": 0,
+                "podium": [],
+                "saved_at": ts,
+            }
+            save_winner(data)
+            return data
+
+        top3 = compute_quiz_top(scores, n=3)
+        podium = [{"rank": i, "user_id": uid, "score": int(sc)} for i, (uid, sc) in enumerate(top3, start=1)]
+        best_uid = top3[0][0] if top3 else None
+        best_score = int(top3[0][1]) if top3 else 0
+
         data = {
             "month": prev_m,
-            "winner_user_id": None,
-            "winner_score": 0,
-            "podium": [],
+            "winner_user_id": best_uid,
+            "winner_score": best_score,
+            "podium": podium,
             "saved_at": ts,
         }
         save_winner(data)
+        save_scores({})
         return data
-
-    top3 = compute_quiz_top(scores, n=3)
-    podium = [{"rank": i, "user_id": uid, "score": int(sc)} for i, (uid, sc) in enumerate(top3, start=1)]
-    best_uid = top3[0][0] if top3 else None
-    best_score = int(top3[0][1]) if top3 else 0
-
-    data = {
-        "month": prev_m,
-        "winner_user_id": best_uid,
-        "winner_score": best_score,
-        "podium": podium,
-        "saved_at": ts,
-    }
-    save_winner(data)
-    save_scores({})
-    return data
 
 
 async def grant_quiz_monthly_podium_rewards(bot, data: dict | None) -> None:
@@ -1699,11 +1720,12 @@ def save_mini_scores(data: dict) -> None:
     save_json(FileConfig.MINI_SCORES, data)
 
 def add_mini_score(user_id: int, game: str, amount: int = 1) -> None:
-    data = load_mini_scores()
-    uid = str(user_id)
-    data.setdefault(uid, {})
-    data[uid][game] = data[uid].get(game, 0) + amount
-    save_mini_scores(data)
+    with DATA_JSON_LOCK:
+        data = load_mini_scores()
+        uid = str(user_id)
+        data.setdefault(uid, {})
+        data[uid][game] = data[uid].get(game, 0) + amount
+        save_mini_scores(data)
 
 def get_mini_scores(user_id: int) -> dict:
     data = load_mini_scores()
@@ -2446,23 +2468,11 @@ def get_xp_bar(xp: int, next_xp: int, length: int = 20) -> str:
 
 # --- ANTI-DUPLICATE POSTING ---
 def _db():
-    import sqlite3, os
-    os.makedirs("data", exist_ok=True)
-    conn = sqlite3.connect("data/animabot.db")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS posted_events (
-            media_id    INTEGER NOT NULL,
-            episode     INTEGER NOT NULL,
-            channel_id  INTEGER NOT NULL,
-            kind        TEXT    NOT NULL, -- "now" | "alert30" | "new"
-            posted_at   INTEGER NOT NULL,
-            PRIMARY KEY (media_id, episode, channel_id, kind)
-        )
-    """)
-    return conn
+    return _db_conn()
+
 
 def has_been_posted(media_id: int, ep: int, channel_id: int, kind: str) -> bool:
-    conn = _db()
+    conn = _db_conn()
     cur = conn.execute(
         "SELECT 1 FROM posted_events WHERE media_id=? AND episode=? AND channel_id=? AND kind=?",
         (media_id, ep, channel_id, kind)
@@ -2484,6 +2494,7 @@ def get_config() -> dict:
     defaults = {
         "channel_id": None,
         "guild_alert_channels": {},
+        "guild_levelup_channels": {},
         "notification_delay": 10,  # minutes
         "daily_summary": True,
         "default_alert_time": "08:00",
@@ -2519,10 +2530,9 @@ def get_guild_alert_channel_id(guild_id: int) -> Optional[int]:
 
 
 def set_guild_alert_channel(guild_id: int, channel_id: int) -> None:
-    """Enregistre le salon d’alertes pour un serveur + conserve `channel_id` pour l’existant (ex. gagnant du mois)."""
+    """Enregistre le salon d’annonces « sortie d’épisode » pour ce serveur (ne modifie pas d’ID global multi-serveur)."""
     cfg = get_config()
     cfg.setdefault("guild_alert_channels", {})[str(int(guild_id))] = int(channel_id)
-    cfg["channel_id"] = int(channel_id)
     save_config(cfg)
 
 
@@ -2553,6 +2563,42 @@ def clear_guild_levelup_channel(guild_id: int) -> None:
     m.pop(str(int(guild_id)), None)
     cfg["guild_levelup_channels"] = m
     save_config(cfg)
+
+
+def format_guild_channels_config_summary(bot: discord.Client) -> str:
+    """
+    Résumé lisible des salons configurés (alertes épisodes, montées de niveau, legacy).
+    Utilisé par /admin show_channel.
+    """
+    cfg = get_config()
+    lines: list[str] = []
+    ga = cfg.get("guild_alert_channels") or {}
+    for gid_str, cid in sorted(ga.items(), key=lambda x: int(x[0])):
+        try:
+            ch = bot.get_channel(int(cid))
+            mention = getattr(ch, "mention", None) or f"`{cid}`"
+        except Exception:
+            mention = f"`{cid}`"
+        lines.append(f"• **Alertes épisodes** — guilde `{gid_str}` → {mention}")
+    gl = cfg.get("guild_levelup_channels") or {}
+    for gid_str, cid in sorted(gl.items(), key=lambda x: int(x[0])):
+        try:
+            ch = bot.get_channel(int(cid))
+            mention = getattr(ch, "mention", None) or f"`{cid}`"
+        except Exception:
+            mention = f"`{cid}`"
+        lines.append(f"• **Titres XP / quiz** — guilde `{gid_str}` → {mention}")
+    leg = cfg.get("channel_id")
+    if leg:
+        try:
+            ch = bot.get_channel(int(leg))
+            mention = getattr(ch, "mention", None) or f"`{leg}`"
+        except Exception:
+            mention = f"`{leg}`"
+        lines.append(f"• _(legacy)_ **channel_id** global → {mention}")
+    if not lines:
+        return "Aucun salon configuré (`/setchannel`, `/setlevelupchannel`)."
+    return "\n".join(lines)
 
 
 def should_notify(ep: dict) -> bool:

@@ -6,6 +6,7 @@ import sys
 import asyncio
 import logging
 import tempfile
+import types
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -40,6 +41,37 @@ if not _owner_raw.isdigit():
     )
     raise SystemExit(1)
 OWNER_ID = int(_owner_raw)
+
+
+def _is_bot_owner_user(user_id: int) -> bool:
+    """True si l’utilisateur est le propriétaire déclaré (OWNER_ID)."""
+    return int(user_id) == OWNER_ID
+
+
+async def _global_tree_interaction_check(self, interaction: discord.Interaction) -> bool:
+    """`self` = CommandTree. Limite les slash en rafale par utilisateur / serveur (owner exempté)."""
+    if interaction.type is not discord.InteractionType.application_command:
+        return True
+    uid = getattr(interaction.user, "id", 0)
+    if _is_bot_owner_user(uid):
+        return True
+    from modules import abuse
+
+    gid = interaction.guild.id if interaction.guild else 0
+    ok, retry_after = abuse.allow_slash_burst(uid, gid)
+    if ok:
+        return True
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                f"⏳ Trop de commandes en peu de temps — réessaie dans **{max(1, int(retry_after) + 1)}s**.",
+                ephemeral=True,
+            )
+    except Exception:
+        pass
+    return False
+
+
 DEV_GUILD_IDS = {
     int(x.strip())
     for x in os.getenv("DEV_GUILD_IDS", "").split(",")
@@ -90,6 +122,7 @@ class AnimeBot(commands.Bot):
             description="Owner : debug slash, sync globale, cogs, test alerte, salon notifications.",
         )
         self._register_admin_commands()
+        self.tree.interaction_check = types.MethodType(_global_tree_interaction_check, self.tree)
 
     # ---------- Setup ----------
     async def setup_hook(self) -> None:
@@ -222,9 +255,39 @@ class AnimeBot(commands.Bot):
 
     # ---------- Tasks ----------
     def _start_tasks(self) -> None:
-        for loop in (self.check_anilist_status, self.monthly_reset, self.update_title_cache, self.send_daily_summaries, self.refresh_anilist_cache):
+        for loop in (self.check_anilist_status, self.update_title_cache, self.send_daily_summaries, self.refresh_anilist_cache):
             try:
                 loop.start()
+            except Exception:
+                pass
+
+    def _iter_alert_text_channels(self) -> list[discord.TextChannel]:
+        """Salons `/setchannel` par serveur ; repli sur `channel_id` legacy si aucune entrée par guilde."""
+        out: list[discord.TextChannel] = []
+        cfg = core.get_config() or {}
+        m = cfg.get("guild_alert_channels") or {}
+        for cid in m.values():
+            try:
+                ch = self.get_channel(int(cid))
+                if isinstance(ch, discord.TextChannel):
+                    out.append(ch)
+            except Exception:
+                pass
+        if not m:
+            leg = cfg.get("channel_id")
+            if leg:
+                try:
+                    ch = self.get_channel(int(leg))
+                    if isinstance(ch, discord.TextChannel):
+                        out.append(ch)
+                except Exception:
+                    pass
+        return out
+
+    async def _broadcast_to_alert_channels(self, content: str) -> None:
+        for ch in self._iter_alert_text_channels():
+            try:
+                await ch.send(content)
             except Exception:
                 pass
 
@@ -233,7 +296,6 @@ class AnimeBot(commands.Bot):
         try:
             test_query = "query { Media(id: 1, type: ANIME) { id } }"
             ok = bool(await asyncio.to_thread(core.query_anilist, test_query))
-            chan = self._get_notification_channel_sync()
             if ok:
                 self._anilist_fail_streak = 0
                 if not self.anilist_online:
@@ -242,8 +304,9 @@ class AnimeBot(commands.Bot):
                         self.anilist_online = True
                         self._anilist_ok_streak = 0
                         LOG.info("✅ AniList de retour.")
-                        if chan:
-                            asyncio.create_task(chan.send("✅ AniList est de nouveau en ligne."))
+                        asyncio.create_task(
+                            self._broadcast_to_alert_channels("✅ AniList est de nouveau en ligne.")
+                        )
                 else:
                     self._anilist_ok_streak = 0
             else:
@@ -254,8 +317,11 @@ class AnimeBot(commands.Bot):
                         self.anilist_online = False
                         self._anilist_fail_streak = 0
                         LOG.warning("⚠️ AniList semble hors ligne.")
-                        if chan:
-                            asyncio.create_task(chan.send("⚠️ AniList indisponible — certaines commandes peuvent échouer."))
+                        asyncio.create_task(
+                            self._broadcast_to_alert_channels(
+                                "⚠️ AniList indisponible — certaines commandes peuvent échouer."
+                            )
+                        )
                 else:
                     self._anilist_fail_streak = 0
         except Exception as e:
@@ -273,19 +339,6 @@ class AnimeBot(commands.Bot):
             LOG.info("AniList status au boot: %s", "OK" if self.anilist_online else "DOWN")
         except Exception as e:
             LOG.warning("_check_anilist_status_once: %s", e)
-
-    @tasks.loop(hours=24)
-    async def monthly_reset(self) -> None:
-        try:
-            now = datetime.now(tz=core.TIMEZONE)
-            if now.day == 1:
-                scores = core.load_scores()
-                if scores:
-                    top_uid = max(scores.items(), key=lambda x: x[1])[0]
-                    core.save_scores({})
-                    await self._announce_monthly_winner(top_uid)
-        except Exception as e:
-            LOG.error("monthly_reset: %s", e)
 
     @tasks.loop(hours=1)
     async def update_title_cache(self) -> None:
@@ -364,36 +417,16 @@ class AnimeBot(commands.Bot):
         except Exception as e:
             LOG.error("_send_summary_message: %s", e)
 
-    async def _announce_monthly_winner(self, user_id: str) -> None:
-        try:
-            channel = await self._get_notification_channel()
-            if not channel:
-                return
-            user = await self.fetch_user(int(user_id))
-            if not user:
-                return
-            em = discord.Embed(
-                title="🏆 Gagnant du mois !",
-                description=f"Félicitations à **{user.display_name}** !",
-                color=discord.Color.gold(),
-            )
-            await channel.send(embed=em)
-        except Exception as e:
-            LOG.error("_announce_monthly_winner: %s", e)
-
-    # ---------- Channels ----------
-    def _get_notification_channel_sync(self) -> Optional[discord.TextChannel]:
-        config = core.get_config()
-        cid = config.get("channel_id")
-        return self.get_channel(int(cid)) if cid else None
-
-    async def _get_notification_channel(self) -> Optional[discord.TextChannel]:
-        return self._get_notification_channel_sync()
-
     # ---------- Admin ----------
     def _register_admin_commands(self) -> None:
         async def _owner_only(itx: discord.Interaction) -> bool:
-            return int(getattr(itx.user, "id", 0)) == OWNER_ID
+            u = getattr(itx, "user", None)
+            if u is None:
+                return False
+            try:
+                return int(u.id) == OWNER_ID
+            except (TypeError, ValueError):
+                return False
 
         @self.admin_group.command(name="debug_tree", description="(Owner) Affiche le tree local.")
         @app_commands.check(_owner_only)
@@ -487,43 +520,20 @@ class AnimeBot(commands.Bot):
 
         @self.admin_group.command(
             name="show_channel",
-            description="(Owner) Affiche le salon enregistré pour les alertes (via /setchannel).",
+            description="(Owner) Liste les salons configurés (alertes épisodes, titres XP, legacy).",
         )
         @app_commands.check(_owner_only)
         async def admin_show_channel(itx: discord.Interaction):
             await itx.response.defer(ephemeral=True)
             try:
-                cfg = core.get_config() or {}
-                cid = int(cfg.get("channel_id", 0)) if cfg.get("channel_id") else 0
-                if not cid:
-                    await itx.followup.send(
-                        "ℹ️ Aucun salon configuré. Utilise **`/setchannel`** dans le salon voulu.",
-                        ephemeral=True,
-                    )
-                    return
-                ch = self.get_channel(cid)
-                if ch is None:
-                    try:
-                        ch = await self.fetch_channel(cid)
-                    except Exception:
-                        ch = None
-                if isinstance(ch, discord.TextChannel):
-                    perms = ch.permissions_for(ch.guild.me) if ch.guild and ch.guild.me else None
-                    can_send = perms.send_messages if perms else False
-                    await itx.followup.send(
-                        f"✅ Salon configuré : {ch.mention} (`{cid}`)\n"
-                        f"Permissions d’envoi : **{'OK' if can_send else 'NON'}**",
-                        ephemeral=True,
-                    )
-                else:
-                    await itx.followup.send(
-                        f"⚠️ ID `{cid}` enregistré mais salon introuvable ou invalide.\n"
-                        "Refais **`/setchannel`** dans le bon salon.",
-                        ephemeral=True,
-                    )
+                summary = core.format_guild_channels_config_summary(itx.client)
+                await itx.followup.send(
+                    "**Salons de notification (config)**\n" + summary,
+                    ephemeral=True,
+                )
             except Exception:
                 await itx.followup.send(
-                    "❌ Impossible de lire la config. Réessaie ou refais **`/setchannel`**.",
+                    "❌ Impossible de lire la config.",
                     ephemeral=True,
                 )
 
@@ -585,6 +595,16 @@ async def _block_prefix_invocation(ctx: commands.Context) -> bool:
     return getattr(ctx, "message", None) is not None
 
 # ========= Gestion des erreurs App Commands =========
+async def _slash_error_respond(interaction: discord.Interaction, msg: str) -> None:
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            await interaction.followup.send(msg, ephemeral=True)
+    except Exception:
+        pass
+
+
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     _reg_err = getattr(app_commands, "CommandRegistrationError", None)
@@ -596,12 +616,32 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         except Exception:
             pass
         return
+
+    if isinstance(error, app_commands.CommandInvokeError):
+        orig = error.original
+        if isinstance(orig, commands.CommandOnCooldown):
+            ra = getattr(orig, "retry_after", None)
+            sec = int(ra) + 1 if ra is not None else 5
+            await _slash_error_respond(interaction, f"⏳ Cooldown : réessaie dans **{sec}s**.")
+            return
+        LOG.error("Erreur slash (invoke): %s", orig, exc_info=orig)
+        await _slash_error_respond(interaction, "❌ Une erreur s’est produite en exécutant la commande.")
+        return
+
+    if isinstance(error, app_commands.CheckFailure):
+        await _slash_error_respond(
+            interaction,
+            "❌ Tu n’as pas la permission d’utiliser cette commande.",
+        )
+        return
+
+    _transform_err = getattr(app_commands, "TransformerError", None)
+    if _transform_err is not None and isinstance(error, _transform_err):
+        await _slash_error_respond(interaction, "❌ Paramètre invalide — vérifie les valeurs saisies.")
+        return
+
     LOG.error("Erreur slash: %s", error, exc_info=error)
-    try:
-        if not interaction.response.is_done():
-            await interaction.response.send_message("❌ Oups, erreur inattendue.", ephemeral=True)
-    except Exception:
-        pass
+    await _slash_error_respond(interaction, "❌ Oups, erreur inattendue.")
 
 # ========= Healthcheck HTTP (Railway / hébergeurs qui exposent PORT) =========
 _health_runner: web.AppRunner | None = None

@@ -38,7 +38,8 @@ DESC_OVERRIDE: Dict[str, str] = {
     "raidconfig horaire": "Jour (menu : lundi…dimanche) et heure du raid auto (fuseau BOT_TIMEZONE / Europe/Paris par défaut).",
     "raidconfig activer": "Oui/Non : lancer le raid automatiquement chaque semaine à l’horaire (sinon seulement /raidstart).",
     "raidconfig statut": "Affiche la configuration du raid et le prochain créneau.",
-    "raidstart": "Lance un raid boss tout de suite dans ce salon (admin).",
+    "raidstart": "Lance un raid boss (admin) : confirmation + max 1× par semaine / serveur.",
+    "owner_raidstart": "(OWNER_ID) Lance un raid test sans consommer la limite hebdomadaire /raidstart.",
     "raidalerttest": "Envoie un message de test type « raid dans 1 h » (admin).",
     "minijeux": "Deux menus : **Devinettes (Guess)** et **Autres** — choix = lance la partie (duel → /duel @membre).",
     "higherlower": "Jeu Higher/Lower version anime.",
@@ -125,7 +126,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "guessop",
         "higherlower", "minijeux",
         "raidconfig", "raidconfig canal", "raidconfig horaire", "raidconfig activer", "raidconfig statut",
-        "raidstart", "raidalerttest",
+        "raidstart", "owner_raidstart", "raidalerttest",
     ]),
     ("🔗 Pages Link", [
         "linkanilist", "verifyanilist", "unlink"

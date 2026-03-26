@@ -420,12 +420,13 @@ class Quiz(commands.Cog):
                     await ctx.send(f"✅ Bonne réponse, **{ctx.author.display_name}** !")
 
                     # scoreboard + xp
-                    scores = core.load_scores()
-                    uid_str = str(ctx.author.id)
-                    old_q = int(scores.get(uid_str, 0))
-                    scores[uid_str] = old_q + 1
-                    new_q = scores[uid_str]
-                    core.save_scores(scores)
+                    with core.DATA_JSON_LOCK:
+                        scores = core.load_scores()
+                        uid_str = str(ctx.author.id)
+                        old_q = int(scores.get(uid_str, 0))
+                        scores[uid_str] = old_q + 1
+                        new_q = scores[uid_str]
+                        core.save_scores(scores)
                     await core.announce_quiz_title_if_changed(self.bot, ctx.channel, ctx.author.id, old_q, new_q)
 
                     xp_amount = 5 if difficulty == "easy" else 10 if difficulty == "medium" else 15
@@ -535,17 +536,20 @@ class Quiz(commands.Cog):
                 await asyncio.sleep(1.2)
 
             # scoreboard global
-            scores = core.load_scores()
-            uid_str = str(ctx.author.id)
-            old_q = int(scores.get(uid_str, 0))
-            if score < (nb_questions / 2):
-                penalty = 1
-                scores[uid_str] = max(0, old_q - penalty)
+            penalty = 0
+            with core.DATA_JSON_LOCK:
+                scores = core.load_scores()
+                uid_str = str(ctx.author.id)
+                old_q = int(scores.get(uid_str, 0))
+                if score < (nb_questions / 2):
+                    penalty = 1
+                    scores[uid_str] = max(0, old_q - penalty)
+                else:
+                    scores[uid_str] = old_q + score
+                new_q = int(scores[uid_str])
+                core.save_scores(scores)
+            if penalty:
                 await ctx.send(f"⚠️ Moins de 50% de bonnes réponses, -{penalty} point retiré.")
-            else:
-                scores[uid_str] = old_q + score
-            new_q = int(scores[uid_str])
-            core.save_scores(scores)
             await core.announce_quiz_title_if_changed(self.bot, ctx.channel, ctx.author.id, old_q, new_q)
 
             total_xp += combo_bonus_total

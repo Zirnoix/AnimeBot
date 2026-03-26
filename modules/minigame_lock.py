@@ -4,11 +4,13 @@ Une seule mini-jeu / interaction « en attente de réponse » par utilisateur à
 """
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Dict, Optional
 
 # user_id -> nom court du jeu (debug / messages)
 _PENDING: Dict[int, str] = {}
+_PENDING_LOCK = threading.Lock()
 
 # Dernier message public « cooldown » (préfixe) pour ne pas spammer le salon
 _LAST_COOLDOWN_PUBLIC: Dict[int, float] = {}
@@ -21,18 +23,21 @@ _BUSY_MSG = (
 
 def try_begin(user_id: int, game_key: str) -> bool:
     """True si la session est ouverte pour cet utilisateur."""
-    if user_id in _PENDING:
-        return False
-    _PENDING[user_id] = game_key
-    return True
+    with _PENDING_LOCK:
+        if user_id in _PENDING:
+            return False
+        _PENDING[user_id] = game_key
+        return True
 
 
 def end(user_id: int) -> None:
-    _PENDING.pop(user_id, None)
+    with _PENDING_LOCK:
+        _PENDING.pop(user_id, None)
 
 
 def active_game(user_id: int) -> Optional[str]:
-    return _PENDING.get(user_id)
+    with _PENDING_LOCK:
+        return _PENDING.get(user_id)
 
 
 async def reply_busy(ctx: Any) -> None:

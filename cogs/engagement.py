@@ -11,7 +11,8 @@ Récompenses adaptées à la difficulté (EASY/MEDIUM/HARD).
 
 from __future__ import annotations
 import logging
-import os, json, random
+import os
+import random
 from datetime import datetime, timedelta, date
 from typing import Dict, Any, Optional, List
 
@@ -39,18 +40,6 @@ def _bar(current: int, goal: int, width: int = 20) -> str:
     cur  = max(0, min(int(current or 0), goal))
     fill = int(round(width * cur / goal))
     return "▰" * fill + "▱" * (width - fill)
-
-def _load_json(path: str, default):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
-
-def _save_json(path: str, data) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
 def _today_str() -> str:
     return datetime.now(tz=core.TIMEZONE).strftime("%Y-%m-%d")
@@ -98,8 +87,8 @@ def _roll_reward(difficulty: str) -> int:
 class Engagement(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.streaks: Dict[str, Dict[str, Any]] = _load_json(STREAK_PATH, {})
-        self.missions: Dict[str, Dict[str, Any]] = _load_json(MISSIONS_PATH, {})
+        self.streaks: Dict[str, Dict[str, Any]] = core.load_json(STREAK_PATH, {})
+        self.missions: Dict[str, Dict[str, Any]] = core.load_json(MISSIONS_PATH, {})
 
     # ------------- DAILY CHECK-IN / STREAK -------------
     @commands.hybrid_command(name="checkin", aliases=["daily", "login"])
@@ -108,20 +97,26 @@ class Engagement(commands.Cog):
         uid = str(ctx.author.id)
         today = _today_str()
         yesterday = _yesterday_str()
-        data = self.streaks.get(uid, {"last": None, "streak": 0, "best": 0})
+        with core.DATA_JSON_LOCK:
+            self.streaks = core.load_json(STREAK_PATH, {})
+            data = self.streaks.get(uid, {"last": None, "streak": 0, "best": 0})
 
-        if data.get("last") == today:
+            if data.get("last") == today:
+                already = True
+            else:
+                already = False
+                if data.get("last") == yesterday:
+                    data["streak"] = int(data.get("streak", 0)) + 1
+                else:
+                    data["streak"] = 1
+
+                data["best"] = max(int(data.get("best", 0)), data["streak"])
+                data["last"] = today
+                self.streaks[uid] = data
+                core.save_json(STREAK_PATH, self.streaks)
+
+        if already:
             return await ctx.send("✅ Tu as **déjà** fait ton check-in aujourd’hui.")
-
-        if data.get("last") == yesterday:
-            data["streak"] = int(data.get("streak", 0)) + 1
-        else:
-            data["streak"] = 1
-
-        data["best"] = max(int(data.get("best", 0)), data["streak"])
-        data["last"] = today
-        self.streaks[uid] = data
-        _save_json(STREAK_PATH, self.streaks)
 
         try:
             core.add_mini_score(int(uid), "checkin", 1)
@@ -161,6 +156,8 @@ class Engagement(commands.Cog):
     async def streak(self, ctx: commands.Context):
         """Affiche ta série quotidienne et ton record."""
         uid = str(ctx.author.id)
+        with core.DATA_JSON_LOCK:
+            self.streaks = core.load_json(STREAK_PATH, {})
         data = self.streaks.get(uid, {"streak": 0, "best": 0})
         s, b = int(data.get("streak", 0)), int(data.get("best", 0))
         if s <= 0:
@@ -180,26 +177,28 @@ class Engagement(commands.Cog):
         return {"date": today, "last_reroll": carry_last_rr, **base}
 
     def _get_or_create_today_mission(self, uid: str) -> Dict[str, Any]:
-        today = _today_str()
-        m = self.missions.get(uid)
-        if m and m.get("date") == today:
-            m.setdefault("difficulty", "EASY")
-            m.setdefault("reward_xp", _roll_reward(m.get("difficulty", "EASY")))
-            # important : on ne touche PAS à last_reroll ici
-            if "commands" in m and isinstance(m["commands"], list):
-                m["commands"] = list(set(m["commands"]))
-            if "distinct" not in m:
-                m["distinct"] = m.get("key") == "use_3_tracking"
-            m.setdefault("distinct_used", [])
-            self.missions[uid] = m
-            return m
+        with core.DATA_JSON_LOCK:
+            self.missions = core.load_json(MISSIONS_PATH, {})
+            today = _today_str()
+            m = self.missions.get(uid)
+            if m and m.get("date") == today:
+                m.setdefault("difficulty", "EASY")
+                m.setdefault("reward_xp", _roll_reward(m.get("difficulty", "EASY")))
+                # important : on ne touche PAS à last_reroll ici
+                if "commands" in m and isinstance(m["commands"], list):
+                    m["commands"] = list(set(m["commands"]))
+                if "distinct" not in m:
+                    m["distinct"] = m.get("key") == "use_3_tracking"
+                m.setdefault("distinct_used", [])
+                self.missions[uid] = m
+                return m
 
-        prev = self.missions.get(uid) or {}
-        carry_last_rr = prev.get("last_reroll")
-        m = self._roll_new_mission_payload(carry_last_rr=carry_last_rr, today=today)
-        self.missions[uid] = m
-        _save_json(MISSIONS_PATH, self.missions)
-        return m
+            prev = self.missions.get(uid) or {}
+            carry_last_rr = prev.get("last_reroll")
+            m = self._roll_new_mission_payload(carry_last_rr=carry_last_rr, today=today)
+            self.missions[uid] = m
+            core.save_json(MISSIONS_PATH, self.missions)
+            return m
 
     def _mission_bar_line(self, progress: int, goal: int) -> str:
         return f"{_bar(progress, goal)}  **{progress}/{goal}**"
@@ -216,12 +215,16 @@ class Engagement(commands.Cog):
         goal = int(m.get("goal", 1))
         prog = int(m.get("progress", 0))
         if prog < goal:
-            self.missions[uid_str] = m
-            _save_json(MISSIONS_PATH, self.missions)
+            with core.DATA_JSON_LOCK:
+                self.missions = core.load_json(MISSIONS_PATH, {})
+                self.missions[uid_str] = m
+                core.save_json(MISSIONS_PATH, self.missions)
             return
         if m.get("completed"):
-            self.missions[uid_str] = m
-            _save_json(MISSIONS_PATH, self.missions)
+            with core.DATA_JSON_LOCK:
+                self.missions = core.load_json(MISSIONS_PATH, {})
+                self.missions[uid_str] = m
+                core.save_json(MISSIONS_PATH, self.missions)
             return
 
         m["completed"] = True
@@ -247,8 +250,10 @@ class Engagement(commands.Cog):
                 except Exception as e:
                     LOG.debug("mission notify DM failed uid=%s: %s", uid, e)
 
-        self.missions[uid_str] = m
-        _save_json(MISSIONS_PATH, self.missions)
+        with core.DATA_JSON_LOCK:
+            self.missions = core.load_json(MISSIONS_PATH, {})
+            self.missions[uid_str] = m
+            core.save_json(MISSIONS_PATH, self.missions)
 
     async def _try_complete_mission(self, ctx: commands.Context):
         """Appelée après chaque commande réussie (listener)."""
@@ -354,8 +359,10 @@ class Engagement(commands.Cog):
                     "last_reroll": today.isoformat(),
                 }
             )
-            self.missions[uid] = m
-            _save_json(MISSIONS_PATH, self.missions)
+            with core.DATA_JSON_LOCK:
+                self.missions = core.load_json(MISSIONS_PATH, {})
+                self.missions[uid] = m
+                core.save_json(MISSIONS_PATH, self.missions)
             just_rerolled = True
 
         # -------- affichage --------

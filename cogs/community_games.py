@@ -71,6 +71,18 @@ GUESSWHO_MODES: dict[str, tuple[int, float, float, int]] = {
 
 _active_raids: dict[int, bool] = {}  # guild_id -> running
 
+# Verrou par guilde : évite deux lancements simultanés (confirm admin + scheduler, ou double clic).
+_raid_spawn_locks: dict[int, asyncio.Lock] = {}
+_raid_spawn_lock_meta = asyncio.Lock()
+
+
+async def _raid_spawn_lock_for(guild_id: int) -> asyncio.Lock:
+    async with _raid_spawn_lock_meta:
+        if guild_id not in _raid_spawn_locks:
+            _raid_spawn_locks[guild_id] = asyncio.Lock()
+        return _raid_spawn_locks[guild_id]
+
+
 # ---------- Raid boss v2 (inscription + défis perso + journal) ----------
 RAID_JOIN_SECONDS = 120.0
 RAID_ROUND_SECONDS = 95.0
@@ -172,17 +184,11 @@ class RaidBattleState:
 
 
 def _load_raid_cfg() -> dict[str, Any]:
-    try:
-        with open(RAID_DATA_PATH, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    return core.load_json(RAID_DATA_PATH, {})
 
 
 def _save_raid_cfg(data: dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(RAID_DATA_PATH) or ".", exist_ok=True)
-    with open(RAID_DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    core.save_json(RAID_DATA_PATH, data)
 
 
 def _week_key(dt: datetime) -> str:
@@ -214,6 +220,98 @@ def _next_raid_moment(now: datetime, weekday: int, hour: int, minute: int) -> da
         if cand > now:
             return cand
     return now + timedelta(days=7)
+
+
+def _get_owner_id() -> Optional[int]:
+    """Même variable d’environnement que `bot.py` (OWNER_ID)."""
+    x = os.getenv("OWNER_ID", "").strip()
+    return int(x) if x.isdigit() else None
+
+
+def _raidstart_week_available(guild_id: int) -> bool:
+    """True si `/raidstart` n’a pas encore été consommé pour la semaine ISO courante."""
+    cfg = _load_raid_cfg()
+    last = str(cfg.get(str(guild_id), {}).get("raidstart_week_key") or "")
+    cur = _week_key(datetime.now(core.TIMEZONE))
+    return last != cur
+
+
+class RaidStartConfirmView(View):
+    """Confirmation éphémère : l’admin accepte la limite 1× / semaine avant lancement."""
+
+    def __init__(
+        self,
+        cog: "CommunityGames",
+        guild: discord.Guild,
+        target: discord.TextChannel,
+        week_key: str,
+        invoker_id: int,
+    ) -> None:
+        super().__init__(timeout=120.0)
+        self.cog = cog
+        self.guild = guild
+        self.target = target
+        self.week_key = week_key
+        self.invoker_id = invoker_id
+
+    @discord.ui.button(label="🚀 Confirmer le lancement", style=discord.ButtonStyle.success, row=0)
+    async def confirm(self, interaction: discord.Interaction, button: Button) -> None:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message("❌ Ce n’est pas ton invitation.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        if _active_raids.get(self.guild.id):
+            await interaction.followup.send("Un raid est déjà en cours sur ce serveur.", ephemeral=True)
+            return
+        cur_key = _week_key(datetime.now(core.TIMEZONE))
+        cfg = _load_raid_cfg()
+        gk = str(self.guild.id)
+        if str(cfg.get(gk, {}).get("raidstart_week_key") or "") == cur_key:
+            await interaction.followup.send(
+                "❌ La limite **1 × /raidstart par semaine** a déjà été atteinte pour ce serveur.",
+                ephemeral=True,
+            )
+            return
+        await self.cog._start_boss_raid(self.guild, self.target, self.week_key)
+        with core.DATA_JSON_LOCK:
+            cfg = _load_raid_cfg()
+            cfg.setdefault(gk, {})
+            cfg[gk]["raidstart_week_key"] = cur_key
+            _save_raid_cfg(cfg)
+        await interaction.followup.send(
+            f"✅ **Raid lancé** dans {self.target.mention}.\n"
+            f"• Semaine ISO enregistrée : **{cur_key}** — tu ne pourras plus utiliser **`/raidstart`** "
+            f"sur ce serveur avant la **semaine prochaine**.\n"
+            f"• Le raid **automatique** (`/raidconfig activer`) n’est pas affecté.",
+            ephemeral=True,
+        )
+        self.stop()
+        for c in self.children:
+            if isinstance(c, Button):
+                c.disabled = True
+        try:
+            if interaction.message:
+                await interaction.message.edit(view=self)
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, row=0)
+    async def cancel(self, interaction: discord.Interaction, button: Button) -> None:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message("❌ Ce n’est pas ton invitation.", ephemeral=True)
+            return
+        self.stop()
+        for c in self.children:
+            if isinstance(c, Button):
+                c.disabled = True
+        try:
+            await interaction.response.edit_message(
+                content="Annulé — aucun raid lancé.",
+                embed=None,
+                view=self,
+            )
+        except Exception:
+            await interaction.response.send_message("Annulé.", ephemeral=True)
 
 
 # ---------- Boss raid : combat (v2) ----------
@@ -254,6 +352,12 @@ class RaidModeSelect(Select):
         if interaction.user.id != self.host.picker_id:
             await interaction.response.send_message("❌ Ce menu n’est pas pour toi.", ephemeral=True)
             return
+        if self.host.picker_id in self.host.join_view.mode_by_user:
+            await interaction.response.send_message(
+                "✅ Tu as **déjà choisi** le mode pour ce raid.",
+                ephemeral=True,
+            )
+            return
         mode = (self.values[0] if self.values else RAID_MODE_DEFAULT) or RAID_MODE_DEFAULT
         self.host.join_view.mode_by_user[self.host.picker_id] = mode
         label = RAID_MODE_LABEL_FR.get(mode, mode)
@@ -292,6 +396,7 @@ class RaidJoinView(View):
         self.mode_by_user: dict[int, str] = {}
         self.message: Optional[discord.Message] = None
         self.promo_message: Optional[discord.Message] = None
+        self._join_lock = asyncio.Lock()
 
     @discord.ui.button(label="✅ S'inscrire au raid", style=discord.ButtonStyle.success)
     async def join(self, interaction: discord.Interaction, button: Button) -> None:
@@ -299,8 +404,15 @@ class RaidJoinView(View):
             await interaction.response.send_message("❌ Mauvais serveur.", ephemeral=True)
             return
         uid = interaction.user.id
-        self.joined.add(uid)
-        n = len(self.joined)
+        async with self._join_lock:
+            if uid in self.joined:
+                await interaction.response.send_message(
+                    "✅ Tu es **déjà inscrit(e)** à ce raid. Attends la fin du timer d’inscription.",
+                    ephemeral=True,
+                )
+                return
+            self.joined.add(uid)
+            n = len(self.joined)
         await interaction.response.send_message(
             f"Tu es enregistré(e) pour ce raid. **{n}** participants pour l’instant.",
             ephemeral=True,
@@ -1433,38 +1545,45 @@ class CommunityGames(commands.Cog):
         _active_raids.pop(guild_id, None)
 
     async def _start_boss_raid(self, guild: discord.Guild, channel: discord.TextChannel, week_key: str) -> None:
-        if _active_raids.get(guild.id):
-            return
-        _active_raids[guild.id] = True
-        cfg = _load_raid_cfg()
-        gk = str(guild.id)
-        if gk in cfg:
-            cfg[gk]["raid_started_for_week"] = week_key
-            _save_raid_cfg(cfg)
+        lock = await _raid_spawn_lock_for(guild.id)
+        async with lock:
+            if _active_raids.get(guild.id):
+                return
+            _active_raids[guild.id] = True
+            try:
+                with core.DATA_JSON_LOCK:
+                    cfg = _load_raid_cfg()
+                    gk = str(guild.id)
+                    if gk in cfg:
+                        cfg[gk]["raid_started_for_week"] = week_key
+                        _save_raid_cfg(cfg)
 
-        promo = await channel.send(
-            "⚔️ **BOSS RAID (hebdo)** — Inscription ouverte **~{0} s**.\n"
-            "• Chaque inscrit a **son propre** défi (boutons en **message privé au salon**).\n"
-            "• **Dégâts aléatoires** par bonne réponse : fourchette selon le **mode** choisi à l’inscription.\n"
-            "• Jusqu’à **{1}** manches ; PV du boss = **nombre d’inscrits** × {2}.\n"
-            "• Tout le monde a **terminé** son défi (réussi, faux, ou temps écoulé) → manche suivante sans attendre la fin du timer.\n"
-            "• XP : base + part des dégâts + MVP + meilleur temps sur une manche + coup final.".format(
-                int(RAID_JOIN_SECONDS),
-                RAID_MAX_ROUNDS,
-                RAID_HP_PER_PLAYER,
-            )
-        )
-        join_view = RaidJoinView(self, guild.id, channel.id)
-        join_view.promo_message = promo
-        msg = await channel.send(
-            embed=discord.Embed(
-                title="📋 Inscription",
-                description="Clique pour participer au combat. **Salon vocal non requis.**",
-                color=discord.Color.red(),
-            ),
-            view=join_view,
-        )
-        join_view.message = msg
+                promo = await channel.send(
+                    "⚔️ **BOSS RAID (hebdo)** — Inscription ouverte **~{0} s**.\n"
+                    "• Chaque inscrit a **son propre** défi (boutons en **message privé au salon**).\n"
+                    "• **Dégâts aléatoires** par bonne réponse : fourchette selon le **mode** choisi à l’inscription.\n"
+                    "• Jusqu’à **{1}** manches ; PV du boss = **nombre d’inscrits** × {2}.\n"
+                    "• Tout le monde a **terminé** son défi (réussi, faux, ou temps écoulé) → manche suivante sans attendre la fin du timer.\n"
+                    "• XP : base + part des dégâts + MVP + meilleur temps sur une manche + coup final.".format(
+                        int(RAID_JOIN_SECONDS),
+                        RAID_MAX_ROUNDS,
+                        RAID_HP_PER_PLAYER,
+                    )
+                )
+                join_view = RaidJoinView(self, guild.id, channel.id)
+                join_view.promo_message = promo
+                msg = await channel.send(
+                    embed=discord.Embed(
+                        title="📋 Inscription",
+                        description="Clique pour participer au combat. **Salon vocal non requis.**",
+                        color=discord.Color.red(),
+                    ),
+                    view=join_view,
+                )
+                join_view.message = msg
+            except Exception:
+                _active_raids.pop(guild.id, None)
+                raise
 
     @tasks.loop(minutes=1.0)
     async def raid_scheduler(self) -> None:
@@ -1498,8 +1617,11 @@ class CommunityGames(commands.Cog):
                     )
                 except Exception as e:
                     LOG.warning("raid alert: %s", e)
-                c["alert_sent_for_week"] = wkey
-                _save_raid_cfg(cfg)
+                with core.DATA_JSON_LOCK:
+                    cfg2 = _load_raid_cfg()
+                    if gid_str in cfg2:
+                        cfg2[gid_str]["alert_sent_for_week"] = wkey
+                    _save_raid_cfg(cfg2)
 
             if (
                 c.get("raid_started_for_week") != wkey
@@ -1535,10 +1657,11 @@ class CommunityGames(commands.Cog):
         if not isinstance(ch, discord.TextChannel):
             await interaction.response.send_message("❌ Salon texte requis.", ephemeral=True)
             return
-        cfg = _load_raid_cfg()
-        cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
-        cfg[str(interaction.guild.id)]["channel_id"] = ch.id
-        _save_raid_cfg(cfg)
+        with core.DATA_JSON_LOCK:
+            cfg = _load_raid_cfg()
+            cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
+            cfg[str(interaction.guild.id)]["channel_id"] = ch.id
+            _save_raid_cfg(cfg)
         await interaction.response.send_message(f"✅ Salon de raid : {ch.mention}", ephemeral=True)
 
     @raidconfig.command(name="horaire", description="Jour et heure du raid (fuseau du bot, voir BOT_TIMEZONE).")
@@ -1569,12 +1692,13 @@ class CommunityGames(commands.Cog):
         if not interaction.guild:
             await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
             return
-        cfg = _load_raid_cfg()
-        cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
-        cfg[str(interaction.guild.id)]["weekday"] = int(weekday)
-        cfg[str(interaction.guild.id)]["hour"] = int(hour)
-        cfg[str(interaction.guild.id)]["minute"] = int(minute)
-        _save_raid_cfg(cfg)
+        with core.DATA_JSON_LOCK:
+            cfg = _load_raid_cfg()
+            cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
+            cfg[str(interaction.guild.id)]["weekday"] = int(weekday)
+            cfg[str(interaction.guild.id)]["hour"] = int(hour)
+            cfg[str(interaction.guild.id)]["minute"] = int(minute)
+            _save_raid_cfg(cfg)
         tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
         jname = core.JOURS_SEMAINE_FR[int(weekday) % 7]
         await interaction.response.send_message(
@@ -1598,10 +1722,11 @@ class CommunityGames(commands.Cog):
         if not interaction.guild:
             await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
             return
-        cfg = _load_raid_cfg()
-        cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
-        cfg[str(interaction.guild.id)]["enabled"] = actif
-        _save_raid_cfg(cfg)
+        with core.DATA_JSON_LOCK:
+            cfg = _load_raid_cfg()
+            cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
+            cfg[str(interaction.guild.id)]["enabled"] = actif
+            _save_raid_cfg(cfg)
         await interaction.response.send_message(
             f"✅ Lancement **hebdomadaire automatique** : **{'oui' if actif else 'non'}**.",
             ephemeral=True,
@@ -1624,19 +1749,78 @@ class CommunityGames(commands.Cog):
         tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
         jname = core.JOURS_SEMAINE_FR[wd % 7]
         auto = bool(cfg.get("enabled", False))
+        cur_w = _week_key(now)
+        rs_w = str(cfg.get("raidstart_week_key") or "")
+        start_line = (
+            f"• **`/raidstart`** (manuel) cette semaine (`{cur_w}`) : **déjà utilisé**."
+            if rs_w == cur_w
+            else f"• **`/raidstart`** (manuel) : **disponible** cette semaine (`{cur_w}`) — _1× par semaine / serveur._"
+        )
         await interaction.response.send_message(
             f"**Raid boss**\n"
             f"• Salon : {ch_txt}\n"
             f"• Horaire : **{jname}** à **{h:02d}:{m:02d}** (fuseau **{tzname}**)\n"
             f"• Lancement auto chaque semaine : **{'oui' if auto else 'non (utilise /raidstart)'}**\n"
+            f"{start_line}\n"
             f"• Prochain créneau (calcul) : <t:{int(nxt.timestamp())}:F>\n"
             f"_Alerte ~1 h avant dans le salon du raid._",
             ephemeral=True,
         )
 
-    @app_commands.command(name="raidstart", description="Lancer un raid boss maintenant (admin).")
+    @app_commands.command(name="raidstart", description="Lancer un raid boss maintenant (admin, 1× par semaine après confirmation).")
     @app_commands.default_permissions(administrator=True)
     async def raid_start(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+            return
+        if _active_raids.get(interaction.guild.id):
+            await interaction.response.send_message("Un raid est déjà en cours sur ce serveur.", ephemeral=True)
+            return
+        target = _raid_target_channel(interaction.guild)
+        if target is None:
+            await interaction.response.send_message(
+                "❌ Aucun salon de raid configuré. Utilise d’abord **`/raidconfig canal`** (choisis le salon du raid).",
+                ephemeral=True,
+            )
+            return
+        if not _raidstart_week_available(interaction.guild.id):
+            cur = _week_key(datetime.now(core.TIMEZONE))
+            await interaction.response.send_message(
+                "❌ **Limite atteinte** : **`/raidstart`** est utilisable **une seule fois par semaine** "
+                f"par serveur (semaine ISO **{cur}**). Réessaie la semaine prochaine.\n"
+                "_Le raid **automatique** (`/raidconfig activer`) n’est pas compté dans cette limite._",
+                ephemeral=True,
+            )
+            return
+        wk = _week_key(datetime.now(core.TIMEZONE))
+        embed = discord.Embed(
+            title="⚔️ Confirmer le lancement du raid",
+            description=(
+                "Tu t’apprêtes à lancer un **Boss Raid** immédiat.\n\n"
+                f"• **Après confirmation**, ce serveur ne pourra plus utiliser **`/raidstart`** jusqu’à la "
+                "**semaine prochaine** (limite **1 × par semaine ISO**, ici : **"
+                f"{wk}**).\n"
+                "• Le **raid auto** hebdomadaire (`/raidconfig activer`) **n’est pas** consommé par cette limite.\n\n"
+                f"**Salon du raid :** {target.mention}\n\n"
+                "Clique **Confirmer** seulement si tu en acceptes les conditions."
+            ),
+            color=discord.Color.dark_red(),
+        )
+        view = RaidStartConfirmView(self, interaction.guild, target, wk, interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(
+        name="owner_raidstart",
+        description="(Propriétaire du bot) Lance un raid test sans limite hebdomadaire /raidstart.",
+    )
+    async def owner_raid_start(self, interaction: discord.Interaction) -> None:
+        oid = _get_owner_id()
+        if oid is None or interaction.user.id != oid:
+            await interaction.response.send_message(
+                "❌ Réservé au **propriétaire** du bot (`OWNER_ID` dans l’environnement, comme au démarrage).",
+                ephemeral=True,
+            )
+            return
         if not interaction.guild:
             await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
             return
@@ -1647,13 +1831,17 @@ class CommunityGames(commands.Cog):
         target = _raid_target_channel(interaction.guild)
         if target is None:
             await interaction.followup.send(
-                "❌ Aucun salon de raid configuré. Utilise d’abord **`/raidconfig canal`** (choisis le salon du raid).",
+                "❌ Aucun salon de raid configuré. Utilise d’abord **`/raidconfig canal`**.",
                 ephemeral=True,
             )
             return
         wk = _week_key(datetime.now(core.TIMEZONE))
         await self._start_boss_raid(interaction.guild, target, wk)
-        await interaction.followup.send(f"✅ Raid lancé dans {target.mention}.", ephemeral=True)
+        await interaction.followup.send(
+            f"✅ **Raid lancé** (owner) dans {target.mention}.\n"
+            "_La limite **`/raidstart`** des admins **n’est pas** consommée._",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="raidalerttest", description="Envoie un message type « raid dans 1 h » (test admin).")
     @app_commands.default_permissions(administrator=True)
