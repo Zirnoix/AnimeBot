@@ -11,15 +11,13 @@ import logging
 import time
 from collections import deque
 from typing import Any
-import aiohttp
-from PIL import Image
-from io import BytesIO
 import random
 import asyncio
 import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select
 from modules import core
+from modules import higherlower_combine
 from modules import minigame_lock
 
 LOG = logging.getLogger(__name__)
@@ -411,36 +409,15 @@ class MiniGames(commands.Cog):
                 color=discord.Color.orange(),
             )
 
-            url1 = choice1["coverImage"]["extraLarge"]
-            url2 = choice2["coverImage"]["extraLarge"]
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url1) as resp1:
-                    img1_bytes = await resp1.read()
-                async with session.get(url2) as resp2:
-                    img2_bytes = await resp2.read()
-
-            img1 = Image.open(BytesIO(img1_bytes)).convert("RGBA")
-            img2 = Image.open(BytesIO(img2_bytes)).convert("RGBA")
-
-            max_height = max(img1.height, img2.height)
-            img1 = img1.resize((int(img1.width * max_height / img1.height), max_height))
-            img2 = img2.resize((int(img2.width * max_height / img2.height), max_height))
-
-            separator_width = 10
-            total_width = img1.width + img2.width + separator_width
-            combined = Image.new("RGBA", (total_width, max_height), (0, 0, 0, 255))
-            combined.paste(img1, (0, 0))
-            combined.paste(img2, (img1.width + separator_width, 0))
-
-            buffer = BytesIO()
-            combined.save(buffer, format="PNG")
-            buffer.seek(0)
-            file = discord.File(buffer, filename="duel.png")
-
-            embed.set_image(url="attachment://duel.png")
+            file = await higherlower_combine.make_higherlower_combined_file(
+                choice1, choice2, filename="duel.png"
+            )
             view = HigherLowerView(ctx, choice1, choice2)
-            await ctx.send(embed=embed, view=view, file=file)
+            if file:
+                embed.set_image(url="attachment://duel.png")
+                await ctx.send(embed=embed, view=view, file=file)
+            else:
+                await ctx.send(embed=embed, view=view)
 
             try:
                 await view.wait()

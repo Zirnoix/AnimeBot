@@ -26,6 +26,7 @@ from discord.ui import Button, Select, View
 from PIL import Image, ImageFilter
 
 from modules import core
+from modules import higherlower_combine
 from modules import minigame_lock
 from modules.core import normalize
 
@@ -385,10 +386,16 @@ class RaidModeSelectView(View):
 
 
 class RaidJoinView(View):
-    """Inscription avant le combat (salon public)."""
+    """Inscription avant le combat (salon public).
+
+    Le délai d’inscription est géré par une tâche asyncio **fixe** (voir `_schedule_raid_join_phase_end`) :
+    avec `timeout` sur le View, discord.py **réinitialise** le compteur à **chaque** clic sur le bouton,
+    ce qui peut repousser la fin indéfiniment (ex. plusieurs inscriptions sur plusieurs minutes).
+    """
 
     def __init__(self, cog: "CommunityGames", guild_id: int, channel_id: int) -> None:
-        super().__init__(timeout=RAID_JOIN_SECONDS)
+        # Pas de timeout lib : la fin de phase est déclenchée par `asyncio.sleep(RAID_JOIN_SECONDS)` au lancement.
+        super().__init__(timeout=None)
         self.cog = cog
         self.guild_id = guild_id
         self.channel_id = channel_id
@@ -397,6 +404,7 @@ class RaidJoinView(View):
         self.message: Optional[discord.Message] = None
         self.promo_message: Optional[discord.Message] = None
         self._join_lock = asyncio.Lock()
+        self._raid_join_timer_task: Optional[asyncio.Task[None]] = None
 
     @discord.ui.button(label="✅ S'inscrire au raid", style=discord.ButtonStyle.success)
     async def join(self, interaction: discord.Interaction, button: Button) -> None:
@@ -435,11 +443,6 @@ class RaidJoinView(View):
             view=RaidModeSelectView(self, uid),
             ephemeral=True,
         )
-
-    async def on_timeout(self) -> None:
-        ch = self.cog.bot.get_channel(self.channel_id)
-        if isinstance(ch, discord.TextChannel):
-            await self.cog._raid_after_join(self.guild_id, ch, self)
 
 
 class RaidRoundHubView(View):
@@ -526,11 +529,18 @@ class RaidRoundHubView(View):
                 damage=damage,
                 raid_mode=mode,
             )
-            emb = discord.Embed(
-                title="🎭 Ton défi (personnel)",
-                description=quiz.get("prompt", "").strip() or "Réponds correctement pour infliger des dégâts.",
-                color=discord.Color.dark_red(),
-            )
+            if str(quiz.get("kind") or "") == "higherlower":
+                emb = discord.Embed(
+                    title="⬆️⬇️ Quel anime est le plus populaire ?",
+                    description=quiz.get("prompt", "").strip() or "Réponds correctement pour infliger des dégâts.",
+                    color=discord.Color.orange(),
+                )
+            else:
+                emb = discord.Embed(
+                    title="🎭 Ton défi (personnel)",
+                    description=quiz.get("prompt", "").strip() or "Réponds correctement pour infliger des dégâts.",
+                    color=discord.Color.dark_red(),
+                )
             if quiz.get("image_url"):
                 emb.set_image(url=quiz["image_url"])
             send_kw = {"embed": emb, "view": pv, "ephemeral": True}
@@ -931,23 +941,28 @@ class CommunityGames(commands.Cog):
             p2 = int(b.get("popularity") or 0)
             correct_index = 0 if p1 >= p2 else 1
             winner = t1 if correct_index == 0 else t2
+            hl_file = await higherlower_combine.make_higherlower_combined_file(
+                a, b, filename="raid_higherlower.png"
+            )
             quiz = {
                 "kind": "higherlower",
                 "options": [f"1️⃣ {t1[:60]}", f"2️⃣ {t2[:60]}"],
                 "correct_index": correct_index,
                 "correct_name": f"Le plus populaire : {winner}",
                 "anime_hint": "Popularité AniList",
-                "image_url": None,
+                "image_url": ("attachment://raid_higherlower.png" if hl_file else None),
                 "hl_title1": t1,
                 "hl_title2": t2,
                 "hl_pop1": p1,
                 "hl_pop2": p2,
                 "prompt": (
                     f"Manche **{rn}/{mr}** — lequel est le **plus populaire** sur AniList ?\n"
-                    f"**1️⃣** {t1}\n**2️⃣** {t2}"
+                    "Clique sur **1️⃣** ou **2️⃣** pour choisir :\n\n"
+                    f"**1️⃣** {t1}\n"
+                    f"**2️⃣** {t2}"
                 ),
             }
-            return quiz, None
+            return quiz, hl_file
 
         if m == "animequiz":
             page = random.randint(1, 80)
@@ -1107,6 +1122,10 @@ class CommunityGames(commands.Cog):
             pass
 
     async def _raid_after_join(self, guild_id: int, channel: discord.TextChannel, join_view: RaidJoinView) -> None:
+        if getattr(join_view, "_raid_after_join_done", False):
+            return
+        join_view._raid_after_join_done = True
+
         joined = set(join_view.joined)
         if not joined:
             await channel.send("❌ **Raid annulé** — aucun participant inscrit.")
@@ -1540,6 +1559,25 @@ class CommunityGames(commands.Cog):
 
         _active_raids.pop(guild_id, None)
 
+    async def _schedule_raid_join_phase_end(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        join_view: RaidJoinView,
+    ) -> None:
+        """Fin d’inscription après **exactement** RAID_JOIN_SECONDS (horloge fixe au lancement)."""
+        try:
+            await asyncio.sleep(RAID_JOIN_SECONDS)
+        except asyncio.CancelledError:
+            return
+        if getattr(join_view, "_raid_after_join_done", False):
+            return
+        try:
+            join_view.stop()
+        except Exception:
+            pass
+        await self._raid_after_join(guild.id, channel, join_view)
+
     async def _raid_abort(self, channel: discord.TextChannel, guild_id: int, reason: str) -> None:
         await channel.send(reason)
         _active_raids.pop(guild_id, None)
@@ -1559,7 +1597,8 @@ class CommunityGames(commands.Cog):
                         _save_raid_cfg(cfg)
 
                 promo = await channel.send(
-                    "⚔️ **BOSS RAID (hebdo)** — Inscription ouverte **~{0} s**.\n"
+                    "⚔️ **BOSS RAID (hebdo)** — Inscription ouverte **~{0} s** "
+                    "_(délai **fixe** depuis le lancement ; il ne se prolonge pas à chaque inscription)_.\n"
                     "• Chaque inscrit a **son propre** défi (boutons en **message privé au salon**).\n"
                     "• **Dégâts aléatoires** par bonne réponse : fourchette selon le **mode** choisi à l’inscription.\n"
                     "• Jusqu’à **{1}** manches ; PV du boss = **nombre d’inscrits** × {2}.\n"
@@ -1581,6 +1620,9 @@ class CommunityGames(commands.Cog):
                     view=join_view,
                 )
                 join_view.message = msg
+                join_view._raid_join_timer_task = asyncio.create_task(
+                    self._schedule_raid_join_phase_end(guild, channel, join_view)
+                )
             except Exception:
                 _active_raids.pop(guild.id, None)
                 raise
