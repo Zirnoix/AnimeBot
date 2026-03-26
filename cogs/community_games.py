@@ -31,6 +31,18 @@ from modules.core import normalize
 
 LOG = logging.getLogger(__name__)
 
+
+def _raid_guesswho_name_match(guess: str, correct_name: str, qz: Any) -> bool:
+    """Accepte prénom/nom dans un ordre ou l’autre (ex. Kageyama Tobio vs Tobio Kageyama)."""
+    if qz and getattr(qz, "title_matcher", None):
+        if qz.title_matcher.find_matches(guess, {correct_name}):  # type: ignore[attr-defined]
+            return True
+    if normalize(guess) == normalize(correct_name):
+        return True
+    tg = tuple(sorted(normalize(guess).split()))
+    tc = tuple(sorted(normalize(correct_name).split()))
+    return bool(tg) and tg == tc
+
 SLASH_ONLY_MSG = "Cette commande est réservée au **slash** : utilise `/{}` dans la barre de commandes."
 
 
@@ -145,6 +157,8 @@ class RaidBattleState:
     best_time_ms: dict[int, int] = field(default_factory=dict)
     final_blow: Optional[tuple[int, str]] = None
     answered_this_round: set[int] = field(default_factory=set)
+    round_finished_users: set[int] = field(default_factory=set)
+    round_early_scheduled: bool = False
     open_challenge_users: set[int] = field(default_factory=set)
     log_lines: list[str] = field(default_factory=list)
     hub_message: Optional[discord.Message] = None
@@ -341,9 +355,9 @@ class RaidRoundHubView(View):
                 ephemeral=True,
             )
             return
-        if uid in self.state.answered_this_round:
+        if uid in self.state.round_finished_users:
             await interaction.response.send_message(
-                "Tu as déjà contribué à cette manche (dégâts infligés).",
+                "Tu as déjà terminé ta manche (réponse donnée ou temps écoulé).",
                 ephemeral=True,
             )
             return
@@ -415,32 +429,6 @@ class RaidRoundHubView(View):
             async with self.state.lock:
                 self.state.open_challenge_users.discard(uid)
             raise
-
-
-class RaidMancheNextView(View):
-    """Après la manche 1 : rappel public + bouton → réponse éphémère avec lien vers le hub."""
-
-    def __init__(self, state: RaidBattleState, hub_jump_url: str) -> None:
-        super().__init__(timeout=600.0)
-        self.state = state
-        self.hub_jump_url = hub_jump_url
-
-    @discord.ui.button(
-        label="📌 Rappel privé (éphémère) + lien vers le hub",
-        style=discord.ButtonStyle.primary,
-    )
-    async def rappel(self, interaction: discord.Interaction, button: Button) -> None:
-        if interaction.user.id not in self.state.participants:
-            await interaction.response.send_message(
-                "❌ Tu n’es pas inscrit(e) à ce raid.",
-                ephemeral=True,
-            )
-            return
-        await interaction.response.send_message(
-            f"**Manche {self.state.round_n}/{self.state.max_rounds}** — Boss **{self.state.hp}** HP.\n"
-            f"Clique **Recevoir ma manche** sur le message du bot dans le salon :\n{self.hub_jump_url}",
-            ephemeral=True,
-        )
 
 
 class PersonalRaidChallengeView(View):
@@ -551,8 +539,12 @@ class PersonalRaidChallengeView(View):
         )
 
     async def on_timeout(self) -> None:
+        ch = self.cog.bot.get_channel(self.state.channel_id)
         async with self.state.lock:
             self.state.open_challenge_users.discard(self.user_id)
+            self.state.round_finished_users.add(self.user_id)
+        if isinstance(ch, discord.TextChannel):
+            await self.cog._raid_maybe_finish_round_early(self.state, self.hub)
 
 
 class CommunityGames(commands.Cog):
@@ -989,7 +981,7 @@ class CommunityGames(commands.Cog):
             return
         if state.hp <= 0:
             return
-        if len(state.answered_this_round) >= len(state.participants):
+        if len(state.round_finished_users) >= len(state.participants):
             return
         await self._raid_after_round_timeout(state, channel)
 
@@ -1049,6 +1041,8 @@ class CommunityGames(commands.Cog):
             return
         await self._raid_cancel_round_timer_async(state)
         state.answered_this_round.clear()
+        state.round_finished_users.clear()
+        state.round_early_scheduled = False
         state.open_challenge_users.clear()
         state.round_start_ts = monotonic()
         hub = RaidRoundHubView(self, state)
@@ -1062,24 +1056,21 @@ class CommunityGames(commands.Cog):
         state.round_timer_task = asyncio.create_task(
             self._raid_round_timer_worker(state, channel, gen)
         )
-        if state.round_n >= 2:
-            prev = state.round_n - 1
-            try:
-                nv = RaidMancheNextView(state, msg.jump_url)
-                await channel.send(
-                    embed=discord.Embed(
-                        title=f"⏭️ Fin de la manche {prev} — manche {state.round_n}/{state.max_rounds}",
-                        description=(
-                            f"La **manche {prev}** est terminée. La **manche {state.round_n}** est ouverte "
-                            f"(boss **{state.hp}** HP). Utilise le bouton **Recevoir ma manche** sur le message du bot "
-                            f"ci-dessus, ou clique le bouton ci-dessous pour un **rappel privé** (éphémère) avec le lien."
-                        ),
-                        color=discord.Color.dark_red(),
-                    ),
-                    view=nv,
-                )
-            except Exception:
-                pass
+
+    async def _raid_maybe_finish_round_early(self, state: RaidBattleState, hub: RaidRoundHubView) -> None:
+        """Si tous les inscrits ont fini leur défi (bonne réponse, faux, ou temps écoulé), enchaîne la manche."""
+        ch = self.bot.get_channel(state.channel_id)
+        if not isinstance(ch, discord.TextChannel):
+            return
+        async with state.lock:
+            if state.hp <= 0:
+                return
+            if len(state.round_finished_users) < len(state.participants):
+                return
+            if state.round_early_scheduled:
+                return
+            state.round_early_scheduled = True
+        await self._raid_complete_round_early(state, ch, hub)
 
     async def _raid_register_hit(
         self,
@@ -1107,6 +1098,7 @@ class CommunityGames(commands.Cog):
             if prev is None or dt_ms < prev:
                 state.best_time_ms[uid] = dt_ms
             state.answered_this_round.add(uid)
+            state.round_finished_users.add(uid)
             state.open_challenge_users.discard(uid)
             line = f"• **{name}** · **−{damage}** HP · {dt_ms} ms — ❤️ **{state.hp}**"
             state.log_lines = state.log_lines[-14:] + [line]
@@ -1138,8 +1130,7 @@ class CommunityGames(commands.Cog):
             )
             return True
 
-        if len(state.answered_this_round) >= len(state.participants):
-            await self._raid_complete_round_early(state, ch, hub)
+        await self._raid_maybe_finish_round_early(state, hub)
         return True
 
     async def _raid_run_guesswho_text(
@@ -1178,6 +1169,7 @@ class CommunityGames(commands.Cog):
                 if state.round_n != started_round or uid not in state.open_challenge_users:
                     return
                 state.open_challenge_users.discard(uid)
+                state.round_finished_users.add(uid)
             emb = discord.Embed(
                 title="⏰ Temps écoulé",
                 description=f"C’était **{correct_name}**.",
@@ -1187,6 +1179,7 @@ class CommunityGames(commands.Cog):
                 await interaction.edit_original_response(embed=emb, content=None, attachments=[])
             except Exception:
                 pass
+            await self._raid_maybe_finish_round_early(state, hub)
             return
 
         try:
@@ -1200,11 +1193,7 @@ class CommunityGames(commands.Cog):
 
         g = (msg.content or "").strip()
         qz = self.bot.get_cog("Quiz")
-        ok = False
-        if qz:
-            ok = bool(qz.title_matcher.find_matches(g, {correct_name}))  # type: ignore[attr-defined]
-        if not ok:
-            ok = normalize(g) == normalize(correct_name)
+        ok = _raid_guesswho_name_match(g, correct_name, qz)
 
         if not ok:
             async with state.lock:
@@ -1212,6 +1201,7 @@ class CommunityGames(commands.Cog):
                     return
                 state.wrong_by_user[uid] = state.wrong_by_user.get(uid, 0) + 1
                 state.open_challenge_users.discard(uid)
+                state.round_finished_users.add(uid)
             emb = discord.Embed(
                 title="❌ Pas la bonne réponse",
                 description=f"La réponse était **{correct_name}**.",
@@ -1221,6 +1211,7 @@ class CommunityGames(commands.Cog):
                 await interaction.edit_original_response(embed=emb, content=None, attachments=[])
             except Exception:
                 pass
+            await self._raid_maybe_finish_round_early(state, hub)
             return
 
         async with state.lock:
@@ -1240,8 +1231,6 @@ class CommunityGames(commands.Cog):
         if anime_hint and anime_hint != "—":
             lines.insert(1, f"Indice anime : _{anime_hint}_")
         desc = "\n".join(lines)
-        if applied:
-            desc += "\n\n_Le hub du raid dans ce salon a été mis à jour (manche suivante si tout le monde a répondu)._"
         try:
             if not applied:
                 emb = discord.Embed(
@@ -1458,7 +1447,7 @@ class CommunityGames(commands.Cog):
             "• Chaque inscrit a **son propre** défi (boutons en **message privé au salon**).\n"
             "• **Dégâts aléatoires** par bonne réponse : fourchette selon le **mode** choisi à l’inscription.\n"
             "• Jusqu’à **{1}** manches ; PV du boss = **nombre d’inscrits** × {2}.\n"
-            "• Tout le monde a répondu → manche suivante sans attendre la fin du timer.\n"
+            "• Tout le monde a **terminé** son défi (réussi, faux, ou temps écoulé) → manche suivante sans attendre la fin du timer.\n"
             "• XP : base + part des dégâts + MVP + meilleur temps sur une manche + coup final.".format(
                 int(RAID_JOIN_SECONDS),
                 RAID_MAX_ROUNDS,
