@@ -70,7 +70,7 @@ RAID_DAMAGE_BY_MODE: dict[str, tuple[int, int]] = {
     "guesscharacter": (400, 720),
     "guessyear": (520, 880),
     "guessepisodes": (520, 880),
-    "guessgenre": (500, 860),
+    "guessgenre": (400, 720),
     "higherlower": (540, 900),
     "animequiz": (640, 1000),
     "guesswho": (660, 1020),
@@ -81,7 +81,7 @@ RAID_XP_FINISHER_BY_MODE: dict[str, int] = {
     "guesscharacter": 12,
     "guessyear": 22,
     "guessepisodes": 22,
-    "guessgenre": 20,
+    "guessgenre": 12,
     "higherlower": 24,
     "animequiz": 38,
     "guesswho": 40,
@@ -100,7 +100,7 @@ RAID_MODE_DIFFICULTY_FR: dict[str, str] = {
     "guesscharacter": "Facile",
     "guessyear": "Moyen",
     "guessepisodes": "Moyen",
-    "guessgenre": "Moyen",
+    "guessgenre": "Facile",
     "higherlower": "Moyen",
     "animequiz": "Difficile",
     "guesswho": "Difficile",
@@ -279,7 +279,7 @@ class RaidJoinView(View):
             title="🎮 Choix du mini-jeu (visible par toi seul)",
             description=(
                 "Sélectionne le **type de défi** pour **toutes** tes manches.\n"
-                "• **Facile** = personnage (4 choix). **Moyen** = année, épisodes, genre, plus populaire. "
+                "• **Facile** = personnage (4 choix) et **genre**. **Moyen** = année, épisodes, plus populaire. "
                 "**Difficile** = affiche (anime quiz) et qui est-ce flou.\n"
                 "• Modes plus durs → **dégâts** et **bonus coup final** plus élevés.\n"
                 "• _Sans choix avant la fin du timer d’inscription → mode **"
