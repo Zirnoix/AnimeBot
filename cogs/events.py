@@ -9,27 +9,34 @@ SUPPORT_DISCORD = "@zirnoix"
 SUPPORT_ID = "180389173985804288"
 
 INTRO_TITLE = "👋 Merci d’avoir ajouté AnimeBot !"
-INTRO_DESC = (
-    "Voici l’essentiel pour démarrer en **moins de 60 secondes**.\n\n"
-    "1) **Salon des annonces**\n"
-    "→ `/setchannel` dans le salon voulu\n\n"
-    "2) **Liste du serveur** (ce que suivent `/next` et `/planning` en mode serveur)\n"
-    "→ `/airings all` — ajoute les titres à suivre\n\n"
-    "Les **alertes image** (à la sortie de l’épisode) utilisent le compte du bot + comptes liés, pas cette liste."
+INTRO_LEAD = (
+    "Voici **l’ordre conseillé** pour que le serveur profite des annonces d’épisodes et des commandes « liste du serveur », "
+    "puis un **rapide topo** pour tes membres."
+)
+
+INTRO_ADMIN = (
+    "**1) Remplir la liste du serveur — `/airings`**\n"
+    "Sous-commande **`all`** (parcourir les sorties) ou ajout/retrait un par un. "
+    "C’est la **liste utilisée** par **`/next`** et **`/planning`** en mode **serveur**. "
+    "**Tant qu’elle est vide**, pas de prochains épisodes côté serveur et **aucune carte** « épisode sorti ».\n\n"
+    "**2) Choisir le salon des annonces — `/setchannel`**\n"
+    "À lancer **dans le salon** où tu veux les **cartes** quand un épisode de la liste sort "
+    "(même liste que `/airings`).\n\n"
+    "**3) Raid boss (optionnel) — `/raidconfig`**\n"
+    "Salon du raid, **jour/heure**, lancement automatique ou non. "
+    "Pour un essai : **`/raidstart`** (admins)."
 )
 
 INTRO_MINIGAMES = (
-    "**🎮 Mini-jeux populaires (essayez-les !)**\n"
-    "• **/animequiz** — Quiz solo rapide (images/indices)\n"
-    "• **/duel** — Affronte un ami en 1v1\n"
-    "• **/guessop** — Devine l’**opening** à l’oreille (vocal)\n"
-    "• **/minijeux** — Deux menus (**Devinettes** / **Autres**) : un clic = une partie\n"
-    "• **`/higherlower`** — Plus ou moins populaire (hors menu)"
+    "**À faire découvrir sur le serveur**\n"
+    "• **/next** · **/planning** — mode **serveur** = liste `/airings` ; mode **global** = toutes les sorties.\n"
+    "• **/animequiz** · **/duel** · **/guessop** · **/minijeux** — **/animetop** pour les classements mini-jeux.\n"
+    "• **Raid boss** (mini-jeu communautaire) une fois **`/raidconfig`** en place."
 )
 
 EXTRA_TIPS = (
-    "Besoin d’aller plus loin ? Tape **`/guide`** (ici en MP) pour le tutoriel complet "
-    "(liens AniList, stats, missions, rappels, etc.)."
+    "Tape **`/guide`** pour recevoir le **tutoriel complet en MP** : "
+    "**XP & niveaux**, badges, lien AniList, rappels, détail du raid, etc."
 )
 
 CONTACT = (
@@ -39,13 +46,14 @@ CONTACT = (
 def make_intro_embed(guild: discord.Guild | None) -> discord.Embed:
     em = discord.Embed(
         title=INTRO_TITLE,
-        description=INTRO_DESC,
+        description=INTRO_LEAD,
         color=discord.Color.blurple(),
     )
     if guild:
         em.set_footer(text=f"Serveur: {guild.name}")
-    em.add_field(name="🎮 Mini-jeux à découvrir", value=INTRO_MINIGAMES, inline=False)
-    em.add_field(name="ℹ️ Astuce", value=EXTRA_TIPS, inline=False)
+    em.add_field(name="⚙️ Configuration (à faire en premier)", value=INTRO_ADMIN, inline=False)
+    em.add_field(name="🎮 Pour les joueurs", value=INTRO_MINIGAMES, inline=False)
+    em.add_field(name="📘 Tutoriel complet", value=EXTRA_TIPS, inline=False)
     em.add_field(name="🆘 Support", value=CONTACT, inline=False)
     return em
 
@@ -73,15 +81,20 @@ class Onboarding(commands.Cog):
                 if ch:
                     await ch.send(
                         f"👋 **{owner.mention}** merci d’avoir ajouté **AnimeBot**.\n"
-                        "Je t’ai mis le guide en MP, mais tes MP semblent fermés.\n"
-                        "Ouvre tes MP ou tape `/guide` pour recevoir le tutoriel (en MP)."
+                        "Je t’ai envoyé un **récap config** en MP, mais tes MP sont fermés.\n"
+                        "**En bref :** remplis **`/airings`** (liste du serveur), puis **`/setchannel`** "
+                        "dans le salon d’annonces — optionnel : **`/raidconfig`** pour le raid boss.\n"
+                        "Ouvre tes MP ou tape **`/guide`** pour le tutoriel détaillé (XP, badges, AniList…)."
                     )
         except Exception:
             # ne pas casser le flux de démarrage si un DM échoue
             pass
 
     # ---- /guide : détaillé, pensé pour **MP**. Utilisable depuis un serveur -> redirige en MP. ----
-    @app_commands.command(name="guide", description="(MP) Tutoriel complet : configuration, AniList, missions, rappels, mini-jeux.")
+    @app_commands.command(
+        name="guide",
+        description="(MP) Tutoriel : config serveur (/airings, /setchannel, raid), XP, mini-jeux, AniList, rappels.",
+    )
     async def guide(self, interaction: discord.Interaction):
         try:
             # Si lancé depuis un serveur, prévenir en ephemeral puis envoyer en MP
@@ -96,65 +109,81 @@ class Onboarding(commands.Cog):
 
             user = interaction.user
 
-            e1 = discord.Embed(
-                title="⚙️ Mise en route — pas à pas",
+            e_server = discord.Embed(
+                title="⚙️ Serveur — ce que configurent les admins",
                 color=discord.Color.blurple(),
                 description=(
-                    "**1) Salon des annonces**\n"
-                    "→ `/setchannel` dans ce salon\n\n"
-                    "**2) Liste du serveur** (`/next` / `/planning` mode serveur)\n"
-                    "→ `/airings all` pour choisir les titres.\n\n"
-                    "_Les alertes image (sortie d’épisode) viennent du compte du bot + comptes liés, pas de cette liste._"
+                    "**1) Liste des animés suivis — `/airings`**\n"
+                    "Utilise **`all`** (parcourir les sorties AniList) ou ajoute/retire des titres. "
+                    "C’est la **whitelist** pour **`/next`** et **`/planning`** en mode **serveur**.\n"
+                    "**Sans titre dans cette liste**, ces commandes restent vides côté serveur et **aucune annonce** "
+                    "« épisode sorti » ne sera postée.\n\n"
+                    "**2) Salon des annonces — `/setchannel`**\n"
+                    "À lancer **dans le salon** où tu veux les **cartes** quand un épisode sort "
+                    "(uniquement pour les animés de la liste `/airings`).\n\n"
+                    "**3) Raid boss (optionnel) — `/raidconfig`**\n"
+                    "Salon du combat, **jour et heure** (fuseau du bot), lancement auto oui/non. "
+                    "Pour tester sans attendre : **`/raidstart`** (admins). "
+                    "Les joueurs s’inscrivent puis reçoivent un **défi perso** par manche."
                 ),
             )
 
-            eMini = discord.Embed(
-                title="🎮 Mini-jeux — mettez l’ambiance !",
+            e_xp = discord.Embed(
+                title="📈 XP, niveaux et badges",
+                color=discord.Color.orange(),
+                description=(
+                    "• L’**XP** augmente ton **niveau global** et change ton **titre** (voir **`/mycard`**, **`/myrank`**).\n"
+                    "• Tu en gagnes en jouant (**`/animequiz`**, devinettes, **`/duel`**, **raid boss**, etc.), "
+                    "avec **`/checkin`** (quotidien + streak) et **`/mission`** (objectif du jour).\n"
+                    "• **`/mybadges`** — progression par activité · **`/animetop`** / **`/quiztop`** — classements.\n"
+                    "• **`/mystats`** — stats AniList détaillées une fois le compte lié."
+                ),
+            )
+
+            e_mini = discord.Embed(
+                title="🎮 Mini-jeux & communauté",
                 color=discord.Color.purple(),
                 description=(
-                    "• **/animequiz** — Quiz solo (rapide, fun)\n"
-                    "• **/duel** — 1v1 quiz entre amis\n"
-                    "• **/guessop** — Devine l’**opening** 🎧 (vocal)\n"
-                    "• **/minijeux** — Menu : un clic = une partie\n"
-                    "• Plus: **`/minijeux`** (Guess + autres), **`/higherlower`**\n\n"
-                    "Astuce: lancez ces jeux dans un salon dédié pour éviter de flood."
+                    "• **/animequiz** · **/duel** · **/guessop** · **/minijeux** (menus devinettes / autres)\n"
+                    "• **/higherlower** · **/guesswho** · **/chainquiz**\n"
+                    "• **Raid boss** — événement serveur si **`/raidconfig`** est réglé (inscription + manches).\n\n"
+                    "_Astuce : un salon dédié aux mini-jeux évite de noyer le général._"
                 ),
             )
 
-            e2 = discord.Embed(
-                title="🔗 Compte AniList (recommandé)",
+            e_anilist = discord.Embed(
+                title="🔗 Compte AniList",
                 color=discord.Color.green(),
                 description=(
-                    "**Lier votre compte** : `/linkanilist <pseudo>`\n"
-                    "• Vos stats : `/mystats`\n"
-                    "• Prochain épisode perso : `/monnext`\n"
-                    "• Planning perso : `/monplanning`\n\n"
-                    "💡 Si un utilisateur **non lié** utilise une commande perso, le bot lui suggèrera de lier son compte."
+                    "**Lier :** `/linkanilist <pseudo>` puis coller le **code** dans la bio AniList et **`/verifyanilist`**.\n"
+                    "**Perso :** `/mystats` · `/monnext` · `/monplanning`\n\n"
+                    "Les commandes **serveur** (`/next`, `/planning` mode serveur, annonces) utilisent **`/airings`**, "
+                    "pas ton compte. Les commandes **perso** demandent un lien."
                 ),
             )
 
-            e3 = discord.Embed(
-                title="🛎️ Rappels & récap quotidiens",
+            e_reminders = discord.Embed(
+                title="🛎️ Rappels (MP)",
                 color=discord.Color.gold(),
                 description=(
-                    "• `/reminder on|off` et `/setalert HH:MM` — récap **personnel** en MP (AniList lié ou global).\n\n"
-                    "➡️ **`/next` / `/planning` (serveur)** = **liste du serveur** (`/airings`).\n"
-                    "➡️ **`/monnext` / `/monplanning`** = **votre** AniList lié."
+                    "• `/reminder on|off` et `/setalert HH:MM` — récap **personnel** en MP.\n"
+                    "• Indépendant des annonces du serveur (`/setchannel`).\n\n"
+                    "**`/next` / `/planning`** — mode **serveur** = liste **`/airings`** · mode **global** = sorties générales.\n"
+                    "**`/monnext` / `/monplanning`** — **ton** planning AniList (compte lié)."
                 ),
             )
 
-            e4 = discord.Embed(
-                title="🎯 Missions & divers",
+            e_misc = discord.Embed(
+                title="🎯 Infos utiles",
                 color=discord.Color.teal(),
                 description=(
-                    "• Mission du jour : `/mission`\n"
-                    "• Check quotidien : `/checkin` (XP + streak)\n\n"
-                    "• Stats d’un membre : `/stats @membre`\n"
-                    "• Infos bot : `/botinfo` — Ping : `/ping`"
+                    "• **`/stats @membre`** — carte AniList d’un membre (si lié)\n"
+                    "• **`/botinfo`** · **`/ping`** — version du bot, latence\n"
+                    "• **`/help`** — liste des commandes ; **`/help <nom>`** — détail"
                 ),
             )
 
-            e5 = discord.Embed(
+            e_support = discord.Embed(
                 title="🆘 Support",
                 color=discord.Color.dark_teal(),
                 description=(
@@ -163,8 +192,7 @@ class Onboarding(commands.Cog):
                 ),
             )
 
-            # Un seul message DM avec plusieurs embeds = une seule notif
-            await user.send(embeds=[e1, eMini, e2, e3, e4, e5])
+            await user.send(embeds=[e_server, e_xp, e_mini, e_anilist, e_reminders, e_misc, e_support])
 
             if not interaction.guild:
                 await interaction.followup.send("✅ Guide envoyé ci-dessus.", ephemeral=False)

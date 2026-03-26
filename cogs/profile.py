@@ -101,6 +101,19 @@ def _animetop_medal(rank: int) -> str:
     return {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"`#{rank}`")
 
 
+def _animetop_select_placeholder(mode: str) -> str:
+    """Indique clairement la vue active (max 150 car. pour le Select Discord)."""
+    s = f"Vue : {_animetop_mode_label(mode)}"
+    return s if len(s) <= 150 else s[:147] + "…"
+
+
+def _animetop_short_blurb(mode: str) -> str:
+    m = _animetop_valid_mode(mode)
+    if m == "all":
+        return "Somme des compteurs de **tous** les mini-jeux."
+    return f"Compteur **{_animetop_mode_label(m)}** dans les stats du bot."
+
+
 # ---------- HELPERS BADGES ----------
 def _get_user_counts(user_id: int) -> dict:
     """
@@ -864,52 +877,44 @@ class Profile(commands.Cog):
         n = 15
         if m == "all":
             rows = core.mini_game_activity_leaderboard(n=n)
-            subtitle = "Somme des compteurs de **tous** les mini-jeux enregistrés."
         else:
             rows = core.mini_game_leaderboard(m, n=n)
-            subtitle = f"Points comptés pour **{_animetop_mode_label(m)}** dans les stats du bot."
 
         color = _animetop_embed_color(m)
-        title = "🏆 Classement mini-jeux"
+        label = _animetop_mode_label(m)
 
         if not rows:
             emb = discord.Embed(
-                title=title,
+                title=f"🏆 {label}",
                 description=(
-                    f"**{_animetop_mode_label(m)}**\n\n"
-                    "Aucune entrée pour ce mode pour l’instant.\n"
-                    "Choisis un autre classement dans le **menu déroulant**."
+                    "Aucune entrée pour ce classement.\n"
+                    "Choisis un autre mode dans le **menu** ci-dessous."
                 ),
                 color=color,
             )
-            emb.set_footer(
-                text="data/mini_scores.json · noms : membre du serveur ou profil Discord"
-            )
+            emb.set_footer(text="mini_scores.json · noms : serveur ou profil Discord")
             return emb
 
         names = await _animetop_names_map(bot, guild, (u for u, _ in rows))
-        podium_lines = [
-            f"{_animetop_medal(i)} **{_animetop_trunc_display(names.get(uid, str(uid)))}** · `{_fmt_number(int(sc))}`"
-            for i, (uid, sc) in enumerate(rows[:3], start=1)
-        ]
-        fields: list[tuple[str, str, bool]] = [("Podium", "\n".join(podium_lines), False)]
-        if len(rows) > 3:
-            lines_tb = [
-                f"{i:>2}. {_animetop_trunc_display(names.get(uid, str(uid)), 18):<18} │ {_fmt_number(int(sc)):>8}"
-                for i, (uid, sc) in enumerate(rows[3:], start=4)
-            ]
-            fields.append(("Suite du classement", "```\n" + "\n".join(lines_tb) + "\n```", False))
+        lines = []
+        for i, (uid, sc) in enumerate(rows, start=1):
+            nm = _animetop_trunc_display(names.get(uid, str(uid)), 22)
+            if i <= 3:
+                prefix = f"{_animetop_medal(i)} **{nm}**"
+            else:
+                prefix = f"`{i:>2}.` **{nm}**"
+            lines.append(f"{prefix} — {_fmt_number(int(sc))}")
+        block = "\n".join(lines)
+        if len(block) > 1024:
+            block = block[:1021] + "…"
 
         emb = discord.Embed(
-            title=title,
-            description=f"▸ **{_animetop_mode_label(m)}**\n{subtitle}",
+            title=f"🏆 {label}",
+            description=_animetop_short_blurb(m),
             color=color,
         )
-        for name, val, inl in fields:
-            emb.add_field(name=name, value=val, inline=inl)
-        emb.set_footer(
-            text="Basé sur data/mini_scores.json · les défaites ne sont pas toujours comptées selon le jeu."
-        )
+        emb.add_field(name="Classement", value=block, inline=False)
+        emb.set_footer(text="mini_scores.json · défaites pas toujours comptées selon le jeu")
         return emb
 
     async def _animetop_overview_embed(
@@ -920,7 +925,7 @@ class Profile(commands.Cog):
         rows = core.mini_game_activity_leaderboard(n=8)
         if not rows:
             return discord.Embed(
-                title="🏆 Aperçu mini-jeux",
+                title="🧩 Aperçu multi-jeux",
                 description="Pas encore de scores.",
                 color=_EMBED_MINIS,
             )
@@ -939,42 +944,41 @@ class Profile(commands.Cog):
         emb = discord.Embed(
             title="🧩 Aperçu multi-jeux",
             description=(
-                "**Total** (top 8) puis **top 3** par mini-jeu — "
-                "les blocs par jeu n’apparaissent que s’il y a au moins un score."
+                "Vue **résumé** : le menu indique **« Vue : Aperçu multi-jeux »**. "
+                "Pour un classement détaillé par jeu, choisis un mini-jeu dans la liste."
             ),
             color=color,
         )
 
         tot_rows = sections[0][1]
-        top3_tot = [
-            f"{_animetop_medal(i)} **{_animetop_trunc_display(names.get(uid, str(uid)))}** · `{_fmt_number(int(sc))}`"
-            for i, (uid, sc) in enumerate(tot_rows[:3], start=1)
+        total_lines = [
+            f"{_animetop_medal(i)} **{_animetop_trunc_display(names.get(uid, str(uid)))}** — {_fmt_number(int(sc))}"
+            for i, (uid, sc) in enumerate(tot_rows, start=1)
         ]
-        rest_tot = ""
-        if len(tot_rows) > 3:
-            lines_tb = [
-                f"{i:>2}. {_animetop_trunc_display(names.get(uid, str(uid)), 16):<16} │ {_fmt_number(int(sc)):>8}"
-                for i, (uid, sc) in enumerate(tot_rows[3:], start=4)
-            ]
-            rest_tot = "```\n" + "\n".join(lines_tb) + "\n```"
-        val_total = "\n".join(top3_tot) + (f"\n{rest_tot}" if rest_tot else "")
+        val_total = "\n".join(total_lines)
         if len(val_total) > 1024:
             val_total = val_total[:1021] + "…"
         emb.add_field(name="📊 Total (tous jeux)", value=val_total or "—", inline=False)
 
+        per_game_chunks: list[str] = []
         for gk, sub in sections[1:]:
             glabel = label_by_key.get(gk, gk)
             slines = [
-                f"{_animetop_medal(i)} **{_animetop_trunc_display(names.get(uid, str(uid)))}** · `{_fmt_number(int(sc))}`"
+                f"{_animetop_medal(i)} **{_animetop_trunc_display(names.get(uid, str(uid)))}** — {_fmt_number(int(sc))}"
                 for i, (uid, sc) in enumerate(sub, start=1)
             ]
-            block = "\n".join(slines)
-            if len(block) > 1024:
-                block = block[:1021] + "…"
-            fld = f"🎮 {glabel}"[:256]
-            emb.add_field(name=fld, value=block or "—", inline=True)
+            per_game_chunks.append(f"**{glabel}**\n" + "\n".join(slines))
+        per_game_block = "\n\n".join(per_game_chunks)
+        if len(per_game_block) > 1024:
+            per_game_block = per_game_block[:1021] + "…"
+        if per_game_block:
+            emb.add_field(
+                name="Par mini-jeu (top 3 si activité)",
+                value=per_game_block,
+                inline=False,
+            )
 
-        emb.set_footer(text="Données : data/mini_scores.json")
+        emb.set_footer(text="mini_scores.json · défaites pas toujours comptées selon le jeu")
         return emb
 
     @commands.hybrid_command(name="mybadges", description="Liste tes badges et ta progression")
@@ -988,7 +992,15 @@ class Profile(commands.Cog):
 
 
 class AnimetopCategorySelect(discord.ui.Select):
-    def __init__(self, cog: Profile, author_id: int, guild: Optional[discord.Guild], initial: str):
+    def __init__(
+        self,
+        cog: Profile,
+        author_id: int,
+        guild: Optional[discord.Guild],
+        initial: str,
+        *,
+        placeholder: str,
+    ):
         self.cog = cog
         self.author_id = author_id
         self.guild = guild
@@ -1020,7 +1032,7 @@ class AnimetopCategorySelect(discord.ui.Select):
                 )
             )
         super().__init__(
-            placeholder="Choisir un classement…",
+            placeholder=placeholder[:150],
             min_values=1,
             max_values=1,
             options=opts,
@@ -1035,13 +1047,24 @@ class AnimetopCategorySelect(discord.ui.Select):
             return
         mode = self.values[0]
         emb = await self.cog._animetop_make_embed(interaction.client, self.guild, mode)
-        await interaction.response.edit_message(embed=emb, view=self.view)
+        new_view = AnimetopLeaderboardView(self.cog, self.author_id, self.guild, mode)
+        await interaction.response.edit_message(embed=emb, view=new_view)
+        new_view._message = interaction.message
 
 
 class AnimetopLeaderboardView(discord.ui.View):
     def __init__(self, cog: Profile, author_id: int, guild: Optional[discord.Guild], initial: str):
         super().__init__(timeout=300.0)
-        self.add_item(AnimetopCategorySelect(cog, author_id, guild, initial))
+        ph = _animetop_select_placeholder(initial)
+        self.add_item(
+            AnimetopCategorySelect(
+                cog,
+                author_id,
+                guild,
+                initial,
+                placeholder=ph,
+            )
+        )
         self._message: Optional[discord.Message] = None
 
     async def on_timeout(self) -> None:
