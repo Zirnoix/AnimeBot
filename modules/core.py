@@ -2566,58 +2566,70 @@ def clear_guild_levelup_channel(guild_id: int) -> None:
     save_config(cfg)
 
 
-def format_guild_channels_config_summary(bot: discord.Client) -> str:
+def format_guild_channels_config_summary(bot: discord.Client, guild_id: int) -> str:
     """
-    Résumé lisible des salons configurés (alertes épisodes, montées de niveau, raid boss, legacy).
-    Utilisé par /admin show_channel.
+    Résumé lisible pour **une seule guilde** (alertes épisodes, montées de niveau, raid boss, legacy local).
+
+    N’expose pas les salons des autres serveurs. Le champ legacy global n’est affiché que si le salon
+    résolu appartient à cette guilde (sinon ignoré, pour éviter fuite d’info).
     """
     cfg = get_config()
     lines: list[str] = []
+    gid_str = str(int(guild_id))
+
     ga = cfg.get("guild_alert_channels") or {}
-    for gid_str, cid in sorted(ga.items(), key=lambda x: int(x[0])):
+    if gid_str in ga:
+        cid = ga[gid_str]
         try:
             ch = bot.get_channel(int(cid))
             mention = getattr(ch, "mention", None) or f"`{cid}`"
         except Exception:
             mention = f"`{cid}`"
-        lines.append(f"• **Alertes épisodes** — guilde `{gid_str}` → {mention}")
+        lines.append(f"• **Alertes épisodes** → {mention}")
+
     gl = cfg.get("guild_levelup_channels") or {}
-    for gid_str, cid in sorted(gl.items(), key=lambda x: int(x[0])):
+    if gid_str in gl:
+        cid = gl[gid_str]
         try:
             ch = bot.get_channel(int(cid))
             mention = getattr(ch, "mention", None) or f"`{cid}`"
         except Exception:
             mention = f"`{cid}`"
-        lines.append(f"• **Titres XP / quiz** — guilde `{gid_str}` → {mention}")
+        lines.append(f"• **Titres XP / quiz** → {mention}")
+
     raid_cfg = load_json(FileConfig.BOSS_RAID, {})
-    for gid_str, entry in sorted(raid_cfg.items(), key=lambda x: int(x[0]) if str(x[0]).isdigit() else 0):
-        if not isinstance(entry, dict):
-            continue
+    entry = raid_cfg.get(gid_str)
+    if isinstance(entry, dict):
         cid = entry.get("channel_id")
-        if not cid:
-            continue
-        try:
-            ch = bot.get_channel(int(cid))
-            mention = getattr(ch, "mention", None) or f"`{cid}`"
-        except Exception:
-            mention = f"`{cid}`"
-        auto = "oui" if entry.get("enabled") else "non"
-        lines.append(
-            f"• **Raid boss** — guilde `{gid_str}` → {mention} _(lancement auto hebdo : **{auto}**)_"
-        )
+        if cid:
+            try:
+                ch = bot.get_channel(int(cid))
+                mention = getattr(ch, "mention", None) or f"`{cid}`"
+            except Exception:
+                mention = f"`{cid}`"
+            auto = "oui" if entry.get("enabled") else "non"
+            lines.append(
+                f"• **Raid boss** → {mention} _(lancement auto hebdo : **{auto}**)_"
+            )
+
     leg = cfg.get("channel_id")
     if leg:
         try:
             ch = bot.get_channel(int(leg))
-            mention = getattr(ch, "mention", None) or f"`{leg}`"
+            if isinstance(ch, discord.TextChannel) and ch.guild and ch.guild.id == int(guild_id):
+                mention = getattr(ch, "mention", None) or f"`{leg}`"
+                lines.append(
+                    f"• _(legacy)_ **channel_id** global → {mention} "
+                    f"_(ancien réglage ; les alertes utilisent **Alertes épisodes** ci-dessus quand c’est défini)_"
+                )
         except Exception:
-            mention = f"`{leg}`"
-        lines.append(
-            f"• _(legacy)_ **channel_id** global → {mention} "
-            f"_(ancien réglage unique ; les cartes par guilde utilisent plutôt **Alertes épisodes** ci-dessus)_"
-        )
+            pass
+
     if not lines:
-        return "Aucun salon configuré (`/setchannel`, `/setlevelupchannel`, `/raidconfig canal`)."
+        return (
+            "Aucun salon configuré pour **ce serveur** "
+            "(`/setchannel`, `/setlevelupchannel`, `/raidconfig canal`)."
+        )
     return "\n".join(lines)
 
 

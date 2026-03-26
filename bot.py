@@ -520,15 +520,21 @@ class AnimeBot(commands.Bot):
 
         @self.admin_group.command(
             name="show_channel",
-            description="(Owner) Liste les salons configurés (alertes épisodes, titres XP, legacy).",
+            description="(Owner) Salons configurés sur ce serveur (alertes, level-up, raid, legacy local).",
         )
         @app_commands.check(_owner_only)
         async def admin_show_channel(itx: discord.Interaction):
+            if not itx.guild:
+                await itx.response.send_message(
+                    "❌ Utilise cette commande **sur un serveur** (pas en message privé).",
+                    ephemeral=True,
+                )
+                return
             await itx.response.defer(ephemeral=True)
             try:
-                summary = core.format_guild_channels_config_summary(itx.client)
+                summary = core.format_guild_channels_config_summary(itx.client, itx.guild.id)
                 await itx.followup.send(
-                    "**Salons de notification (config)**\n" + summary,
+                    "**Salons de notification (ce serveur)**\n" + summary,
                     ephemeral=True,
                 )
             except Exception:
