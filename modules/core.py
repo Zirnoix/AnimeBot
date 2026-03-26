@@ -110,6 +110,7 @@ class FileConfig:
     GUESSCHAR_SCORES = os.path.join(DATA_DIR, "guesschar_scores.json")
     GUESS_GENRE_SANCTIONS = os.path.join(DATA_DIR, "guess_genre_sanctions.json")
     OWNER_TELEMETRY = os.path.join(DATA_DIR, "owner_telemetry.json")
+    BOSS_RAID = os.path.join(DATA_DIR, "boss_raid.json")
 
 _AIRING_SORT_FIX = {
     "AIRING_AT": "TIME",
@@ -2567,7 +2568,7 @@ def clear_guild_levelup_channel(guild_id: int) -> None:
 
 def format_guild_channels_config_summary(bot: discord.Client) -> str:
     """
-    Résumé lisible des salons configurés (alertes épisodes, montées de niveau, legacy).
+    Résumé lisible des salons configurés (alertes épisodes, montées de niveau, raid boss, legacy).
     Utilisé par /admin show_channel.
     """
     cfg = get_config()
@@ -2588,6 +2589,22 @@ def format_guild_channels_config_summary(bot: discord.Client) -> str:
         except Exception:
             mention = f"`{cid}`"
         lines.append(f"• **Titres XP / quiz** — guilde `{gid_str}` → {mention}")
+    raid_cfg = load_json(FileConfig.BOSS_RAID, {})
+    for gid_str, entry in sorted(raid_cfg.items(), key=lambda x: int(x[0]) if str(x[0]).isdigit() else 0):
+        if not isinstance(entry, dict):
+            continue
+        cid = entry.get("channel_id")
+        if not cid:
+            continue
+        try:
+            ch = bot.get_channel(int(cid))
+            mention = getattr(ch, "mention", None) or f"`{cid}`"
+        except Exception:
+            mention = f"`{cid}`"
+        auto = "oui" if entry.get("enabled") else "non"
+        lines.append(
+            f"• **Raid boss** — guilde `{gid_str}` → {mention} _(lancement auto hebdo : **{auto}**)_"
+        )
     leg = cfg.get("channel_id")
     if leg:
         try:
@@ -2595,9 +2612,12 @@ def format_guild_channels_config_summary(bot: discord.Client) -> str:
             mention = getattr(ch, "mention", None) or f"`{leg}`"
         except Exception:
             mention = f"`{leg}`"
-        lines.append(f"• _(legacy)_ **channel_id** global → {mention}")
+        lines.append(
+            f"• _(legacy)_ **channel_id** global → {mention} "
+            f"_(ancien réglage unique ; les cartes par guilde utilisent plutôt **Alertes épisodes** ci-dessus)_"
+        )
     if not lines:
-        return "Aucun salon configuré (`/setchannel`, `/setlevelupchannel`)."
+        return "Aucun salon configuré (`/setchannel`, `/setlevelupchannel`, `/raidconfig canal`)."
     return "\n".join(lines)
 
 
