@@ -123,7 +123,14 @@ def build_anilist_stats_embed(
         except Exception:
             pass
 
-    e.set_footer(text=f"Demandé par {ctx.author.display_name}")
+    footer_parts = [f"Demandé par {ctx.author.display_name}"]
+    viewer_al = core.get_linked_username(ctx.author.id)
+    tgt = (target or "").strip().lower()
+    if viewer_al and viewer_al.lower() == tgt:
+        footer_parts.append("Profil = ton compte AniList lié (/linkanilist)")
+    elif not viewer_al:
+        footer_parts.append("/linkanilist pour /mystats sans pseudo, récaps MP, /monnext…")
+    e.set_footer(text=" · ".join(footer_parts)[:2048])
     return e
 
 

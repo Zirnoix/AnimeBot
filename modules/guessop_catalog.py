@@ -108,6 +108,36 @@ def pick_random() -> Optional[Tuple[int, str, str, str]]:
         )
 
 
+def pick_random_title_in_set(titles_romaji_lower: set[str]) -> Optional[Tuple[int, str, str, str]]:
+    """
+    Une opening au hasard dont lower(title) figure dans le set (ex. titres romaji AniList liés).
+    Correspondance exacte sur lower(title) — le catalogue peut ne pas matcher tous les titres.
+    """
+    if not titles_romaji_lower:
+        return None
+    titles = tuple(titles_romaji_lower)
+    ph = ",".join("?" * len(titles))
+    with _connect() as c:
+        row = c.execute(
+            f"""
+            SELECT id, title, theme_label, video_url
+            FROM openings
+            WHERE lower(title) IN ({ph})
+            ORDER BY RANDOM()
+            LIMIT 1
+            """,
+            titles,
+        ).fetchone()
+        if not row:
+            return None
+        return (
+            int(row["id"]),
+            str(row["title"]),
+            str(row["theme_label"] or "OP"),
+            str(row["video_url"]),
+        )
+
+
 def record_used(opening_id: int) -> None:
     if opening_id <= 0:
         return

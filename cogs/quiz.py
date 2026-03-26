@@ -34,6 +34,19 @@ from modules.core import normalize
 
 logger = logging.getLogger(__name__)
 
+
+def _embed_footer_anilist_hint(ctx: commands.Context, genres: Optional[List[str]] = None) -> str:
+    """Pied d’embed quiz : genres + rappel compte AniList lié ou /linkanilist."""
+    parts: List[str] = []
+    if genres:
+        parts.append(f"Genres : {', '.join(genres)}")
+    alu = core.get_linked_username(ctx.author.id)
+    if alu:
+        parts.append(f"AniList lié : {alu}")
+    else:
+        parts.append("/linkanilist pour lier ton profil")
+    return " · ".join(parts)[:2048]
+
 # --- petit utilitaire pour éviter "This interaction failed" côté slash ---
 async def _maybe_defer(ctx: commands.Context, ephemeral: bool = False) -> None:
     try:
@@ -394,8 +407,7 @@ class Quiz(commands.Cog):
             if image_url:
                 embed.set_image(url=image_url)
             genres = anime.get("genres") or []
-            if genres:
-                embed.set_footer(text=f"Genres : {', '.join(genres)}")
+            embed.set_footer(text=_embed_footer_anilist_hint(ctx, genres if genres else None))
             await ctx.send(embed=embed)
 
             try:
@@ -491,8 +503,9 @@ class Quiz(commands.Cog):
                     )
                     if image:
                         embed.set_image(url=image)
-                    if anime.get("genres"):
-                        embed.set_footer(text=f"Genres : {', '.join(anime['genres'])}")
+                    embed.set_footer(
+                        text=_embed_footer_anilist_hint(ctx, list(anime.get("genres") or []))
+                    )
                     await ctx.send(embed=embed)
 
                     try:
@@ -678,8 +691,7 @@ class Quiz(commands.Cog):
                 )
                 if image:
                     embed.set_image(url=image)
-                if genres:
-                    embed.set_footer(text=f"Genres : {', '.join(genres)}")
+                embed.set_footer(text=_embed_footer_anilist_hint(ctx, genres if genres else None))
                 await ctx.send(embed=embed)
     
                 winner: Optional[discord.Member] = None
@@ -886,7 +898,13 @@ class Quiz(commands.Cog):
             tz = getattr(core, "TIMEZONE", timezone.utc)
             nxt = _next_reset_dt(tz)
             left = _human_td(nxt - datetime.now(tz))
-            em.set_footer(text=f"⏳ Prochain reset : {nxt:%d/%m %H:%M} • dans {left}")
+            ft = f"⏳ Prochain reset : {nxt:%d/%m %H:%M} • dans {left}"
+            alu = core.get_linked_username(ctx.author.id)
+            if alu:
+                ft += f" · AniList : {alu}"
+            else:
+                ft += " · /linkanilist"
+            em.set_footer(text=ft[:2048])
 
             await ctx.send(embed=em)
 
@@ -982,6 +1000,20 @@ class Quiz(commands.Cog):
                         ),
                         inline=False
                     )
+
+            alu = core.get_linked_username(ctx.author.id)
+            if alu:
+                embed.add_field(
+                    name="🔗 AniList",
+                    value=f"Compte lié : **`{alu}`** — `/mystats` sans pseudo, `/duelstats`, récaps…",
+                    inline=False,
+                )
+            else:
+                embed.add_field(
+                    name="🔗 AniList",
+                    value="Non lié — **`/linkanilist`** pour lier ton profil (stats, duel de stats, MP…).",
+                    inline=False,
+                )
 
             await ctx.send(embed=embed)
 

@@ -461,6 +461,19 @@ def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days):
     if next_pal:
         streak_line += f" • Prochain palier : **{streak_days}/{next_pal}**"
     e.add_field(name="🔥 Streak", value=streak_line, inline=False)
+    al_name = core.get_linked_username(ctx.author.id)
+    if al_name:
+        e.add_field(
+            name="🔗 AniList",
+            value=f"Compte lié : **`{al_name}`**",
+            inline=False,
+        )
+    else:
+        e.add_field(
+            name="🔗 AniList",
+            value="Non lié — **`/linkanilist`** pour stats perso, récaps MP, `/mystats` sans pseudo, etc.",
+            inline=False,
+        )
     gg_pen = core.get_guess_genre_penalty_count(ctx.author.id)
     e.add_field(
         name="⚠️ Sanctions Guess genre",

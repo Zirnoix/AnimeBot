@@ -38,6 +38,14 @@ def main() -> int:
     except Exception as e:
         errors.append(f"modules.image: {e!r}")
 
+    # 2b) higher/lower image helper (import seulement)
+    try:
+        from modules import higherlower_combine
+
+        assert callable(higherlower_combine.make_higherlower_combined_file)
+    except Exception as e:
+        errors.append(f"modules.higherlower_combine: {e!r}")
+
     # 3) quiz helper
     try:
         from cogs import quiz as quiz_cog

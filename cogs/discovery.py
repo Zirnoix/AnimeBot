@@ -175,7 +175,8 @@ class Discovery(commands.Cog):
         footer = "Source : AniList"
         if desc_fr:
             footer += " • Trad auto"
-        embed.set_footer(text=footer)
+        footer += " · /linkanilist → /monnext, /mystats, récaps MP"
+        embed.set_footer(text=footer[:2048])
         return embed, title
 
     # ----------------- command -----------------

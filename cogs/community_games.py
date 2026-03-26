@@ -25,6 +25,7 @@ from discord.ext import commands, tasks
 from discord.ui import Button, Select, View
 from PIL import Image, ImageFilter
 
+from modules import abuse
 from modules import core
 from modules import higherlower_combine
 from modules import minigame_lock
@@ -479,6 +480,14 @@ class RaidRoundHubView(View):
         if uid in self.state.open_challenge_users:
             await interaction.response.send_message(
                 "Tu as déjà un défi en cours — regarde tes messages **éphémères** au-dessus.",
+                ephemeral=True,
+            )
+            return
+
+        ok_burst, retry_c = abuse.allow_component_burst(uid, f"raid_hub:{self.state.guild_id}")
+        if not ok_burst:
+            await interaction.response.send_message(
+                f"⏳ Trop de clics — réessaie dans **{max(1, int(retry_c) + 1)}s**.",
                 ephemeral=True,
             )
             return
@@ -1991,7 +2000,7 @@ class CommunityGames(commands.Cog):
 
     @commands.hybrid_command(
         name="guesswho",
-        description="Devine le personnage sur une image floutée — difficulté = flou + récompense XP.",
+        description="Devine le personnage sur une image floutée (AniList lié → perso depuis ta liste).",
     )
     @app_commands.describe(
         difficulte="Facile = un peu plus net (+18 XP). Normal (+28). Difficile = très flou (+42).",
@@ -2017,31 +2026,39 @@ class CommunityGames(commands.Cog):
             div, blur_r, timeout_sec, xp_win = GUESSWHO_MODES.get(difficulte, GUESSWHO_MODES["medium"])
             diff_label = {"easy": "Facile", "medium": "Normal", "hard": "Difficile"}.get(difficulte, "Normal")
 
-            page = random.randint(1, 100)
-            query = """
-            query ($page: Int) {
-              Page(page: $page, perPage: 1) {
-                characters(sort: FAVOURITES_DESC) {
-                  name { full }
-                  image { large }
-                  media(type: ANIME) { nodes { title { romaji } } }
+            linked = core.get_linked_username(uid)
+            gw = core.build_guesswho_from_user_list(linked) if linked else None
+
+            if gw:
+                name = gw["name"]
+                url = gw["image_url"]
+                hint = gw["hint_anime"]
+            else:
+                page = random.randint(1, 100)
+                query = """
+                query ($page: Int) {
+                  Page(page: $page, perPage: 1) {
+                    characters(sort: FAVOURITES_DESC) {
+                      name { full }
+                      image { large }
+                      media(type: ANIME) { nodes { title { romaji } } }
+                    }
+                  }
                 }
-              }
-            }
-            """
-            data = core.query_anilist(query, {"page": page})
-            if not data or "data" not in data:
-                await ctx.send(core.anilist_error_user_message())
-                return
-            chars = data["data"]["Page"]["characters"]
-            if not chars:
-                await ctx.send("❌ Pas de personnage.")
-                return
-            char = chars[0]
-            name = char["name"]["full"]
-            url = (char.get("image") or {}).get("large")
-            nodes = (char.get("media") or {}).get("nodes") or []
-            hint = nodes[0]["title"]["romaji"] if nodes else "—"
+                """
+                data = core.query_anilist(query, {"page": page})
+                if not data or "data" not in data:
+                    await ctx.send(core.anilist_error_user_message())
+                    return
+                chars = data["data"]["Page"]["characters"]
+                if not chars:
+                    await ctx.send("❌ Pas de personnage.")
+                    return
+                char = chars[0]
+                name = char["name"]["full"]
+                url = (char.get("image") or {}).get("large")
+                nodes = (char.get("media") or {}).get("nodes") or []
+                hint = nodes[0]["title"]["romaji"] if nodes else "—"
 
             buf = io.BytesIO()
             if url:
@@ -2070,6 +2087,14 @@ class CommunityGames(commands.Cog):
                 ),
                 color=discord.Color.purple(),
             )
+            if gw:
+                embed.set_footer(
+                    text="Personnage tiré depuis ta liste AniList (complété, en cours, relecture, en pause)."
+                )
+            elif linked:
+                embed.set_footer(
+                    text="Liste AniList vide ou indisponible — tirage global (popularité)."
+                )
             if buf:
                 embed.set_image(url="attachment://guesswho.png")
                 file = discord.File(buf, filename="guesswho.png")

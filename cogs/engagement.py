@@ -149,7 +149,10 @@ class Engagement(commands.Cog):
             ),
             color=discord.Color.green(),
         )
-        embed.set_footer(text="Reviens chaque jour pour entretenir ta série !")
+        ft = "Reviens chaque jour pour entretenir ta série !"
+        if not core.get_linked_username(ctx.author.id):
+            ft += " · /linkanilist : stats AniList + récaps MP"
+        embed.set_footer(text=ft[:2048])
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="streak")

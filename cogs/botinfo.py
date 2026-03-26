@@ -7,6 +7,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from modules import core
+
 def _format_uptime(delta_seconds: float) -> str:
     s = int(delta_seconds)
     d, s = divmod(s, 86400)
@@ -35,11 +37,7 @@ class BotInfo(commands.Cog):
         # — Version (ordre de priorité : env > modules.core.__version__ > 'dev')
         version = os.getenv("BOT_VERSION")
         if not version:
-            try:
-                from modules import core  # si tu as modules/core.py
-                version = getattr(core, "__version__", None)
-            except Exception:
-                version = None
+            version = getattr(core, "__version__", None)
         version = version or "dev"
 
         guilds = len(self.bot.guilds)
@@ -75,7 +73,25 @@ class BotInfo(commands.Cog):
             inline=False,
         )
 
-        embed.set_footer(text="/help · liste du serveur = /airings")
+        try:
+            uid = interaction.user.id
+            linked = core.get_linked_username(uid)
+            if linked:
+                embed.add_field(
+                    name="Ton compte AniList",
+                    value=f"Lié : **`{linked}`**",
+                    inline=False,
+                )
+            else:
+                embed.add_field(
+                    name="Ton compte AniList",
+                    value="Non lié — **`/linkanilist`** puis **`/verifyanilist`** pour stats, récaps MP, `/mystats` rapide…",
+                    inline=False,
+                )
+        except Exception:
+            pass
+
+        embed.set_footer(text="/help · liste du serveur = /airings · lien AniList = /linkanilist")
         try:
             if self.bot.user and self.bot.user.display_avatar:
                 embed.set_thumbnail(url=self.bot.user.display_avatar.url)

@@ -439,27 +439,52 @@ class MiniGames(commands.Cog):
                 await ctx.interaction.response.defer(thinking=True)
 
             await ctx.send("🗓️ Chargement d'un anime…")
-            page = random.randint(1, 500)
-            query = '''
-            query ($page: Int) {
-              Page(perPage: 1, page: $page) {
-                media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
-                  title { romaji }
-                  startDate { year }
-                  coverImage { extraLarge }
-                }
-              }
-            }
-            '''
-            data = core.query_anilist(query, {"page": page})
-            try:
-                anime = data["data"]["Page"]["media"][0]
-                title = anime["title"]["romaji"]
-                year = anime.get("startDate", {}).get("year")
-                if not year:
-                    await ctx.send("❌ L'année de cet anime est indisponible.")
-                    return
+            linked = core.get_linked_username(uid)
+            list_source = False
+            user_list_fallback = False
+            anime = None
+            if linked:
+                ml = core.fetch_user_list_media_for_minigames(linked)
+                anime = core.pick_random_media_for_guess_year_from_list(ml)
+                if anime:
+                    list_source = True
+                else:
+                    user_list_fallback = True
 
+            if not anime:
+                for _ in range(5):
+                    page = random.randint(1, 500)
+                    query = '''
+                    query ($page: Int) {
+                      Page(perPage: 1, page: $page) {
+                        media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                          title { romaji }
+                          startDate { year }
+                          coverImage { extraLarge }
+                        }
+                      }
+                    }
+                    '''
+                    data = core.query_anilist(query, {"page": page})
+                    try:
+                        candidate = data["data"]["Page"]["media"][0]
+                        if candidate.get("startDate", {}).get("year"):
+                            anime = candidate
+                            break
+                    except Exception:
+                        continue
+
+            if not anime:
+                await ctx.send(core.anilist_error_user_message())
+                return
+
+            title = anime["title"]["romaji"]
+            year = anime.get("startDate", {}).get("year")
+            if not year:
+                await ctx.send("❌ L'année de cet anime est indisponible.")
+                return
+
+            try:
                 embed = discord.Embed(
                     title="📅 Mini-jeu : Devine l'année !",
                     description=(
@@ -468,6 +493,17 @@ class MiniGames(commands.Cog):
                     ),
                     color=discord.Color.purple(),
                 )
+                base_tip = "Réponse attendue : une année à 4 chiffres."
+                if list_source:
+                    embed.set_footer(
+                        text="Animé tiré depuis ta liste AniList (complété, en cours, relecture, en pause).\n" + base_tip
+                    )
+                elif user_list_fallback and linked:
+                    embed.set_footer(
+                        text="Liste AniList vide ou sans année connue — tirage global.\n" + base_tip
+                    )
+                else:
+                    embed.set_footer(text=base_tip)
                 img_url = anime.get("coverImage", {}).get("extraLarge")
                 if img_url:
                     embed.set_image(url=img_url)
@@ -505,28 +541,40 @@ class MiniGames(commands.Cog):
                 await ctx.interaction.response.defer(thinking=True)
 
             await ctx.send("🎬 Sélection d'un anime…")
+            linked = core.get_linked_username(uid)
+            list_source = False
+            user_list_fallback = False
             anime = None
-            for _ in range(5):
-                page = random.randint(1, 500)
-                query = '''
-                query ($page: Int) {
-                  Page(perPage: 1, page: $page) {
-                    media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
-                      title { romaji }
-                      episodes
-                      coverImage { extraLarge }
+            if linked:
+                ml = core.fetch_user_list_media_for_minigames(linked)
+                anime = core.pick_random_media_for_guess_episodes_from_list(ml)
+                if anime:
+                    list_source = True
+                else:
+                    user_list_fallback = True
+
+            if not anime:
+                for _ in range(5):
+                    page = random.randint(1, 500)
+                    query = '''
+                    query ($page: Int) {
+                      Page(perPage: 1, page: $page) {
+                        media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                          title { romaji }
+                          episodes
+                          coverImage { extraLarge }
+                        }
+                      }
                     }
-                  }
-                }
-                '''
-                data = core.query_anilist(query, {"page": page})
-                try:
-                    candidate = data["data"]["Page"]["media"][0]
-                    if candidate.get("episodes") and isinstance(candidate.get("episodes"), int):
-                        anime = candidate
-                        break
-                except Exception:
-                    continue
+                    '''
+                    data = core.query_anilist(query, {"page": page})
+                    try:
+                        candidate = data["data"]["Page"]["media"][0]
+                        if candidate.get("episodes") and isinstance(candidate.get("episodes"), int):
+                            anime = candidate
+                            break
+                    except Exception:
+                        continue
 
             if not anime:
                 await ctx.send(core.anilist_error_user_message())
@@ -542,6 +590,17 @@ class MiniGames(commands.Cog):
                 ),
                 color=discord.Color.blue(),
             )
+            base_tip = "Tolérance : ±10 % du total (min. 5 épisodes)."
+            if list_source:
+                embed.set_footer(
+                    text="Animé tiré depuis ta liste AniList (complété, en cours, relecture, en pause).\n" + base_tip
+                )
+            elif user_list_fallback and linked:
+                embed.set_footer(
+                    text="Liste AniList vide ou sans nombre d'épisodes fixe — tirage global.\n" + base_tip
+                )
+            else:
+                embed.set_footer(text=base_tip)
             img_url = anime.get("coverImage", {}).get("extraLarge")
             if img_url:
                 embed.set_image(url=img_url)
@@ -590,27 +649,39 @@ class MiniGames(commands.Cog):
 
             await ctx.send("🎭 Sélection d'un anime…")
             anime = None
-            for _ in range(5):
-                page = random.randint(1, 500)
-                query = '''
-                query ($page: Int) {
-                  Page(perPage: 1, page: $page) {
-                    media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
-                      title { romaji }
-                      genres
-                      coverImage { extraLarge }
+            linked = core.get_linked_username(uid)
+            list_source = False
+            user_list_fallback = False
+            if linked:
+                ml = core.fetch_user_list_media_for_minigames(linked)
+                anime = core.pick_random_media_for_guess_genre_from_list(ml)
+                if anime:
+                    list_source = True
+                else:
+                    user_list_fallback = True
+
+            if not anime:
+                for _ in range(5):
+                    page = random.randint(1, 500)
+                    query = '''
+                    query ($page: Int) {
+                      Page(perPage: 1, page: $page) {
+                        media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+                          title { romaji }
+                          genres
+                          coverImage { extraLarge }
+                        }
+                      }
                     }
-                  }
-                }
-                '''
-                data = core.query_anilist(query, {"page": page})
-                try:
-                    candidate = data["data"]["Page"]["media"][0]
-                    if candidate.get("genres"):
-                        anime = candidate
-                        break
-                except Exception:
-                    continue
+                    '''
+                    data = core.query_anilist(query, {"page": page})
+                    try:
+                        candidate = data["data"]["Page"]["media"][0]
+                        if candidate.get("genres"):
+                            anime = candidate
+                            break
+                    except Exception:
+                        continue
 
             if not anime:
                 await ctx.send(core.anilist_error_user_message())
@@ -629,9 +700,22 @@ class MiniGames(commands.Cog):
                 ),
                 color=discord.Color.magenta(),
             )
-            embed.set_footer(
-                text="Astuce : varie — un genre plus rare ou précis évite les avertissements « facile »."
+            base_tip = (
+                "Astuce : varie — un genre plus rare ou précis évite les avertissements « facile »."
             )
+            if list_source:
+                footer_txt = (
+                    "Animé tiré depuis ta liste AniList (complété, en cours, relecture, en pause).\n"
+                    + base_tip
+                )
+            elif user_list_fallback and linked:
+                footer_txt = (
+                    "Liste AniList vide, privée ou sans genres exploitables — tirage global.\n"
+                    + base_tip
+                )
+            else:
+                footer_txt = base_tip
+            embed.set_footer(text=footer_txt)
             img_url = anime.get("coverImage", {}).get("extraLarge")
             if img_url:
                 embed.set_image(url=img_url)
@@ -765,47 +849,65 @@ class MiniGames(commands.Cog):
             if ctx.interaction and not ctx.interaction.response.is_done():
                 await ctx.interaction.response.defer(thinking=True)
 
-            page = random.randint(1, 100)
-            query = '''
-            query ($page: Int) {
-              Page(page: $page, perPage: 4) {
-                characters(sort: FAVOURITES_DESC) {
-                  name { full }
-                  image { large }
-                  media(type: ANIME) {
-                    nodes { title { romaji } }
+            linked = core.get_linked_username(uid)
+            list_choice = core.build_guess_character_from_user_list(linked) if linked else None
+
+            if list_choice:
+                correct_name = list_choice["correct_name"]
+                correct_image = list_choice["image_url"]
+                correct_anime = list_choice["correct_anime"]
+                options = list_choice["options"]
+                correct_index = list_choice["correct_index"]
+            else:
+                page = random.randint(1, 100)
+                query = '''
+                query ($page: Int) {
+                  Page(page: $page, perPage: 4) {
+                    characters(sort: FAVOURITES_DESC) {
+                      name { full }
+                      image { large }
+                      media(type: ANIME) {
+                        nodes { title { romaji } }
+                      }
+                    }
                   }
                 }
-              }
-            }
-            '''
-            data = core.query_anilist(query, {"page": page})
-            if not data or "data" not in data:
-                await ctx.send(core.anilist_error_user_message())
-                return
+                '''
+                data = core.query_anilist(query, {"page": page})
+                if not data or "data" not in data:
+                    await ctx.send(core.anilist_error_user_message())
+                    return
 
-            characters = data["data"]["Page"]["characters"]
-            if len(characters) < 4:
-                await ctx.send("❌ Pas assez de personnages trouvés.")
-                return
+                characters = data["data"]["Page"]["characters"]
+                if len(characters) < 4:
+                    await ctx.send("❌ Pas assez de personnages trouvés.")
+                    return
 
-            correct = random.choice(characters)
-            correct_name = correct["name"]["full"]
-            correct_image = correct["image"]["large"]
-            nodes = (correct.get("media", {}) or {}).get("nodes", [])
-            correct_anime = (nodes[0]["title"]["romaji"] if nodes else "—")
+                correct = random.choice(characters)
+                correct_name = correct["name"]["full"]
+                correct_image = correct["image"]["large"]
+                nodes = (correct.get("media", {}) or {}).get("nodes", [])
+                correct_anime = (nodes[0]["title"]["romaji"] if nodes else "—")
 
-            options = [c["name"]["full"] for c in characters]
-            try:
-                correct_index = options.index(correct_name)
-            except ValueError:
-                correct_index = random.randrange(len(options))
+                options = [c["name"]["full"] for c in characters]
+                try:
+                    correct_index = options.index(correct_name)
+                except ValueError:
+                    correct_index = random.randrange(len(options))
 
             embed = discord.Embed(
                 title="👤 Devine le personnage !",
                 description="Clique sur le bouton correspondant au bon nom.",
                 color=discord.Color.blurple()
             )
+            if list_choice:
+                embed.set_footer(
+                    text="Quatre animés différents tirés depuis ta liste AniList ; une image = le bon perso."
+                )
+            elif linked:
+                embed.set_footer(
+                    text="Liste AniList vide ou indisponible — tirage global (popularité)."
+                )
             embed.set_image(url=correct_image)
 
             class GCView(View):
@@ -885,28 +987,28 @@ class MiniGames(commands.Cog):
 
     @commands.hybrid_command(
         name="guessyear",
-        description="Devine l’année de diffusion d’un anime (image + réponse dans le salon).",
+        description="Devine l’année de diffusion (AniList lié → tirage depuis ta liste).",
     )
     async def guessyear(self, ctx: commands.Context) -> None:
         await self._guess_year(ctx)
 
     @commands.hybrid_command(
         name="guessepisodes",
-        description="Devine le nombre d’épisodes d’un anime (image + réponse dans le salon).",
+        description="Devine le nombre d’épisodes (AniList lié → depuis ta liste si possible).",
     )
     async def guessepisodes(self, ctx: commands.Context) -> None:
         await self._guess_episodes(ctx)
 
     @commands.hybrid_command(
         name="guessgenre",
-        description="Trouve un des genres de l’anime (image + réponse texte dans le salon).",
+        description="Trouve un des genres de l’anime (compte AniList lié → tirage depuis ta liste).",
     )
     async def guessgenre(self, ctx: commands.Context) -> None:
         await self._guess_genre(ctx)
 
     @commands.hybrid_command(
         name="guesscharacter",
-        description="Choisis le bon personnage parmi 4 propositions (boutons).",
+        description="Choisis le bon personnage parmi 4 propositions (lié AniList → depuis ta liste).",
     )
     async def guesscharacter(self, ctx: commands.Context) -> None:
         await self._guess_character(ctx)

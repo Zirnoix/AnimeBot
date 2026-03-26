@@ -649,6 +649,70 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     LOG.error("Erreur slash: %s", error, exc_info=error)
     await _slash_error_respond(interaction, "❌ Oups, erreur inattendue.")
 
+
+# ========= Erreurs commandes préfixe (!) =========
+@bot.event
+async def on_command_error(ctx: commands.Context, error: Exception) -> None:
+    """Réponses claires pour `!commande` — slash / hybrid (interaction) restent gérés par `@bot.tree.error`."""
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if getattr(ctx, "interaction", None) is not None:
+        return
+
+    if isinstance(error, commands.CommandInvokeError) and error.original is not None:
+        error = error.original
+
+    if isinstance(error, commands.CommandOnCooldown):
+        ra = getattr(error, "retry_after", None)
+        sec = int(ra) + 1 if ra is not None else 5
+        try:
+            await ctx.send(f"⏳ Cooldown : réessaie dans **{sec}s**.")
+        except Exception:
+            pass
+        return
+
+    if isinstance(error, commands.MissingPermissions):
+        try:
+            await ctx.send("❌ Permissions insuffisantes sur ce serveur pour cette commande.")
+        except Exception:
+            pass
+        return
+
+    if isinstance(error, commands.BotMissingPermissions):
+        try:
+            await ctx.send("❌ Il manque des permissions au bot sur ce salon (rôle du bot / ordre des rôles).")
+        except Exception:
+            pass
+        return
+
+    if isinstance(error, commands.CheckFailure):
+        try:
+            await ctx.send("❌ Tu ne peux pas utiliser cette commande ici.")
+        except Exception:
+            pass
+        return
+
+    if isinstance(error, commands.BadArgument):
+        try:
+            await ctx.send(f"❌ Argument invalide : {error}")
+        except Exception:
+            pass
+        return
+
+    if isinstance(error, commands.UserInputError):
+        try:
+            await ctx.send(f"❌ Saisie invalide : {error}")
+        except Exception:
+            pass
+        return
+
+    LOG.error("Erreur commande préfixe: %s", error, exc_info=error)
+    try:
+        await ctx.send("❌ Erreur en exécutant la commande.")
+    except Exception:
+        pass
+
+
 # ========= Healthcheck HTTP (Railway / hébergeurs qui exposent PORT) =========
 _health_runner: web.AppRunner | None = None
 

@@ -328,7 +328,7 @@ class Openings(commands.Cog):
 
     @commands.hybrid_command(
         name="guessop",
-        description="Devine l'opening (20s audio + 4 choix, catalogue global enrichi automatiquement)",
+        description="Devine l'opening (20s audio + 4 choix ; AniList lié → priorité + leurres depuis ta liste).",
     )
     @commands.cooldown(1, 15, commands.BucketType.user)  # anti-spam: 1 commande / 15s par user
     async def guess_op(self, ctx: commands.Context) -> None:
@@ -346,15 +346,34 @@ class Openings(commands.Cog):
             return await send("🔇 Tu dois être dans un **salon vocal** pour jouer.")
         voice_channel: discord.VoiceChannel = ctx.author.voice.channel
 
+        linked_anilist = core.get_linked_username(ctx.author.id)
+        user_romaji_list: list[str] = []
+        user_titles_lower: set[str] = set()
+        if linked_anilist:
+            ml = core.fetch_user_list_media_for_minigames(linked_anilist)
+            for m in ml:
+                r = ((m.get("title") or {}).get("romaji") or "").strip()
+                if r:
+                    user_romaji_list.append(r)
+                    user_titles_lower.add(r.lower())
+
         async with self._guild_lock(ctx.guild.id):
             correct_anime = None
             theme_label = None
             media_source = None
             source_footer = ""
 
-            # --------- 1) Catalogue persistant (prioritaire quand assez riche) ---------
+            # --------- 1) Catalogue : si AniList lié, tenter un opening dont le titre est dans ta liste ---------
             n_cat = gopc.count()
-            if n_cat >= CATALOG_MIN_FOR_BIAS and random.random() < CATALOG_PICK_BIAS:
+            if linked_anilist and user_titles_lower and n_cat >= CATALOG_MIN_FOR_BIAS:
+                picked_list = gopc.pick_random_title_in_set(user_titles_lower)
+                if picked_list:
+                    oid, correct_anime, theme_label, media_source = picked_list
+                    source_footer = f"Catalogue Guess OP · depuis ta liste AniList · {n_cat} openings"
+                    gopc.record_used(oid)
+
+            # --------- 1b) Catalogue global (biais habituel) ---------
+            if not media_source and n_cat >= CATALOG_MIN_FOR_BIAS and random.random() < CATALOG_PICK_BIAS:
                 picked = gopc.pick_random()
                 if picked:
                     oid, correct_anime, theme_label, media_source = picked
@@ -430,11 +449,20 @@ class Openings(commands.Cog):
                     pool = []
 
             choices = [correct_anime]
+            if user_romaji_list:
+                list_alts = [t for t in user_romaji_list if t.lower() != (correct_anime or "").lower()]
+                random.shuffle(list_alts)
+                for alt in list_alts:
+                    if len(choices) >= 4:
+                        break
+                    alt_clean = _clean_title_from_filename(alt)
+                    if alt_clean and alt_clean.lower() != (correct_anime or "").lower() and alt_clean not in choices:
+                        choices.append(alt_clean)
             tries = 0
             while len(choices) < 4 and pool and tries < 200:
                 alt = _clean_title_from_filename(random.choice(pool))
                 tries += 1
-                if alt and alt.lower() != correct_anime.lower() and alt not in choices:
+                if alt and alt.lower() != (correct_anime or "").lower() and alt not in choices:
                     choices.append(alt)
             while len(choices) < 4:
                 choices.append(f"Option {len(choices) + 1}")

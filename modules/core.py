@@ -1273,6 +1273,193 @@ def invalidate_upcoming_cache(username: str | None = None) -> None:
         return
     _ANILIST_CACHE["upcoming"].pop(str(username).strip().lower(), None)
 
+
+def _flatten_media_list_collection(data: dict | None) -> list[dict]:
+    """Extrait les médias uniques depuis une réponse MediaListCollection."""
+    if not data:
+        return []
+    coll = (data.get("data") or {}).get("MediaListCollection")
+    if not coll:
+        return []
+    out: list[dict] = []
+    seen_ids: set[int] = set()
+    for lst in coll.get("lists") or []:
+        for e in lst.get("entries") or []:
+            m = e.get("media") or {}
+            mid = m.get("id")
+            if mid and mid not in seen_ids:
+                seen_ids.add(mid)
+                out.append(m)
+    return out
+
+
+def fetch_user_list_media_for_minigames(username: str) -> list[dict]:
+    """
+    Animés présents sur la liste AniList du pseudo (complété, en cours, relecture, en pause).
+    Champs utiles aux mini-jeux liés : genres, startDate, episodes, etc.
+    """
+    uname = (username or "").strip()
+    if not uname:
+        return []
+    q = """
+    query ($name: String) {
+      MediaListCollection(userName: $name, type: ANIME, status_in: [COMPLETED, CURRENT, REPEATING, PAUSED]) {
+        lists {
+          entries {
+            media {
+              id
+              title { romaji english native }
+              genres
+              startDate { year }
+              episodes
+              coverImage { extraLarge large }
+            }
+          }
+        }
+      }
+    }"""
+    data = query_anilist(q, variables={"name": uname})
+    if not data or "data" not in data:
+        return []
+    if isinstance(data, dict) and data.get("errors"):
+        inner = data.get("data")
+        if inner is None or (isinstance(inner, dict) and inner.get("MediaListCollection") is None):
+            LOG.debug(
+                "[AniList] fetch_user_list_media_for_minigames GraphQL pour %s — %s",
+                uname,
+                str(data.get("errors"))[:200],
+            )
+            return []
+    return _flatten_media_list_collection(data)
+
+
+def pick_random_media_for_guess_genre_from_list(media_list: list[dict]) -> Optional[dict]:
+    """Choisit un média avec au moins un genre ; None si impossible."""
+    if not media_list:
+        return None
+    with_genres = [m for m in media_list if len(m.get("genres") or []) >= 1]
+    if not with_genres:
+        return None
+    return random.choice(with_genres)
+
+
+def pick_random_media_for_guess_year_from_list(media_list: list[dict]) -> Optional[dict]:
+    """Média avec année de diffusion connue (startDate.year)."""
+    if not media_list:
+        return None
+    with_year = [m for m in media_list if (m.get("startDate") or {}).get("year")]
+    if not with_year:
+        return None
+    return random.choice(with_year)
+
+
+def pick_random_media_for_guess_episodes_from_list(media_list: list[dict]) -> Optional[dict]:
+    """Média avec nombre d'épisodes fixe (int) côté AniList."""
+    if not media_list:
+        return None
+    with_eps = [m for m in media_list if isinstance(m.get("episodes"), int)]
+    if not with_eps:
+        return None
+    return random.choice(with_eps)
+
+
+def build_guesswho_from_user_list(username: str, *, max_attempts: int = 16) -> Optional[dict]:
+    """
+    Un personnage (nom + image + indice titre anime) depuis un animé de la liste.
+    None si liste vide ou aucun personnage exploitable après essais.
+    """
+    ml = fetch_user_list_media_for_minigames(username)
+    if not ml:
+        return None
+    rng = random.Random()
+    mids = list(ml)
+    rng.shuffle(mids)
+    for m in mids[:max_attempts]:
+        ch = fetch_one_character_from_media(int(m["id"]))
+        if ch:
+            return {
+                "name": ch["name_full"],
+                "image_url": ch["image_url"],
+                "hint_anime": ch["media_romaji"],
+            }
+    return None
+
+
+def fetch_one_character_from_media(media_id: int) -> Optional[dict]:
+    """
+    Un personnage (nom + image + titre romaji) pour un média.
+    None si pas de personnage avec image exploitable.
+    """
+    q = """
+    query ($id: Int) {
+      Media(id: $id) {
+        title { romaji }
+        characters(perPage: 40, sort: [ROLE, FAVOURITES_DESC]) {
+          edges {
+            node {
+              name { full }
+              image { large }
+            }
+          }
+        }
+      }
+    }"""
+    data = query_anilist(q, variables={"id": int(media_id)})
+    if not data or "data" not in data:
+        return None
+    media = (data.get("data") or {}).get("Media") or {}
+    if not media:
+        return None
+    title_romaji = (media.get("title") or {}).get("romaji") or "—"
+    edges = ((media.get("characters") or {}).get("edges") or [])
+    candidates: list[dict] = []
+    for e in edges:
+        node = e.get("node") or {}
+        name = (node.get("name") or {}).get("full")
+        img = (node.get("image") or {}).get("large")
+        if name and img:
+            candidates.append({"name_full": name, "image_url": img, "media_romaji": title_romaji})
+    if not candidates:
+        return None
+    return random.choice(candidates)
+
+
+def build_guess_character_from_user_list(username: str, *, max_attempts: int = 8) -> Optional[dict]:
+    """
+    4 noms distincts + index correct + image du bon perso + titre anime source.
+    None si moins de 4 entrées listées ou échec après plusieurs tirages.
+    """
+    media_list = fetch_user_list_media_for_minigames(username)
+    if len(media_list) < 4:
+        return None
+    rng = random.Random()
+    for _ in range(max_attempts):
+        sampled = rng.sample(media_list, 4)
+        chars: list[dict] = []
+        ok = True
+        for m in sampled:
+            ch = fetch_one_character_from_media(int(m["id"]))
+            if ch is None:
+                ok = False
+                break
+            chars.append(ch)
+        if not ok or len(chars) != 4:
+            continue
+        names = [c["name_full"] for c in chars]
+        if len(set(names)) < 4:
+            continue
+        correct_idx = rng.randrange(4)
+        correct = chars[correct_idx]
+        return {
+            "options": names,
+            "correct_index": correct_idx,
+            "correct_name": correct["name_full"],
+            "correct_anime": correct["media_romaji"],
+            "image_url": correct["image_url"],
+        }
+    return None
+
+
 def get_anime_details(media_id: int) -> Optional[dict]:
     query = '''
     query ($id: Int) {
