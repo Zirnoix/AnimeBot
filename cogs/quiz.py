@@ -85,11 +85,42 @@ def _human_td(delta: timedelta) -> str:
 class TitleMatcher:
     """Gestionnaire de correspondance des titres d'anime."""
 
+    # Avant `normalize` : sinon « Kaguya-sama » → « kaguyasama » alors que l’utilisateur tape « kaguya sama ».
+    _SEP_BEFORE_NORM = (
+        "-",
+        "\u2010",
+        "\u2011",
+        "\u2012",
+        "\u2013",
+        "\u2014",
+        "\u2015",
+        "\uFF0D",
+        ":",
+        "?",
+        "!",
+        "…",
+        "/",
+        "|",
+        "(",
+        ")",
+        "[",
+        "]",
+    )
+
     def __init__(self):
         self.cached_titles: Dict[str, Set[str]] = {}
 
+    @classmethod
+    def _prepare_for_normalize(cls, raw: str) -> str:
+        t = raw or ""
+        for sep in cls._SEP_BEFORE_NORM:
+            t = t.replace(sep, " ")
+        while "  " in t:
+            t = t.replace("  ", " ")
+        return t.strip()
+
     def clean_title(self, title: str) -> str:
-        cleaned = core.normalize(title)
+        cleaned = core.normalize(self._prepare_for_normalize(title))
         stop_words = {"the", "a", "an", "season", "part", "episode", "movie", "saison"}
         words = [w for w in cleaned.split() if w not in stop_words]
         return " ".join(words)
@@ -281,6 +312,7 @@ class Quiz(commands.Cog):
             ) {
               id
               title { romaji english native }
+              synonyms
               averageScore
               genres
               coverImage { large extraLarge }
