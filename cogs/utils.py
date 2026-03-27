@@ -52,12 +52,55 @@ class Utils(commands.Cog):
                 return
             core.set_guild_alert_channel(ctx.guild.id, ctx.channel.id)
             await ctx.send(
-                "✅ Ce salon recevra les **annonces de sortie d’épisode** pour **ce serveur**.\n"
-                "Les titres suivis sont ceux de **`/airings`** (liste remplie par les admins, ex. **`/airings all`**). "
-                "Sans anime dans cette liste, aucune annonce ne part."
+                "✅ Ce salon recevra les **cartes « sortie d’épisode »** pour **ce serveur**.\n"
+                "• Liste des animés suivis : **`/airings`** (ex. **`/airings all`** pour les admins).\n"
+                "• **Indépendant** du salon du **raid boss** — celui-ci se règle avec **`/raidconfig`** (paramètre salon).\n"
+                "• Vérifier la config : **`/sorties`** (tout le monde)."
             )
         except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
+
+    @commands.hybrid_command(
+        name="sorties",
+        description="État des annonces auto « sortie d’épisode » (salon /setchannel, liste /airings).",
+    )
+    async def sorties_episodes(self, ctx: commands.Context) -> None:
+        """Vérifie salon + liste pour les cartes de sortie (pas le raid)."""
+        if not ctx.guild:
+            await ctx.send("❌ Utilise cette commande dans un serveur.")
+            return
+        cid = core.get_guild_alert_channel_id(ctx.guild.id)
+        n_wl = len(core.guild_whitelist_list(ctx.guild.id))
+        legacy = core.guild_airings_ids(ctx.guild.id)
+        n_legacy = len(legacy)
+        parts: list[str] = []
+        if cid:
+            ch = ctx.guild.get_channel(int(cid))
+            if isinstance(ch, discord.TextChannel):
+                perms = ch.permissions_for(ctx.guild.me)
+                if not perms.send_messages:
+                    parts.append(
+                        f"• Salon d’annonces : {ch.mention} — ⚠️ le bot **ne peut pas envoyer** de message ici."
+                    )
+                else:
+                    parts.append(f"• Salon d’annonces : {ch.mention}")
+            else:
+                parts.append(
+                    f"• Salon enregistré (`{cid}`) **introuvable** — refais **`/setchannel`** dans un salon valide."
+                )
+        else:
+            parts.append(
+                "• **Aucun salon** pour les sorties — un admin doit taper **`/setchannel`** "
+                "dans le salon voulu (indépendant du **raid** : `/raidconfig`)."
+            )
+        parts.append(
+            f"• Animés dans la liste serveur (`/airings`) : **{n_wl}**"
+            + (f" (+ **{n_legacy}** ID(s) table legacy)" if n_legacy else "")
+        )
+        parts.append(
+            "• Les cartes partent après la **diffusion** (fenêtre de rattrapage ~18 h, fuseau AniList)."
+        )
+        await ctx.send("**📺 Annonces de sortie d’épisode**\n" + "\n".join(parts))
 
     @commands.hybrid_command(
         name="setlevelupchannel",

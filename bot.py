@@ -368,13 +368,30 @@ class AnimeBot(commands.Bot):
             now = datetime.now(core.TIMEZONE)
             current_time = now.strftime("%H:%M")
             current_day = now.strftime("%A")
-            prefs_all = core.load_preferences()
-            settings_all = core.load_user_settings()
-            for user_id, prefs in (prefs_all or {}).items():
-                user_settings = (settings_all or {}).get(user_id, {})
-                if not user_settings.get("daily_summary", True):
+            prefs_all = core.load_preferences() or {}
+            settings_all = core.load_user_settings() or {}
+            all_uids = set(settings_all.keys()) | set(prefs_all.keys())
+            for user_id in all_uids:
+                user_settings = settings_all.get(user_id, {})
+                daily = user_settings.get("daily_summary")
+                if daily is None:
+                    # Legacy preferences.json → garder le récap « Sorties du jour ».
+                    # Uniquement /reminder (sans prefs) → ne pas ajouter le 1er récap par défaut.
+                    if user_id in prefs_all:
+                        daily = True
+                    elif user_settings.get("reminder_on"):
+                        daily = False
+                    else:
+                        daily = True
+                if not daily:
                     continue
-                if prefs.get("alert_time", "08:00") != current_time:
+                pref_prefs = prefs_all.get(user_id, {})
+                alert_time = (
+                    user_settings.get("alert_time")
+                    or pref_prefs.get("alert_time")
+                    or core.get_config().get("default_alert_time", "08:00")
+                )
+                if alert_time != current_time:
                     continue
 
                 episodes = core.get_upcoming_episodes_for_discord(int(user_id)) or []
@@ -403,15 +420,15 @@ class AnimeBot(commands.Bot):
             }.get(day_name, day_name)
             lines = []
             for ep in episodes[:10]:
-                t = core.format_anilist_title_obj(ep.get("title"))
-                lines.append(f"• **{t}** — Épisode {ep.get('episode', '?')}")
+                title_md = core.format_anilist_episode_title_markdown(ep)
+                lines.append(f"• {title_md} — Épisode {ep.get('episode', '?')}")
             em = discord.Embed(
                 title=f"🗓️ Sorties du {day_fr}",
                 description="\n".join(lines),
                 color=discord.Color.blurple(),
             )
             em.set_footer(
-                text="Récap auto (préférences) — le récap /reminder est séparé ; voir /help."
+                text="Récap « Sorties du jour » — `/dailysummary` + `/setalert` (heure) + `/linkanilist`. Autre récap : `/reminder` (off par défaut). /help"
             )
             await user.send(embed=em)
         except Exception as e:

@@ -151,7 +151,8 @@ class Onboarding(commands.Cog):
                 title="🛎️ Rappels (MP)",
                 color=discord.Color.gold(),
                 description=(
-                    "• `/reminder on|off` et `/setalert HH:MM` — récap **personnel** en MP.\n"
+                    "• `/dailysummary on|off` + `/setalert HH:MM` — récap MP **« Sorties du jour »** (liste AniList liée).\n"
+                    "• `/reminder` — second récap (détail), **off** par défaut ; évite d’avoir les deux si tu n’en veux qu’un.\n"
                     "• Indépendant des annonces du serveur (`/setchannel`).\n\n"
                     "**`/next` / `/planning`** — mode **serveur** = liste **`/airings`** · mode **global** = sorties générales.\n"
                     "**`/monnext` / `/monplanning`** — **ton** planning AniList (compte lié)."
@@ -229,7 +230,8 @@ class Onboarding(commands.Cog):
                     "**3) `/setlevelupchannel`** — salon des **annonces** : **nouveau titre global** (XP) et **nouveau titre quiz** "
                     "(score du mois, `/animequiz` / `/animequizmulti`) ; sinon dans le salon où la partie a lieu. "
                     "**`/clearlevelupchannel`** pour réinitialiser.\n"
-                    "**4) `/raidconfig`** — salon du raid, horaire hebdo, auto ; **`/raidstart`** manuel (1×/semaine serveur après confirmation)."
+                    "**4) `/raidconfig`** (admins) — salon, auto, jour, heure ; **`/raid statut`** pour tout le monde ; "
+                    "**`/raidstart`** manuel (1×/semaine serveur après confirmation)."
                 ),
             )
             e_note = discord.Embed(

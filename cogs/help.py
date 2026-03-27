@@ -33,11 +33,9 @@ DESC_OVERRIDE: Dict[str, str] = {
     "guesscharacter": "Choisis le bon personnage (4 boutons).",
     "guesswho": "Devine le personnage sur une image floutée — choix Facile / Normal / Difficile (flou + XP).",
     "chainquiz": "Enchaîne des quiz solo : la difficulté monte à chaque bonne réponse.",
-    "raidconfig": "Groupe admin : salon, horaire hebdo, activer/désactiver le raid boss.",
-    "raidconfig canal": "Définit le salon des alertes et du combat de raid boss.",
-    "raidconfig horaire": "Jour (menu : lundi…dimanche) et heure du raid auto (fuseau BOT_TIMEZONE / Europe/Paris par défaut).",
-    "raidconfig activer": "Oui/Non : lancer le raid automatiquement chaque semaine à l’horaire (sinon seulement /raidstart).",
-    "raidconfig statut": "Affiche la configuration du raid et le prochain créneau.",
+    "raid": "Groupe : statut du raid (tout le monde).",
+    "raid statut": "Salon, horaire, auto ou non, prochain créneau (fuseau du bot).",
+    "raidconfig": "Admins : une commande — salon, lancement auto, jour, heure (paramètres omis = inchangés).",
     "raidstart": "Lance un raid boss (admin) : confirmation + max 1× par semaine / serveur.",
     "owner_raidstart": "(OWNER_ID) Lance un raid test sans consommer la limite hebdomadaire /raidstart.",
     "raidalerttest": "Envoie un message de test type « raid dans 1 h » (admin).",
@@ -76,14 +74,16 @@ DESC_OVERRIDE: Dict[str, str] = {
     "clear": "Efface le suivi.",
 
     # Utils
-    "setchannel": "Salon des annonces « sortie d’épisode » pour ce serveur (même liste que /airings).",
+    "setchannel": "Salon des cartes « sortie d’épisode » (liste /airings). Pas le salon du raid — voir /sorties.",
+    "sorties": "Vérifie salon /setchannel + nombre d’animes /airings (annonces auto, pas le raid).",
     "setlevelupchannel": "Salon des annonces : nouveau titre global (XP) et nouveau titre quiz (sinon : salon de la partie).",
     "clearlevelupchannel": "Retire le salon dédié aux annonces de niveau XP (comportement par défaut).",
     "guide_admin": "(MP, admins) Configuration serveur : airings, setchannel, niveaux XP, raid.",
     "botinfo": "Infos sur le bot (versions, créateur, etc.).",
     "ping": "Latence du bot.",
-    "reminder": "Récap quotidien en MP (/reminder + /setalert), basé sur ton AniList si lié. Indépendant du récap « préférences ».",
-    "setalert": "Régler l’heure du rappel quotidien (HH:MM).",
+    "reminder": "Récap MP détaillé (2e message). Même ergonomie qu’avant : /reminder on|off et heure optionnelle (ex. /reminder on 08:30).",
+    "setalert": "Heure HH:MM des récaps MP (fuseau du bot). Raccourci : /reminder ou /dailysummary avec l’argument heure.",
+    "dailysummary": "Récap « Sorties du jour » (liste liée). /dailysummary on|off et heure optionnelle (ex. /dailysummary on 08:30).",
     "source": "Lien vers le dépôt GitHub du bot.",
     "uptime": "Depuis combien de temps le bot tourne.",
 
@@ -125,7 +125,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "guesswho", "chainquiz",
         "guessop",
         "higherlower", "minijeux",
-        "raidconfig", "raidconfig canal", "raidconfig horaire", "raidconfig activer", "raidconfig statut",
+        "raid", "raid statut", "raidconfig",
         "raidstart", "owner_raidstart", "raidalerttest",
     ]),
     ("🔗 Pages Link", [
@@ -138,7 +138,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "track", "track add", "track list", "track remove", "track clear"
     ]),
     ("🧰 Pages Utils", [
-        "setchannel", "setlevelupchannel", "clearlevelupchannel", "botinfo", "ping", "reminder", "setalert", "source", "uptime"
+        "setchannel", "sorties", "setlevelupchannel", "clearlevelupchannel", "botinfo", "ping", "dailysummary", "setalert", "reminder", "source", "uptime"
     ]),
     ("🛠️ Pages Admin (guide)", [
         "guide_admin",
@@ -530,8 +530,9 @@ class Help(commands.Cog):
             ("/planning", DESC_OVERRIDE["planning"]),
             ("/mystats", DESC_OVERRIDE["mystats"]),
             ("/linkanilist", DESC_OVERRIDE["linkanilist"]),
-            ("/reminder", DESC_OVERRIDE["reminder"]),
+            ("/dailysummary", DESC_OVERRIDE["dailysummary"]),
             ("/setalert", DESC_OVERRIDE["setalert"]),
+            ("/reminder", DESC_OVERRIDE["reminder"]),
             ("/botinfo", DESC_OVERRIDE["botinfo"]),
         ]
         for name, desc in picks:

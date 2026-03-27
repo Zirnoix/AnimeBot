@@ -70,7 +70,19 @@ def _fmt_list(items: List[dict], limit: int = 25) -> List[tuple[str, str]]:
         hour = _format_time(ts)
         genres = (media.get("genres") if media else (it.get("genres") or [])) or []
         emoji = core.genre_emoji(genres)
-        name = f"{emoji} {title} — Épisode {ep}"
+        site_url = (media.get("siteUrl") or it.get("siteUrl") or "").strip()
+        mid = media.get("id") if media else it.get("id")
+        if not site_url and mid is not None:
+            try:
+                site_url = f"https://anilist.co/anime/{int(mid)}"
+            except (TypeError, ValueError):
+                pass
+        if site_url:
+            safe = title.replace("]", "›")
+            title_part = f"[**{safe}**]({site_url})"
+        else:
+            title_part = f"**{title}**"
+        name = f"{emoji} {title_part} — Épisode {ep}"
         value = f"⏰ {hour}"
         out.append((name, value))
     return out
@@ -124,10 +136,13 @@ class ReminderDigest(commands.Cog):
     def _reminder_on(state: str) -> bool:
         return (state or "").strip().lower() == "on"
 
-    @commands.hybrid_command(name="reminder", description="Active/Désactive le récap quotidien en MP.")
+    @commands.hybrid_command(
+        name="reminder",
+        description="Récap MP détaillé (2e message). on|off + heure optionnelle en une commande : /reminder on 08:30",
+    )
     @app_commands.describe(
-        state="Choisis on ou off",
-        heure="Optionnel — heure du récap en MP (HH:MM). Sinon utilise /setalert ou la valeur déjà enregistrée.",
+        state="on ou off",
+        heure="Optionnel (HH:MM) — même envoi que /setalert : règle l’heure des récaps MP en une fois.",
     )
     @app_commands.choices(
         state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")]
@@ -173,12 +188,53 @@ class ReminderDigest(commands.Cog):
         else:
             await ctx.reply("⏹️ Rappel **désactivé**.", ephemeral=True)
 
-    @commands.hybrid_command(name="setalert", description="Règle l’heure du récap quotidien en MP (HH:MM).")
+    @commands.hybrid_command(
+        name="setalert",
+        description="Heure (HH:MM) du récap « Sorties du jour » et, si activé, du /reminder (fuseau du bot).",
+    )
     async def setalert(self, ctx: commands.Context, heure: str):
         if not _hhmm_valid(heure):
             return await ctx.reply("❌ Format invalide. Exemple : `08:00`", ephemeral=True)
         _set_user_pref(ctx.author.id, alert_time=heure)
-        await ctx.reply(f"⏰ Heure du rappel réglée sur **{heure}** (timezone du bot).", ephemeral=True)
+        await ctx.reply(
+            f"⏰ Heure réglée sur **{heure}** (fuseau du bot) — récap « Sorties du jour » (`/dailysummary`) "
+            f"et **/reminder** si tu l’as activé.",
+            ephemeral=True,
+        )
+
+    @commands.hybrid_command(
+        name="dailysummary",
+        description="Récap MP « Sorties du jour ». on|off + heure optionnelle : /dailysummary on 08:30 (comme /reminder).",
+    )
+    @app_commands.describe(
+        state="on ou off",
+        heure="Optionnel (HH:MM) — règle l’heure comme /setalert / /reminder, en une commande.",
+    )
+    @app_commands.choices(
+        state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")]
+    )
+    async def dailysummary(self, ctx: commands.Context, state: str, heure: Optional[str] = None):
+        on = self._reminder_on(state)
+        updates: Dict[str, Any] = {"daily_summary": on}
+        if heure is not None and str(heure).strip():
+            hh = str(heure).strip()
+            if not _hhmm_valid(hh):
+                return await ctx.reply("❌ Heure invalide. Exemple : `08:00`", ephemeral=True)
+            updates["alert_time"] = hh
+        _set_user_pref(ctx.author.id, **updates)
+        if on:
+            pref = _get_user_pref(ctx.author.id)
+            hhmm = pref.get("alert_time", core.get_config().get("default_alert_time", "08:00"))
+            await ctx.reply(
+                f"✅ Récap **« Sorties du jour »** activé — envoi vers **`{hhmm}`** (fuseau du bot). "
+                f"Compte AniList : **`/linkanilist`**. Le récap **/reminder** (2e message) est séparé : `/reminder off` si tu n’en veux qu’un.",
+                ephemeral=True,
+            )
+        else:
+            await ctx.reply(
+                "⏹️ Récap **« Sorties du jour »** désactivé. Tu peux le réactiver avec `/dailysummary on` (éventuellement avec une heure).",
+                ephemeral=True,
+            )
 
     # ---------- boucle d'envoi ----------
     @tasks.loop(minutes=1)

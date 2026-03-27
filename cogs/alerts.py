@@ -172,7 +172,7 @@ class Alerts(commands.Cog):
     async def before(self):
         await self.bot.wait_until_ready()
         LOG.info(
-            "Alerte épisodes: boucle démarrée (sortie — whitelist /airings, nextAiringEpisode, rattrapage 18 h)."
+            "Alerte épisodes: boucle démarrée (whitelist /airings, nextAiringEpisode + créneaux passés AniList, 18 h)."
         )
 
 

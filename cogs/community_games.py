@@ -231,7 +231,7 @@ def _week_key(dt: datetime) -> str:
 
 
 def _raid_target_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
-    """Salon configuré pour le raid (`/raidconfig canal`), sinon None."""
+    """Salon configuré pour le raid (`/raidconfig` → salon), sinon None."""
     cfg = _load_raid_cfg().get(str(guild.id), {})
     cid = cfg.get("channel_id")
     if not cid:
@@ -254,6 +254,37 @@ def _next_raid_moment(now: datetime, weekday: int, hour: int, minute: int) -> da
         if cand > now:
             return cand
     return now + timedelta(days=7)
+
+
+def _format_raid_status_message(guild: discord.Guild) -> str:
+    """Texte unique pour /raid statut et /raidconfig sans paramètres."""
+    cfg = _load_raid_cfg().get(str(guild.id), {})
+    ch = cfg.get("channel_id")
+    ch_txt = f"<#{ch}>" if ch else "— *(non configuré — admins : `/raidconfig`)*"
+    now = datetime.now(core.TIMEZONE)
+    wd = int(cfg.get("weekday", 5))
+    h = int(cfg.get("hour", 20))
+    m = int(cfg.get("minute", 0))
+    nxt = _next_raid_moment(now, wd, h, m)
+    tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
+    jname = core.JOURS_SEMAINE_FR[wd % 7]
+    auto = bool(cfg.get("enabled", False))
+    cur_w = _week_key(now)
+    rs_w = str(cfg.get("raidstart_week_key") or "")
+    start_line = (
+        f"• **`/raidstart`** (manuel) cette semaine (`{cur_w}`) : **déjà utilisé**."
+        if rs_w == cur_w
+        else f"• **`/raidstart`** (manuel) : **disponible** cette semaine (`{cur_w}`) — _1× par semaine / serveur._"
+    )
+    return (
+        f"**Raid boss**\n"
+        f"• Salon : {ch_txt}\n"
+        f"• Horaire : **{jname}** à **{h:02d}:{m:02d}** (fuseau **{tzname}**)\n"
+        f"• Lancement auto chaque semaine : **{'oui' if auto else 'non (admins : `/raidstart`)'}**\n"
+        f"{start_line}\n"
+        f"• Prochain créneau : <t:{int(nxt.timestamp())}:F> · <t:{int(nxt.timestamp())}:R>\n"
+        f"_Rappel **~1 h** avant dans le salon du raid (si auto activé et salon défini)._"
+    )
 
 
 def _get_owner_id() -> Optional[int]:
@@ -2103,7 +2134,8 @@ class CommunityGames(commands.Cog):
             if c.get("alert_sent_for_week") != wkey and alert_at <= now < raid_at:
                 try:
                     await channel.send(
-                        "@here ⏰ **Boss Raid** dans **1 h** — préparez-vous (quiz / persos AniList) !"
+                        "@here ⏰ **Boss Raid** dans **1 h** — préparez-vous (quiz / persos AniList) !",
+                        allowed_mentions=discord.AllowedMentions(everyone=True),
                     )
                 except Exception as e:
                     LOG.warning("raid alert: %s", e)
@@ -2127,41 +2159,31 @@ class CommunityGames(commands.Cog):
     async def _raid_sched_before(self) -> None:
         await self.bot.wait_until_ready()
 
-    raidconfig = app_commands.Group(
-        name="raidconfig",
-        description="Configurer le raid boss hebdomadaire (administrateurs uniquement).",
+    raid = app_commands.Group(
+        name="raid",
+        description="Statut du raid boss (tout le monde). Configuration : /raidconfig (admins).",
     )
 
-    @raidconfig.command(name="canal", description="Définir le salon des annonces et du combat de raid.")
-    @app_commands.describe(channel="Salon texte (défaut : salon actuel)")
-    @app_commands.default_permissions(administrator=True)
-    async def raid_canal(
-        self,
-        interaction: discord.Interaction,
-        channel: Optional[discord.TextChannel] = None,
-    ) -> None:
+    @raid.command(name="statut", description="Salon, horaire, auto activé ou non, prochain créneau.")
+    async def raid_statut_public(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
             return
-        ch = channel or interaction.channel
-        if not isinstance(ch, discord.TextChannel):
-            await interaction.response.send_message("❌ Salon texte requis.", ephemeral=True)
-            return
-        with core.DATA_JSON_LOCK:
-            cfg = _load_raid_cfg()
-            cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
-            cfg[str(interaction.guild.id)]["channel_id"] = ch.id
-            _save_raid_cfg(cfg)
-        await interaction.response.send_message(f"✅ Salon de raid : {ch.mention}", ephemeral=True)
+        await interaction.response.send_message(_format_raid_status_message(interaction.guild))
 
-    @raidconfig.command(name="horaire", description="Jour et heure du raid (fuseau du bot, voir BOT_TIMEZONE).")
+    @app_commands.command(
+        name="raidconfig",
+        description="Configurer le raid (salon, lancement auto, jour, heure). Laisser vide = afficher l’aide / statut.",
+    )
     @app_commands.describe(
-        weekday="Jour de la semaine",
-        hour="0–23",
-        minute="0–59",
+        salon="Salon des annonces et du combat (optionnel)",
+        lancement_auto="Raid automatique chaque semaine + rappel ~1 h avant",
+        jour="Jour (fuseau du bot, BOT_TIMEZONE)",
+        heure="0–23 (optionnel)",
+        minute="0–59 (optionnel)",
     )
     @app_commands.choices(
-        weekday=[
+        jour=[
             app_commands.Choice(name="Lundi", value=0),
             app_commands.Choice(name="Mardi", value=1),
             app_commands.Choice(name="Mercredi", value=2),
@@ -2172,88 +2194,70 @@ class CommunityGames(commands.Cog):
         ]
     )
     @app_commands.default_permissions(administrator=True)
-    async def raid_horaire(
+    async def raid_config_unified(
         self,
         interaction: discord.Interaction,
-        weekday: int,
-        hour: app_commands.Range[int, 0, 23],
-        minute: app_commands.Range[int, 0, 59],
+        salon: Optional[discord.TextChannel] = None,
+        lancement_auto: Optional[bool] = None,
+        jour: Optional[int] = None,
+        heure: Optional[int] = None,
+        minute: Optional[int] = None,
     ) -> None:
         if not interaction.guild:
             await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
             return
-        with core.DATA_JSON_LOCK:
-            cfg = _load_raid_cfg()
-            cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
-            cfg[str(interaction.guild.id)]["weekday"] = int(weekday)
-            cfg[str(interaction.guild.id)]["hour"] = int(hour)
-            cfg[str(interaction.guild.id)]["minute"] = int(minute)
-            _save_raid_cfg(cfg)
-        tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
-        jname = core.JOURS_SEMAINE_FR[int(weekday) % 7]
-        await interaction.response.send_message(
-            f"✅ Raid planifié : **{jname}** à **{hour:02d}:{minute:02d}** "
-            f"(fuseau **{tzname}**, variable d’environnement **`BOT_TIMEZONE`** sur l’hébergeur).",
-            ephemeral=True,
-        )
-
-    @raidconfig.command(
-        name="activer",
-        description="Lancer le raid automatiquement chaque semaine (sinon uniquement avec /raidstart).",
-    )
-    @app_commands.describe(
-        actif=(
-            "**Oui** : le bot ouvre l’inscription **chaque semaine** à l’horaire + rappel ~1 h avant. "
-            "**Non** : pas de lancement auto (admins utilisent **`/raidstart`**)."
-        ),
-    )
-    @app_commands.default_permissions(administrator=True)
-    async def raid_activer(self, interaction: discord.Interaction, actif: bool) -> None:
-        if not interaction.guild:
-            await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+        if (
+            salon is None
+            and lancement_auto is None
+            and jour is None
+            and heure is None
+            and minute is None
+        ):
+            await interaction.response.send_message(
+                "Configure le raid **en une commande** — précise au moins un paramètre :\n"
+                "• **`salon`** — où poster l’alerte ~1 h avant et le combat\n"
+                "• **`lancement_auto`** — oui/non (sinon seulement **`/raidstart`** manuel)\n"
+                "• **`jour`** + **`heure`** + **`minute`** — créneau hebdo\n\n"
+                "Exemple : `/raidconfig` avec salon + lancement_auto + jour + heure + minute.\n"
+                "Pour **voir** la config sans rien changer : **`/raid statut`** (tout le monde).\n\n"
+                "— *Statut actuel (admin)* —\n"
+                + _format_raid_status_message(interaction.guild),
+                ephemeral=True,
+            )
+            return
+        if heure is not None and (heure < 0 or heure > 23):
+            await interaction.response.send_message("❌ Heure invalide (0–23).", ephemeral=True)
+            return
+        if minute is not None and (minute < 0 or minute > 59):
+            await interaction.response.send_message("❌ Minute invalide (0–59).", ephemeral=True)
             return
         with core.DATA_JSON_LOCK:
             cfg = _load_raid_cfg()
-            cfg[str(interaction.guild.id)] = cfg.get(str(interaction.guild.id), {})
-            cfg[str(interaction.guild.id)]["enabled"] = actif
+            gk = str(interaction.guild.id)
+            cfg[gk] = cfg.get(gk, {})
+            cur = cfg[gk]
+            if salon is not None:
+                cur["channel_id"] = salon.id
+            if lancement_auto is not None:
+                cur["enabled"] = bool(lancement_auto)
+            if jour is not None:
+                cur["weekday"] = int(jour)
+            if heure is not None:
+                cur["hour"] = int(heure)
+            if minute is not None:
+                cur["minute"] = int(minute)
             _save_raid_cfg(cfg)
-        await interaction.response.send_message(
-            f"✅ Lancement **hebdomadaire automatique** : **{'oui' if actif else 'non'}**.",
-            ephemeral=True,
-        )
-
-    @raidconfig.command(name="statut", description="Afficher la config actuelle du raid.")
-    @app_commands.default_permissions(administrator=True)
-    async def raid_statut(self, interaction: discord.Interaction) -> None:
-        if not interaction.guild:
-            await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-            return
-        cfg = _load_raid_cfg().get(str(interaction.guild.id), {})
-        ch = cfg.get("channel_id")
-        ch_txt = f"<#{ch}>" if ch else "—"
-        now = datetime.now(core.TIMEZONE)
-        wd = int(cfg.get("weekday", 5))
-        h = int(cfg.get("hour", 20))
-        m = int(cfg.get("minute", 0))
-        nxt = _next_raid_moment(now, wd, h, m)
         tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
+        wd = int(cur.get("weekday", 5))
         jname = core.JOURS_SEMAINE_FR[wd % 7]
-        auto = bool(cfg.get("enabled", False))
-        cur_w = _week_key(now)
-        rs_w = str(cfg.get("raidstart_week_key") or "")
-        start_line = (
-            f"• **`/raidstart`** (manuel) cette semaine (`{cur_w}`) : **déjà utilisé**."
-            if rs_w == cur_w
-            else f"• **`/raidstart`** (manuel) : **disponible** cette semaine (`{cur_w}`) — _1× par semaine / serveur._"
-        )
+        ch_id = cur.get("channel_id")
+        ch_mention = f"<#{ch_id}>" if ch_id else "—"
         await interaction.response.send_message(
-            f"**Raid boss**\n"
-            f"• Salon : {ch_txt}\n"
-            f"• Horaire : **{jname}** à **{h:02d}:{m:02d}** (fuseau **{tzname}**)\n"
-            f"• Lancement auto chaque semaine : **{'oui' if auto else 'non (utilise /raidstart)'}**\n"
-            f"{start_line}\n"
-            f"• Prochain créneau (calcul) : <t:{int(nxt.timestamp())}:F>\n"
-            f"_Alerte ~1 h avant dans le salon du raid._",
+            f"✅ **Raid** — configuration enregistrée.\n"
+            f"• Salon : {ch_mention}\n"
+            f"• Auto : **{'oui' if cur.get('enabled') else 'non'}**\n"
+            f"• **{jname}** à **{int(cur.get('hour', 20)):02d}:{int(cur.get('minute', 0)):02d}** ({tzname})\n"
+            f"• Voir tout le monde : **`/raid statut`**",
             ephemeral=True,
         )
 
@@ -2269,7 +2273,7 @@ class CommunityGames(commands.Cog):
         target = _raid_target_channel(interaction.guild)
         if target is None:
             await interaction.response.send_message(
-                "❌ Aucun salon de raid configuré. Utilise d’abord **`/raidconfig canal`** (choisis le salon du raid).",
+                "❌ Aucun salon de raid configuré. Utilise **`/raidconfig`** avec le paramètre **salon**.",
                 ephemeral=True,
             )
             return
@@ -2321,7 +2325,7 @@ class CommunityGames(commands.Cog):
         target = _raid_target_channel(interaction.guild)
         if target is None:
             await interaction.followup.send(
-                "❌ Aucun salon de raid configuré. Utilise d’abord **`/raidconfig canal`**.",
+                "❌ Aucun salon de raid configuré. Utilise **`/raidconfig`** avec le paramètre **salon**.",
                 ephemeral=True,
             )
             return
@@ -2342,7 +2346,7 @@ class CommunityGames(commands.Cog):
         target = _raid_target_channel(interaction.guild)
         if target is None:
             await interaction.response.send_message(
-                "❌ Aucun salon de raid configuré. Utilise d’abord **`/raidconfig canal`**.",
+                "❌ Aucun salon de raid configuré. Utilise **`/raidconfig`** avec le paramètre **salon**.",
                 ephemeral=True,
             )
             return

@@ -546,24 +546,141 @@ def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: i
     return out
 
 
+def _fetch_airing_schedules_past_window(
+    start_ts: int,
+    end_ts: int,
+    *,
+    limit_pages: int = 25,
+) -> List[dict]:
+    """
+    Créneaux dont airingAt est dans ]start_ts, end_ts] (AniList « airingSchedules »).
+    Sert de filet de sécurité : après diffusion, `nextAiringEpisode` peut déjà pointer vers le futur,
+    ce qui faisait rater l’annonce basée uniquement sur Media.nextAiringEpisode.
+    """
+    if start_ts >= end_ts:
+        return []
+    out: List[dict] = []
+    page = 1
+    per_page = 50
+    for _ in range(max(1, int(limit_pages))):
+        query = """
+        query ($page:Int!, $perPage:Int!, $start:Int!, $end:Int!) {
+          Page(page:$page, perPage:$perPage) {
+            pageInfo { hasNextPage }
+            airingSchedules(
+              airingAt_greater: $start,
+              airingAt_lesser: $end,
+              sort: [TIME]
+            ) {
+              airingAt
+              episode
+              media {
+                id
+                siteUrl
+                title { romaji english native }
+                coverImage { large }
+                genres
+                isAdult
+              }
+            }
+          }
+        }
+        """
+        data = query_anilist(query, {"page": page, "perPage": per_page, "start": start_ts, "end": end_ts}) or {}
+        if isinstance(data, dict) and data.get("errors"):
+            LOG.warning(
+                "airingSchedules past window: %s",
+                str(data.get("errors"))[:280],
+            )
+            break
+        pg = (data.get("data") or {}).get("Page") or {}
+        items = pg.get("airingSchedules") or []
+        for s in items:
+            m = s.get("media") or {}
+            if m.get("isAdult"):
+                continue
+            out.append(
+                {
+                    "airingAt": s.get("airingAt"),
+                    "episode": s.get("episode"),
+                    "media": {
+                        "id": m.get("id"),
+                        "siteUrl": m.get("siteUrl"),
+                        "title": m.get("title") or {},
+                        "cover": (m.get("coverImage") or {}).get("large"),
+                        "genres": m.get("genres") or [],
+                    },
+                }
+            )
+        if not (pg.get("pageInfo") or {}).get("hasNextPage"):
+            break
+        page += 1
+    return [x for x in out if isinstance(x.get("airingAt"), int)]
+
+
 def get_recent_airings_for_guild(
     guild_id: int,
     *,
     grace_sec: int = 18 * 3600,
     chunk_size: int = 10,
 ) -> List[dict]:
-    """Animes de la whitelist `/airings` dont le prochain épisode annoncé vient de passer (fenêtre de rattrapage)."""
+    """Animes de la whitelist `/airings` : épisode vient de passer (fenêtre de rattrapage)."""
     ids: Set[int] = {int(x["media_id"]) for x in guild_whitelist_list(guild_id)}
     ids |= {int(x) for x in guild_airings_ids(guild_id)}
     if not ids:
         return []
     now = int(time.time())
+    grace = int(grace_sec)
+    start_ts = now - grace
     id_list = sorted(ids)
     out: List[dict] = []
+    seen: Set[tuple[int, int]] = set()
     cs = max(1, min(25, int(chunk_size)))
     for i in range(0, len(id_list), cs):
         chunk = id_list[i : i + cs]
-        out.extend(_fetch_media_alert_candidates_batch(chunk, now, int(grace_sec)))
+        for item in _fetch_media_alert_candidates_batch(chunk, now, grace):
+            mid = int((item.get("media") or {}).get("id") or 0)
+            ep = item.get("episode")
+            try:
+                ek = int(float(ep))
+            except Exception:
+                ek = 0
+            seen.add((mid, ek))
+            out.append(item)
+
+    try:
+        for item in _fetch_airing_schedules_past_window(start_ts, now, limit_pages=25):
+            m = item.get("media") or {}
+            mid = m.get("id")
+            if mid is None:
+                continue
+            imid = int(mid)
+            if imid not in ids:
+                continue
+            ep = item.get("episode")
+            try:
+                ek = int(float(ep))
+            except Exception:
+                ek = 0
+            if (imid, ek) in seen:
+                continue
+            seen.add((imid, ek))
+            t = m.get("title") or {}
+            out.append(
+                {
+                    "airingAt": item.get("airingAt"),
+                    "episode": ep,
+                    "media": {
+                        "id": m.get("id"),
+                        "siteUrl": m.get("siteUrl"),
+                        "title": t,
+                        "cover": (m.get("coverImage") or {}).get("large"),
+                        "genres": m.get("genres") or [],
+                    },
+                }
+            )
+    except Exception as e:
+        LOG.warning("get_recent_airings_for_guild schedule fallback: %s", e)
     return out
 
 
@@ -2200,6 +2317,26 @@ def format_anilist_title_obj(title: Any) -> str:
     return str(title or "Titre inconnu")
 
 
+def format_anilist_episode_title_markdown(ep: dict) -> str:
+    """
+    Titre d’épisode en markdown pour embed (lien AniList si id ou siteUrl présent).
+    Les ] dans le titre sont neutralisés pour ne pas casser le lien markdown.
+    """
+    t = format_anilist_title_obj(ep.get("title"))
+    url = (ep.get("siteUrl") or "").strip()
+    if not url:
+        mid = ep.get("id")
+        if mid is not None:
+            try:
+                url = f"https://anilist.co/anime/{int(mid)}"
+            except (TypeError, ValueError):
+                url = ""
+    if not url:
+        return f"**{t}**"
+    safe = t.replace("]", "›")
+    return f"[**{safe}**]({url})"
+
+
 # --- LINKS ---
 def link_anilist(user_id: int, username: str, anilist_id: int) -> None:
     conn = _db()
@@ -2815,7 +2952,7 @@ def format_guild_channels_config_summary(bot: discord.Client, guild_id: int) -> 
     if not lines:
         return (
             "Aucun salon configuré pour **ce serveur** "
-            "(`/setchannel`, `/setlevelupchannel`, `/raidconfig canal`)."
+            "(`/setchannel`, `/setlevelupchannel`, `/raidconfig`)."
         )
     return "\n".join(lines)
 
