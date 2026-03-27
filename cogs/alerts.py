@@ -72,13 +72,7 @@ class Alerts(commands.Cog):
             LOG.info("Alertes: migration salon %s → serveur %s", cid, ch.guild.id)
 
     async def _get_guild_alert_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
-        cid = core.get_guild_alert_channel_id(guild.id)
-        if not cid:
-            return None
-        ch = guild.get_channel(cid)
-        if ch is None:
-            ch = self.bot.get_channel(cid)
-        return ch if isinstance(ch, discord.TextChannel) else None
+        return await core.fetch_guild_alert_text_channel(self.bot, guild)
 
     async def _send_card_alert(
         self,

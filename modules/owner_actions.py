@@ -76,29 +76,73 @@ async def run_cogs(bot: commands.Bot, interaction: discord.Interaction) -> None:
 
 
 async def run_test_alert(bot: commands.Bot, interaction: discord.Interaction) -> None:
-    if not isinstance(interaction.channel, discord.TextChannel):
-        await interaction.followup.send("❌ Utilise cette action dans un salon texte.", ephemeral=True)
+    """Carte identique aux annonces salon ; envoi dans le salon `/setchannel` du serveur si défini."""
+    if not interaction.guild:
+        await interaction.followup.send(
+            "❌ Utilise **`/owner` sur un serveur** pour tester l’envoi dans le salon des sorties (`/setchannel`).",
+            ephemeral=True,
+        )
         return
     try:
         item = core.get_my_next_airing_one()
         if not item:
             await interaction.followup.send(
-                "Aucun prochain épisode à afficher (vérifie `ANILIST_USERNAME` / API AniList).",
+                "Aucun prochain épisode à afficher (vérifie **`ANILIST_USERNAME`** dans `.env` / API AniList).",
                 ephemeral=True,
             )
             return
         item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
+        c = item.get("cover")
+        if c and not item.get("cover_urls"):
+            item["cover_urls"] = [c]
+
         img_path = generate_next_card(
             item,
             out_path=os.path.join(tempfile.gettempdir(), "test_alert.png"),
             scale=1.2,
             padding=40,
         )
-        await interaction.channel.send(
-            "🧪 Test alerte (carte) :",
-            file=discord.File(img_path, filename="test_alert.png"),
+
+        gid = interaction.guild.id
+        configured_id = core.resolve_guild_alert_channel_id(gid)
+        target = await core.fetch_guild_alert_text_channel(bot, interaction.guild)
+        if configured_id is not None and target is None:
+            await interaction.followup.send(
+                "❌ Le salon d’annonces configuré pour ce serveur est **introuvable** (supprimé ou bot sans accès). "
+                "Refais **`/setchannel`** dans le bon salon, ou vérifie les permissions.",
+                ephemeral=True,
+            )
+            return
+        via_setchannel = target is not None
+        if target is None:
+            ch = interaction.channel
+            target = ch if isinstance(ch, discord.TextChannel) else None
+        if target is None:
+            await interaction.followup.send("❌ Impossible de trouver un salon texte pour l’envoi.", ephemeral=True)
+            return
+
+        # Même format que `cogs/alerts` (fichier PNG seul) + ligne pour repérer le test.
+        header = "📺 **Sortie** — l’épisode est disponible !\n`🧪 Test owner`"
+        try:
+            await target.send(
+                header,
+                file=discord.File(img_path, filename="test_alert.png"),
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                f"❌ Envoi refusé dans {target.mention} — vérifie que le bot peut **écrire** et **joindre des fichiers**.",
+                ephemeral=True,
+            )
+            return
+
+        where = target.mention
+        if not via_setchannel:
+            where += " _(aucun salon `/setchannel` sur ce serveur — test dans le salon où tu as ouvert /owner)_"
+        await interaction.followup.send(
+            f"✅ Carte envoyée dans {where}.\n"
+            "_L’image vient du **prochain épisode** de la liste **`ANILIST_USERNAME`** du bot — ce n’est pas forcément la même série que les annonces automatiques du serveur._",
+            ephemeral=True,
         )
-        await interaction.followup.send("✅ Carte envoyée dans ce salon.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Erreur : `{type(e).__name__}: {e}`", ephemeral=True)
 
@@ -286,7 +330,7 @@ ACTIONS: list[tuple[str, str, str]] = [
     ("debug_pub", "Debug publié", "GLOBAL vs GUILD sur ce serveur"),
     ("publish_global", "Sync globale", "Republie toutes les commandes en GLOBAL (rare)"),
     ("cogs", "Cogs chargés", "Liste des extensions Python chargées"),
-    ("test_alert", "Test carte alerte", "Envoie une carte test dans ce salon (AniList)"),
+    ("test_alert", "Test carte alerte", "Envoie la carte dans le salon /setchannel (sinon salon actuel)"),
     ("show_channel", "Salons config", "Récap salons alertes / XP / raid (ce serveur)"),
     ("recap_mensuel", "Stats internes", "Pics, usages slash, mois courant / précédent"),
     ("raid_owner_start", "Raid test (owner)", "Lance un raid sans consommer /raidstart"),

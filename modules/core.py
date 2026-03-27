@@ -2893,6 +2893,52 @@ def set_guild_alert_channel(guild_id: int, channel_id: int) -> None:
     save_config(cfg)
 
 
+def resolve_guild_alert_channel_id(guild_id: int) -> Optional[int]:
+    """
+    ID du salon des sorties d’épisode pour cette guilde.
+
+    - D’abord `guild_alert_channels` (comme `/setchannel`).
+    - Si la map est **vide**, repli sur le **`channel_id`** legacy global (même logique que
+      `bot._iter_alert_text_channels` / annonces AniList).
+    - Si la map contient d’autres serveurs mais pas celui-ci, pas de repli legacy (évite le mauvais salon).
+    """
+    cid = get_guild_alert_channel_id(guild_id)
+    if cid is not None:
+        return cid
+    cfg = get_config()
+    m = cfg.get("guild_alert_channels") or {}
+    if m:
+        return None
+    leg = cfg.get("channel_id")
+    if not leg:
+        return None
+    try:
+        return int(leg)
+    except Exception:
+        return None
+
+
+async def fetch_guild_alert_text_channel(
+    bot: discord.Client, guild: discord.Guild
+) -> Optional[discord.TextChannel]:
+    """
+    Résout le salon texte des annonces sorties (config + legacy), avec repli API si absent du cache.
+    Même intention que les alertes automatiques (`cogs.alerts`).
+    """
+    rid = resolve_guild_alert_channel_id(guild.id)
+    if not rid:
+        return None
+    ch = guild.get_channel(rid) or bot.get_channel(rid)
+    if isinstance(ch, discord.TextChannel):
+        return ch
+    if ch is None:
+        try:
+            ch = await guild.fetch_channel(rid)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return None
+    return ch if isinstance(ch, discord.TextChannel) else None
+
+
 def get_guild_levelup_channel_id(guild_id: int) -> Optional[int]:
     """Salon des annonces de **montée de niveau XP** (optionnel, `/setlevelupchannel`)."""
     cfg = get_config()
