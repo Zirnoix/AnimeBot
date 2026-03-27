@@ -1,0 +1,101 @@
+2026-03-27 18:49:59,417 - AnimeBot - INFO - Chargé: cogs.admin_anilist
+2026-03-27 18:49:59,420 - AnimeBot - INFO - Chargé: cogs.airings_admin
+2026-03-27 18:49:59,425 - AnimeBot - INFO - Chargé: cogs.alerts
+2026-03-27 18:49:59,426 - AnimeBot - INFO - Chargé: cogs.anilist_sync
+2026-03-27 18:49:59,427 - AnimeBot - INFO - Chargé: cogs.botinfo
+2026-03-27 18:49:59,432 - AnimeBot - INFO - Chargé: cogs.community_games
+2026-03-27 18:49:59,433 - AnimeBot - INFO - Chargé: cogs.discovery
+2026-03-27 18:49:59,438 - AnimeBot - INFO - Chargé: cogs.emoji_autosync
+2026-03-27 18:49:59,440 - AnimeBot - INFO - Chargé: cogs.emoji_status
+2026-03-27 18:49:59,448 - AnimeBot - INFO - Chargé: cogs.engagement
+2026-03-27 18:49:59,454 - AnimeBot - INFO - Chargé: cogs.episodes
+2026-03-27 18:49:59,455 - AnimeBot - INFO - Chargé: cogs.events
+2026-03-27 18:49:59,456 - AnimeBot - INFO - Chargé: cogs.help
+2026-03-27 18:49:59,458 - AnimeBot - INFO - Chargé: cogs.link
+2026-03-27 18:49:59,460 - AnimeBot - INFO - Chargé: cogs.minigames
+2026-03-27 18:50:18,403 - cogs.opening - INFO - Guess OP catalogue : +2195 entrées (import legacy JSON)
+2026-03-27 18:50:18,403 - AnimeBot - INFO - Chargé: cogs.opening
+2026-03-27 18:50:18,409 - AnimeBot - INFO - Chargé: cogs.owner_hub
+2026-03-27 18:50:18,410 - AnimeBot - INFO - Chargé: cogs.presence
+2026-03-27 18:50:18,413 - AnimeBot - INFO - Chargé: cogs.profile
+2026-03-27 18:50:18,415 - AnimeBot - INFO - Chargé: cogs.quiz
+2026-03-27 18:50:18,416 - AnimeBot - INFO - Chargé: cogs.quiz_reset
+2026-03-27 18:50:18,422 - AnimeBot - INFO - Chargé: cogs.reminder_digest
+2026-03-27 18:50:18,424 - AnimeBot - INFO - Chargé: cogs.stats
+2026-03-27 18:50:18,426 - AnimeBot - INFO - Chargé: cogs.tracker
+2026-03-27 18:50:18,427 - AnimeBot - INFO - Chargé: cogs.utils
+2026-03-27 18:50:18,427 - AnimeBot - INFO - Cogs chargés (25): cogs.admin_anilist, cogs.airings_admin, cogs.alerts, cogs.anilist_sync, cogs.botinfo, cogs.community_games, cogs.discovery, cogs.emoji_autosync, cogs.emoji_status, cogs.engagement, cogs.episodes, cogs.events, cogs.help, cogs.link, cogs.minigames, cogs.opening, cogs.owner_hub, cogs.presence, cogs.profile, cogs.quiz, cogs.quiz_reset, cogs.reminder_digest, cogs.stats, cogs.tracker, cogs.utils
+2026-03-27 18:50:18,452 - asyncio - ERROR - Task exception was never retrieved
+future: <Task finished name='discord-ext-tasks: Alerts.check_airing' coro=<Loop._loop() done, defined at C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py:208> exception=RuntimeError('Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method')>
+Traceback (most recent call last):
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 210, in _loop
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 194, in _call_loop_function
+  File "C:\Users\jusco\Downloads\AnimeBot\cogs\alerts.py", line 173, in before
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\client.py", line 1230, in wait_until_ready
+RuntimeError: Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method
+2026-03-27 18:50:18,452 - asyncio - ERROR - Task exception was never retrieved
+future: <Task finished name='discord-ext-tasks: CommunityGames.raid_scheduler' coro=<Loop._loop() done, defined at C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py:208> exception=RuntimeError('Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method')>
+Traceback (most recent call last):
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 210, in _loop
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 194, in _call_loop_function
+  File "C:\Users\jusco\Downloads\AnimeBot\cogs\community_games.py", line 2185, in _raid_sched_before
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\client.py", line 1230, in wait_until_ready
+RuntimeError: Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method
+2026-03-27 18:50:18,453 - asyncio - ERROR - Task exception was never retrieved
+future: <Task finished name='discord-ext-tasks: ReminderDigest.ticker' coro=<Loop._loop() done, defined at C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py:208> exception=RuntimeError('Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method')>
+Traceback (most recent call last):
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 210, in _loop
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 194, in _call_loop_function
+  File "C:\Users\jusco\Downloads\AnimeBot\cogs\reminder_digest.py", line 250, in before_ticker
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\client.py", line 1230, in wait_until_ready
+RuntimeError: Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method
+2026-03-27 18:50:18,453 - asyncio - ERROR - Task exception was never retrieved
+future: <Task finished name='discord-ext-tasks: Tracker.alert_loop' coro=<Loop._loop() done, defined at C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py:208> exception=RuntimeError('Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method')>
+Traceback (most recent call last):
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 210, in _loop
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 194, in _call_loop_function
+  File "C:\Users\jusco\Downloads\AnimeBot\cogs\tracker.py", line 490, in before_alert_loop
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\client.py", line 1230, in wait_until_ready
+RuntimeError: Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method
+2026-03-27 18:50:18,453 - asyncio - ERROR - Task exception was never retrieved
+future: <Task finished name='discord-ext-tasks: Openings.guessop_catalog_harvest' coro=<Loop._loop() done, defined at C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py:208> exception=RuntimeError('Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method')>
+Traceback (most recent call last):
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 210, in _loop
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 194, in _call_loop_function
+  File "C:\Users\jusco\Downloads\AnimeBot\cogs\opening.py", line 326, in _before_guessop_harvest
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\client.py", line 1230, in wait_until_ready
+RuntimeError: Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method
+2026-03-27 18:50:18,453 - asyncio - ERROR - Task exception was never retrieved
+future: <Task finished name='discord-ext-tasks: QuizMonthlyReset.loop_check' coro=<Loop._loop() done, defined at C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py:208> exception=RuntimeError('Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method')>
+Traceback (most recent call last):
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 210, in _loop
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\ext\tasks\__init__.py", line 194, in _call_loop_function
+  File "C:\Users\jusco\Downloads\AnimeBot\cogs\quiz_reset.py", line 68, in before_loop
+  File "C:\Users\jusco\AppData\Local\Programs\Python\Python313\Lib\site-packages\discord\client.py", line 1230, in wait_until_ready
+RuntimeError: Client has not been properly initialised. Please use the login method or asynchronous context manager before calling this method
+2026-03-27 18:51:15,950 - AnimeBot - INFO - Chargé: cogs.admin_anilist
+2026-03-27 18:51:15,952 - AnimeBot - INFO - Chargé: cogs.airings_admin
+2026-03-27 18:51:15,956 - AnimeBot - INFO - Chargé: cogs.alerts
+2026-03-27 18:51:15,956 - AnimeBot - INFO - Chargé: cogs.anilist_sync
+2026-03-27 18:51:15,957 - AnimeBot - INFO - Chargé: cogs.botinfo
+2026-03-27 18:51:15,961 - AnimeBot - INFO - Chargé: cogs.community_games
+2026-03-27 18:51:15,962 - AnimeBot - INFO - Chargé: cogs.discovery
+2026-03-27 18:51:15,963 - AnimeBot - INFO - Chargé: cogs.emoji_autosync
+2026-03-27 18:51:15,964 - AnimeBot - INFO - Chargé: cogs.emoji_status
+2026-03-27 18:51:15,966 - AnimeBot - INFO - Chargé: cogs.engagement
+2026-03-27 18:51:15,968 - AnimeBot - INFO - Chargé: cogs.episodes
+2026-03-27 18:51:15,968 - AnimeBot - INFO - Chargé: cogs.events
+2026-03-27 18:51:15,969 - AnimeBot - INFO - Chargé: cogs.help
+2026-03-27 18:51:15,971 - AnimeBot - INFO - Chargé: cogs.link
+2026-03-27 18:51:15,972 - AnimeBot - INFO - Chargé: cogs.minigames
+2026-03-27 18:51:34,458 - AnimeBot - INFO - Chargé: cogs.opening
+2026-03-27 18:51:34,460 - AnimeBot - INFO - Chargé: cogs.owner_hub
+2026-03-27 18:51:34,461 - AnimeBot - INFO - Chargé: cogs.presence
+2026-03-27 18:51:34,463 - AnimeBot - INFO - Chargé: cogs.profile
+2026-03-27 18:51:34,465 - AnimeBot - INFO - Chargé: cogs.quiz
+2026-03-27 18:51:34,465 - AnimeBot - INFO - Chargé: cogs.quiz_reset
+2026-03-27 18:51:34,467 - AnimeBot - INFO - Chargé: cogs.reminder_digest
+2026-03-27 18:51:34,469 - AnimeBot - INFO - Chargé: cogs.stats
+2026-03-27 18:51:34,473 - AnimeBot - INFO - Chargé: cogs.tracker
+2026-03-27 18:51:34,474 - AnimeBot - INFO - Chargé: cogs.utils
+2026-03-27 18:51:34,474 - AnimeBot - INFO - Cogs chargés (25): cogs.admin_anilist, cogs.airings_admin, cogs.alerts, cogs.anilist_sync, cogs.botinfo, cogs.community_games, cogs.discovery, cogs.emoji_autosync, cogs.emoji_status, cogs.engagement, cogs.episodes, cogs.events, cogs.help, cogs.link, cogs.minigames, cogs.opening, cogs.owner_hub, cogs.presence, cogs.profile, cogs.quiz, cogs.quiz_reset, cogs.reminder_digest, cogs.stats, cogs.tracker, cogs.utils
