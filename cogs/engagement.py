@@ -69,6 +69,15 @@ def _days_until(d: date) -> int:
     t = _today_date()
     return max(0, (d - t).days)
 
+
+def _next_mission_reset_unix() -> int:
+    """Unix (UTC) du prochain minuit dans le fuseau du bot — pour `<t:…:R>` (compte à rebours côté Discord)."""
+    now = datetime.now(tz=core.TIMEZONE)
+    start_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_midnight = start_today + timedelta(days=1)
+    return int(next_midnight.timestamp())
+
+
 # Barème de récompenses selon difficulté (min, max)
 REWARD_TABLE = {
     "EASY":   (20, 35),
@@ -406,10 +415,16 @@ class Engagement(commands.Cog):
         embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
         embed.add_field(name="Enjeu", value=f"**+{_fmt(xp)} XP** · {diff_badge}", inline=False)
         embed.add_field(name="Comment faire", value=hint, inline=False)
+        ts = _next_mission_reset_unix()
+        embed.add_field(
+            name="⏱️ Prochaine mission",
+            value=f"Nouvelle mission <t:{ts}:R> (minuit, fuseau du bot).",
+            inline=False,
+        )
         if m.get("completed"):
             embed.add_field(
                 name="Demain",
-                value="Une **nouvelle mission** sera tirée après minuit (fuseau du bot). Pense à **`/checkin`** pour la série !",
+                value="Pense à **`/checkin`** pour la série !",
                 inline=False,
             )
         else:
