@@ -256,6 +256,26 @@ def _next_raid_moment(now: datetime, weekday: int, hour: int, minute: int) -> da
     return now + timedelta(days=7)
 
 
+def _resolve_scheduled_raid_for_loop(now: datetime, weekday: int, hour: int, minute: int) -> datetime:
+    """Créneau T utilisé pour l’alerte 1 h et le lancement auto.
+
+    `_next_raid_moment` utilise `cand > now` : dès **l’heure pile** du raid (ou juste après un
+    redémarrage), le « prochain » raid devient **la semaine suivante**, ce qui annule la fenêtre
+    d’alerte et peut faire rater le démarrage auto. Tant qu’on est encore dans
+    ``[T - 1h, T + 4 min)`` pour un créneau T du calendrier, on retourne ce T.
+    """
+    tz = now.tzinfo or core.TIMEZONE
+    wd = int(weekday) % 7
+    for delta in range(-7, 15):
+        day = (now + timedelta(days=delta)).date()
+        if day.weekday() != wd:
+            continue
+        t = datetime.combine(day, time(hour, minute), tzinfo=tz)
+        if t - timedelta(hours=1) <= now < t + timedelta(minutes=4):
+            return t
+    return _next_raid_moment(now, weekday, hour, minute)
+
+
 def _raid_status_embed(guild: discord.Guild) -> discord.Embed:
     """Embed lisible (thème sombre Discord) pour /raid statut et récap config."""
     cfg = _load_raid_cfg().get(str(guild.id), {})
@@ -2152,7 +2172,7 @@ class CommunityGames(commands.Cog):
             weekday = int(c.get("weekday", 5))
             hour = int(c.get("hour", 20))
             minute = int(c.get("minute", 0))
-            raid_at = _next_raid_moment(now, weekday, hour, minute)
+            raid_at = _resolve_scheduled_raid_for_loop(now, weekday, hour, minute)
             wkey = _week_key(raid_at)
             alert_at = raid_at - timedelta(hours=1)
 
@@ -2163,18 +2183,42 @@ class CommunityGames(commands.Cog):
                         allowed_mentions=discord.AllowedMentions(everyone=True),
                     )
                 except Exception as e:
-                    LOG.warning("raid alert: %s", e)
-                with core.DATA_JSON_LOCK:
-                    cfg2 = _load_raid_cfg()
-                    if gid_str in cfg2:
-                        cfg2[gid_str]["alert_sent_for_week"] = wkey
-                    _save_raid_cfg(cfg2)
+                    LOG.warning(
+                        "raid alert 1h: échec envoi serveur=%r (%s) salon=%s semaine=%s — %s",
+                        guild.name,
+                        gid,
+                        ch_id,
+                        wkey,
+                        e,
+                    )
+                else:
+                    LOG.info(
+                        "raid alert 1h: envoyé serveur=%r (%s) salon=%s semaine=%s créneau=%s",
+                        guild.name,
+                        gid,
+                        ch_id,
+                        wkey,
+                        raid_at.isoformat(),
+                    )
+                    with core.DATA_JSON_LOCK:
+                        cfg2 = _load_raid_cfg()
+                        if gid_str in cfg2:
+                            cfg2[gid_str]["alert_sent_for_week"] = wkey
+                        _save_raid_cfg(cfg2)
 
             if (
                 c.get("raid_started_for_week") != wkey
                 and raid_at <= now < raid_at + timedelta(minutes=4)
                 and not _active_raids.get(guild.id)
             ):
+                LOG.info(
+                    "raid auto: lancement boss serveur=%r (%s) semaine=%s créneau=%s (now=%s)",
+                    guild.name,
+                    gid,
+                    wkey,
+                    raid_at.isoformat(),
+                    now.isoformat(),
+                )
                 try:
                     await self._start_boss_raid(guild, channel, wkey)
                 except Exception as e:
