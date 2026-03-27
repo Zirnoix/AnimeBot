@@ -10,14 +10,14 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules import core
-from modules.badges import BADGES, evaluate_tier
+from modules.badges import BADGES, BADGE_SECTION_TITLE_FR, evaluate_tier, iter_badges_sorted, tier_name_fr
 from modules.badge_helpers import badge_count_for_spec
 from modules.emoji_utils import get_emoji
 
 # Couleurs cohérentes (proche blurple Discord + or trophées)
 _EMBED_OVERVIEW = discord.Color.from_rgb(88, 101, 242)
 _EMBED_MINIS = discord.Color.from_rgb(52, 58, 64)
-_EMBED_BADGES = discord.Color.from_rgb(212, 168, 67)
+_EMBED_BADGES = discord.Color.from_rgb(155, 89, 182)
 
 # Ordre d’affichage pour /animetop aperçu (clé mini_scores.json → libellé)
 _ANITOP_GAME_LABELS: list[tuple[str, str]] = [
@@ -201,6 +201,16 @@ def _xp_bar(xp: int, next_xp: int, seg: int = 20) -> str:
     return "🟦" * progress + "⬛" * (seg - progress)
 
 
+def _append_badge_section_header(lines: list[str], state: list[str | None], category: str) -> None:
+    """Insère un titre de section (catégorie) avant la prochaine ligne, si besoin."""
+    if category != state[0]:
+        title = BADGE_SECTION_TITLE_FR.get(category, BADGE_SECTION_TITLE_FR["autre"])
+        if lines:
+            lines.append("")
+        lines.append(f"**— {title} —**")
+        state[0] = category
+
+
 def _pct_bar(cur: int, total: int, width: int = 14) -> str:
     """Barre texte compacte (cur/total)."""
     if total <= 0:
@@ -317,7 +327,7 @@ def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
     unlocked_n = 0
     visible_total = 0
 
-    for _bid, spec in BADGES.items():
+    for _bid, spec in iter_badges_sorted():
         count = badge_count_for_spec(spec, counts)
 
         thresholds = spec["thresholds"]
@@ -340,7 +350,8 @@ def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
                 if resolved:
                     icon = resolved
             paliers = len(thresholds)
-            unlocked_lines.append(f"{icon} **{spec['name']}** · palier **{tier + 1}/{paliers}**")
+            rank = tier_name_fr(tier)
+            unlocked_lines.append(f"{icon} **{spec['name']}** · _{rank}_ ({tier + 1}/{paliers})")
         elif not hidden and thresholds:
             need = int(thresholds[0])
             ratio = (count / need) if need else 0.0
@@ -519,8 +530,8 @@ def _embed_badges(ctx, bot, counts):
     e = discord.Embed(
         title="🏅 Trophées",
         description=(
-            f"{bar} **{pct}%** · **{un}** / **{s['visible_total']}** pistes avec au moins un palier\n"
-            f"_Détail, paliers et secrets : **`/mybadges`**_"
+            f"{bar} **{pct}%** · **{un}** / **{s['visible_total']}** séries avec au moins un rang (**Initié → Mythe**)\n"
+            f"_Détail par catégorie : **`/mybadges`**_"
         ),
         color=_EMBED_BADGES,
     )
@@ -556,12 +567,15 @@ def _build_mybadges_payload(bot: commands.Bot, counts: dict) -> dict[str, Any]:
     unlocked: list[str] = []
     locked: list[str] = []
     mystery: list[str] = []
+    sec_u: list[str | None] = [None]
+    sec_l: list[str | None] = [None]
 
-    for _bid, spec in BADGES.items():
+    for _bid, spec in iter_badges_sorted():
         count = badge_count_for_spec(spec, counts)
         thresholds = spec["thresholds"]
         icon_list = spec["icons"]
         tier, next_th = evaluate_tier(count, thresholds)
+        cat = spec.get("category", "autre")
 
         if spec.get("hidden", False) and (tier is None or tier < 0):
             if thresholds:
@@ -578,9 +592,11 @@ def _build_mybadges_payload(bot: commands.Bot, counts: dict) -> dict[str, Any]:
                 if resolved:
                     icon = resolved
             paliers = len(thresholds)
-            prog = f"{count}/{next_th}" if next_th else "MAX"
+            rank = tier_name_fr(tier)
+            prog = f"{count}/{next_th}" if next_th else "**max**"
+            _append_badge_section_header(unlocked, sec_u, cat)
             unlocked.append(
-                f"{icon} **{spec['name']}** · palier **{tier + 1}/{paliers}** ({prog})\n"
+                f"{icon} **{spec['name']}** · _{rank}_ · {prog}\n"
                 f"_{spec['desc']}_"
             )
         elif thresholds:
@@ -588,6 +604,7 @@ def _build_mybadges_payload(bot: commands.Bot, counts: dict) -> dict[str, Any]:
             rest = max(0, need - count)
             pct = min(100, int(round(100 * count / need))) if need else 0
             bar = _pct_bar(count, need, 10)
+            _append_badge_section_header(locked, sec_l, cat)
             locked.append(
                 f"{bar} **{spec['name']}** — {count}/{need} ({pct}%) · reste **{rest}**\n"
                 f"_{spec['desc']}_"
@@ -635,8 +652,8 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
         e = discord.Embed(
             title=f"🏅 Trophées — {ctx.author.display_name}",
             description=(
-                f"{bar} **{pct}%** · **{un}** pistes avec au moins un palier sur **{s['visible_total']}** visibles\n"
-                f"_Utilise le menu pour le détail._"
+                f"{bar} **{pct}%** · **{un}** rangs obtenus sur **{s['visible_total']}** séries visibles\n"
+                f"_Rangs : **Initié** → **Confirmé** → **Vétéran** → **Élite** → **Mythe** · Menu ci-dessous._"
             ),
             color=_EMBED_BADGES,
         )
@@ -994,7 +1011,10 @@ class Profile(commands.Cog):
         emb.set_footer(text="mini_scores.json · défaites pas toujours comptées selon le jeu")
         return emb
 
-    @commands.hybrid_command(name="mybadges", description="Liste tes badges et ta progression")
+    @commands.hybrid_command(
+        name="mybadges",
+        description="Trophées par catégorie (rangs Initié→Mythe) et progression.",
+    )
     async def mybadges(self, ctx: commands.Context) -> None:
         user_id = ctx.author.id
         counts = _get_user_counts(user_id)

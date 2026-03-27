@@ -57,7 +57,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     # Stats
     "mycard": "Carte profil AniList (stats, badges, streak).",
     "mystats": "Stats AniList (vus, jours, score moyen, genre favori).",
-    "mybadges": "Liste tes badges et ta progression.",
+    "mybadges": "Trophées par catégorie (rangs Initié → Mythe) et barres de progression.",
     "duelstats": "Duel d’engagement AniList : complétés, en cours, épisodes, temps (+ note si les deux notent).",
     "quiztop": "Top du classement quiz + podium du mois dernier et récompenses.",
     "animetop": "Classement mini-jeux avec menu déroulant (total, aperçu ou un jeu) — podium + tableau ; noms via Discord si hors serveur.",

@@ -119,7 +119,7 @@ class Onboarding(commands.Cog):
                     "• L’**XP** augmente ton **niveau global** et change ton **titre** (voir **`/mycard`**, **`/myrank`**).\n"
                     "• Tu en gagnes en jouant (**`/animequiz`**, devinettes, **`/duel`**, **raid boss**, etc.), "
                     "avec **`/checkin`** (quotidien + streak) et **`/mission`** (objectif du jour).\n"
-                    "• **`/mybadges`** — progression par activité · **`/animetop`** / **`/quiztop`** — classements.\n"
+                    "• **`/mybadges`** — trophées par catégorie (rangs Initié→Mythe) · **`/animetop`** / **`/quiztop`** — classements.\n"
                     "• **`/mystats`** — stats AniList détaillées une fois le compte lié.\n"
                     "• **Nouveaux titres** (global XP ou quiz) : annoncés dans le salon de la partie, ou dans un salon dédié avec **`/setlevelupchannel`** (pas une ligne par niveau intermédiaire pour l’XP)."
                 ),

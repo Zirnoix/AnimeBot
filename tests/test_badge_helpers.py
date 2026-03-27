@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from modules.badge_helpers import badge_count_for_spec
+from modules.badges import tier_name_fr
 
 
 def test_mini_sum_adds_keys() -> None:
@@ -29,3 +30,9 @@ def test_streak_fallback_streak_days() -> None:
 
 def test_unknown_source_returns_zero() -> None:
     assert badge_count_for_spec({"source": "other:foo"}, {}) == 0
+
+
+def test_tier_name_fr() -> None:
+    assert tier_name_fr(0) == "Initié"
+    assert tier_name_fr(4) == "Mythe"
+    assert "Palier" in tier_name_fr(10)
