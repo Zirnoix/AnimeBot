@@ -109,24 +109,11 @@ class Alerts(commands.Cog):
                 scale=1.2,
                 padding=40,
             )
-            title = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "Anime"
-            ep = anime.get("episode") or "?"
-            genres = anime.get("genres") or []
-            genres_txt = " • ".join(str(g) for g in genres[:8]) if genres else "—"
-            when = anime.get("when") or ""
+            # Comme /next : texte + PNG uniquement (pas d’embed). Un embed + url AniList déclenchait
+            # une preview Discord imbriquée avec vignette grise ; l’image suffit (carte déjà complète).
             fn = f"sortie_{media_id}_{episode_key}.png"
-            em = discord.Embed(
-                title=title[:256],
-                description=f"**Épisode {ep}**\n{genres_txt}\n🕐 {when}"[:4096],
-                color=discord.Color.from_rgb(52, 73, 94),
-            )
-            su = anime.get("siteUrl")
-            if isinstance(su, str) and su.startswith("http"):
-                em.url = su[:2048]
-            em.set_image(url=f"attachment://{fn}")
             await ch.send(
                 content=header,
-                embed=em,
                 file=discord.File(img_path, filename=fn),
             )
             if media_id:
