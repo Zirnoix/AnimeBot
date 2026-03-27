@@ -499,6 +499,22 @@ def get_airings_global(days: int = 14, limit: int = 200) -> List[dict]:
     return out
 
 
+def _best_anilist_cover_url(media: dict | None) -> str | None:
+    """URL cover AniList (extraLarge > large > medium) ; évite vignette vide si seul `large` manque."""
+    if not media:
+        return None
+    ci = media.get("coverImage")
+    if isinstance(ci, str) and ci.strip():
+        return ci.strip()
+    if isinstance(ci, dict):
+        return (
+            ci.get("extraLarge")
+            or ci.get("large")
+            or ci.get("medium")
+        )
+    return None
+
+
 def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: int) -> List[dict]:
     """
     Pour chaque media_id, interroge nextAiringEpisode : si la date est passée mais encore dans
@@ -511,7 +527,7 @@ def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: i
     for i, mid in enumerate(media_ids):
         parts.append(
             f"a{i}: Media(id: {int(mid)}, type: ANIME) {{ id siteUrl title {{ romaji english native }} "
-            f"coverImage {{ large }} genres nextAiringEpisode {{ episode airingAt }} }}"
+            f"coverImage {{ extraLarge large medium }} genres nextAiringEpisode {{ episode airingAt }} }}"
         )
     query = "query { " + " ".join(parts) + " }"
     data = query_anilist(query, {}) or {}
@@ -538,7 +554,7 @@ def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: i
                     "id": m.get("id"),
                     "siteUrl": m.get("siteUrl"),
                     "title": t,
-                    "cover": (m.get("coverImage") or {}).get("large"),
+                    "cover": _best_anilist_cover_url(m),
                     "genres": m.get("genres") or [],
                 },
             }
@@ -578,7 +594,7 @@ def _fetch_airing_schedules_past_window(
                 id
                 siteUrl
                 title { romaji english native }
-                coverImage { large }
+                coverImage { extraLarge large medium }
                 genres
                 isAdult
               }
@@ -607,7 +623,7 @@ def _fetch_airing_schedules_past_window(
                         "id": m.get("id"),
                         "siteUrl": m.get("siteUrl"),
                         "title": m.get("title") or {},
-                        "cover": (m.get("coverImage") or {}).get("large"),
+                        "cover": _best_anilist_cover_url(m),
                         "genres": m.get("genres") or [],
                     },
                 }
@@ -674,7 +690,7 @@ def get_recent_airings_for_guild(
                         "id": m.get("id"),
                         "siteUrl": m.get("siteUrl"),
                         "title": t,
-                        "cover": (m.get("coverImage") or {}).get("large"),
+                        "cover": _best_anilist_cover_url(m),
                         "genres": m.get("genres") or [],
                     },
                 }
@@ -695,13 +711,16 @@ def airing_item_to_card_dict(item: dict, *, tz_name: str = "Europe/Paris") -> di
     except Exception:
         ep_disp = ep if ep is not None else "?"
     when_str = format_airing_datetime_fr(ts, tz_name) if ts else "date inconnue"
+    cov = m.get("cover")
+    if not cov:
+        cov = _best_anilist_cover_url(m)
     return {
         "title_romaji": t.get("romaji"),
         "title_english": t.get("english"),
         "title_native": t.get("native"),
         "episode": ep_disp,
         "airingAt": ts,
-        "cover": m.get("cover"),
+        "cover": cov,
         "genres": m.get("genres") or [],
         "when": when_str,
     }

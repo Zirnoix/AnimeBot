@@ -256,34 +256,65 @@ def _next_raid_moment(now: datetime, weekday: int, hour: int, minute: int) -> da
     return now + timedelta(days=7)
 
 
-def _format_raid_status_message(guild: discord.Guild) -> str:
-    """Texte unique pour /raid statut et /raidconfig sans paramètres."""
+def _raid_status_embed(guild: discord.Guild) -> discord.Embed:
+    """Embed lisible (thème sombre Discord) pour /raid statut et récap config."""
     cfg = _load_raid_cfg().get(str(guild.id), {})
     ch = cfg.get("channel_id")
-    ch_txt = f"<#{ch}>" if ch else "— *(non configuré — admins : `/raidconfig`)*"
+    ch_txt = f"<#{ch}>" if ch else "— *non configuré* — utilise `/raidconfig` avec le paramètre **salon**."
     now = datetime.now(core.TIMEZONE)
     wd = int(cfg.get("weekday", 5))
     h = int(cfg.get("hour", 20))
-    m = int(cfg.get("minute", 0))
-    nxt = _next_raid_moment(now, wd, h, m)
+    mi = int(cfg.get("minute", 0))
+    nxt = _next_raid_moment(now, wd, h, mi)
     tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
     jname = core.JOURS_SEMAINE_FR[wd % 7]
     auto = bool(cfg.get("enabled", False))
     cur_w = _week_key(now)
     rs_w = str(cfg.get("raidstart_week_key") or "")
-    start_line = (
-        f"• **`/raidstart`** (manuel) cette semaine (`{cur_w}`) : **déjà utilisé**."
+    ts = int(nxt.timestamp())
+    raidstart_val = (
+        f"🔒 Déjà utilisé cette semaine (`{cur_w}`)."
         if rs_w == cur_w
-        else f"• **`/raidstart`** (manuel) : **disponible** cette semaine (`{cur_w}`) — _1× par semaine / serveur._"
+        else f"✅ Disponible (`{cur_w}`) — 1× par semaine / serveur."
     )
-    return (
-        f"**Raid boss**\n"
-        f"• Salon : {ch_txt}\n"
-        f"• Horaire : **{jname}** à **{h:02d}:{m:02d}** (fuseau **{tzname}**)\n"
-        f"• Lancement auto chaque semaine : **{'oui' if auto else 'non (admins : `/raidstart`)'}**\n"
-        f"{start_line}\n"
-        f"• Prochain créneau : <t:{int(nxt.timestamp())}:F> · <t:{int(nxt.timestamp())}:R>\n"
-        f"_Rappel **~1 h** avant dans le salon du raid (si auto activé et salon défini)._"
+    em = discord.Embed(
+        title="⚔️ Raid boss — statut",
+        description="Résumé pour **ce serveur** (fuseau du bot).",
+        color=discord.Color.from_rgb(52, 73, 94),
+    )
+    em.add_field(name="📍 Salon", value=ch_txt, inline=False)
+    em.add_field(
+        name="📅 Créneau hebdo",
+        value=f"**{jname}** à **{h:02d}:{mi:02d}**\n`{tzname}`",
+        inline=True,
+    )
+    em.add_field(
+        name="🤖 Lancement auto",
+        value="**Oui** — rappel ~1 h avant + combat à l’heure." if auto else "**Non** — utilise `/raidstart` manuel.",
+        inline=True,
+    )
+    em.add_field(
+        name="⏱️ Prochaine occurrence",
+        value=f"<t:{ts}:F>\n<t:{ts}:R>",
+        inline=False,
+    )
+    em.add_field(name="🎯 /raidstart (manuel)", value=raidstart_val, inline=False)
+    em.set_footer(text="Rappel ~1 h avant dans le salon du raid si l’auto est activé.")
+    return em
+
+
+def _raid_config_instructions_embed() -> discord.Embed:
+    """Texte d’aide seul (couplé à _raid_status_embed en embeds=[...])."""
+    return discord.Embed(
+        title="⚙️ /raidconfig — aide",
+        description=(
+            "Renseigne **au moins un** paramètre pour enregistrer.\n\n"
+            "**Paramètres** : **`salon`** · **`lancement_auto`** (oui/non) · **`jour`** · **`heure`** · **`minute`**\n\n"
+            "• **Salon** : alerte ~1 h avant + messages de combat.\n"
+            "• **Sans auto** : les admins utilisent **`/raidstart`**.\n"
+            "• **`/raid statut`** (éphémère) : même récap sans toucher à la config."
+        ),
+        color=discord.Color.blurple(),
     )
 
 
@@ -2163,7 +2194,10 @@ class CommunityGames(commands.Cog):
         if not interaction.guild:
             await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
             return
-        await interaction.response.send_message(_format_raid_status_message(interaction.guild))
+        await interaction.response.send_message(
+            embed=_raid_status_embed(interaction.guild),
+            ephemeral=True,
+        )
 
     @app_commands.command(
         name="raidconfig",
@@ -2208,14 +2242,7 @@ class CommunityGames(commands.Cog):
             and minute is None
         ):
             await interaction.response.send_message(
-                "Configure le raid **en une commande** — précise au moins un paramètre :\n"
-                "• **`salon`** — où poster l’alerte ~1 h avant et le combat\n"
-                "• **`lancement_auto`** — oui/non (sinon seulement **`/raidstart`** manuel)\n"
-                "• **`jour`** + **`heure`** + **`minute`** — créneau hebdo\n\n"
-                "Exemple : `/raidconfig` avec salon + lancement_auto + jour + heure + minute.\n"
-                "Pour **voir** la config sans rien changer : **`/raid statut`** (tout le monde).\n\n"
-                "— *Statut actuel (admin)* —\n"
-                + _format_raid_status_message(interaction.guild),
+                embeds=[_raid_config_instructions_embed(), _raid_status_embed(interaction.guild)],
                 ephemeral=True,
             )
             return
@@ -2246,14 +2273,23 @@ class CommunityGames(commands.Cog):
         jname = core.JOURS_SEMAINE_FR[wd % 7]
         ch_id = cur.get("channel_id")
         ch_mention = f"<#{ch_id}>" if ch_id else "—"
-        await interaction.response.send_message(
-            f"✅ **Raid** — configuration enregistrée.\n"
-            f"• Salon : {ch_mention}\n"
-            f"• Auto : **{'oui' if cur.get('enabled') else 'non'}**\n"
-            f"• **{jname}** à **{int(cur.get('hour', 20)):02d}:{int(cur.get('minute', 0)):02d}** ({tzname})\n"
-            f"• Voir tout le monde : **`/raid statut`**",
-            ephemeral=True,
+        em_ok = discord.Embed(
+            title="✅ Raid — configuration enregistrée",
+            color=discord.Color.green(),
         )
+        em_ok.add_field(name="Salon", value=ch_mention, inline=False)
+        em_ok.add_field(
+            name="Auto hebdo",
+            value="oui" if cur.get("enabled") else "non",
+            inline=True,
+        )
+        em_ok.add_field(
+            name="Créneau",
+            value=f"**{jname}** · **{int(cur.get('hour', 20)):02d}:{int(cur.get('minute', 0)):02d}**\n`{tzname}`",
+            inline=True,
+        )
+        em_ok.set_footer(text="/raid statut — récap éphémère pour vérifier sans spam.")
+        await interaction.response.send_message(embed=em_ok, ephemeral=True)
 
     @app_commands.command(name="raidstart", description="Lancer un raid boss maintenant (admin, 1× par semaine après confirmation).")
     @app_commands.default_permissions(administrator=True)

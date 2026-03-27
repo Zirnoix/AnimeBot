@@ -7,10 +7,16 @@ from PIL import Image, ImageFilter, ImageDraw, ImageFont, ImageOps
 import requests
 
 def _fetch_image(url: Optional[str]) -> Image.Image:
+    """Télécharge la cover ; si échec (403, timeout, URL vide), fond gris foncé (comme avant)."""
     if not url:
         return Image.new("RGB", (1200, 675), (20, 22, 26))
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; AnimeBot/1.0; +https://anilist.co/)",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": "https://anilist.co/",
+    }
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, timeout=12, headers=headers)
         r.raise_for_status()
         return Image.open(BytesIO(r.content)).convert("RGB")
     except Exception:

@@ -104,7 +104,7 @@ class OwnerHub(commands.Cog):
             ),
             color=discord.Color.dark_teal(),
         )
-        embed.set_footer(text="Remplace les anciennes commandes /admin et outils owner dispersés.")
+        embed.set_footer(text="Outils owner regroupés ici — Guess OP, stats, aide MP, etc.")
         await interaction.response.send_message(embed=embed, view=OwnerHubView(self.bot), ephemeral=True)
 
 
