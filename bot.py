@@ -5,7 +5,6 @@ import os
 import sys
 import asyncio
 import logging
-import tempfile
 import types
 from datetime import datetime, timezone
 from typing import Optional
@@ -16,8 +15,6 @@ from discord.ext import commands, tasks
 from discord import app_commands
 
 from modules import core
-from modules.image import generate_next_card
-
 # ========= LOGGING (unique) =========
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -116,21 +113,11 @@ class AnimeBot(commands.Bot):
         self.PURGE_GLOBAL_ON_BOOT = False
         self.AUTO_GLOBAL_SYNC = False
 
-        # Groupe /admin
-        self.admin_group = app_commands.Group(
-            name="admin",
-            description="Owner : debug slash, sync globale, cogs, test alerte, salon notifications.",
-        )
-        self._register_admin_commands()
         self.tree.interaction_check = types.MethodType(_global_tree_interaction_check, self.tree)
 
     # ---------- Setup ----------
     async def setup_hook(self) -> None:
         await self._load_extensions()
-        try:
-            self.tree.add_command(self.admin_group)
-        except Exception:
-            pass
         await self._sync_slash_commands()
         self._start_tasks()
 
@@ -433,177 +420,6 @@ class AnimeBot(commands.Bot):
             await user.send(embed=em)
         except Exception as e:
             LOG.error("_send_summary_message: %s", e)
-
-    # ---------- Admin ----------
-    def _register_admin_commands(self) -> None:
-        async def _owner_only(itx: discord.Interaction) -> bool:
-            u = getattr(itx, "user", None)
-            if u is None:
-                return False
-            try:
-                return int(u.id) == OWNER_ID
-            except (TypeError, ValueError):
-                return False
-
-        @self.admin_group.command(name="debug_tree", description="(Owner) Affiche le tree local.")
-        @app_commands.check(_owner_only)
-        async def admin_debug_tree(itx: discord.Interaction):
-            cmds = itx.client.tree.get_commands()
-            lines: list[str] = []
-            for c in cmds:
-                if isinstance(c, app_commands.Command):
-                    lines.append(f"/{c.name}")
-                elif isinstance(c, app_commands.Group):
-                    if c.commands:
-                        for sc in c.commands:
-                            lines.append(f"/{c.name} {sc.name}")
-                    else:
-                        lines.append(f"/{c.name} (group vide)")
-            chunk = "\n".join(lines) or "(aucune)"
-            await itx.response.send_message(f"```\n{chunk[:1900]}\n```", ephemeral=True)
-
-        @self.admin_group.command(name="debug_pub", description="(Owner) GLOBAL vs GUILD publiés.")
-        @app_commands.check(_owner_only)
-        async def admin_debug_pub(itx: discord.Interaction):
-            await itx.response.defer(ephemeral=True)
-            try:
-                global_cmds = await itx.client.tree.fetch_commands()
-                guild_cmds = await itx.client.tree.fetch_commands(guild=itx.guild) if itx.guild else []
-                g_names = ["/" + c.name for c in global_cmds]
-                gu_names: list[str] = []
-                for c in guild_cmds:
-                    if isinstance(c, app_commands.Command):
-                        gu_names.append("/" + c.name)
-                    else:
-                        for sc in c.commands:
-                            gu_names.append(f"/{c.name} {sc.name}")
-                txt = (
-                    f"GLOBAL ({len(g_names)}):\n" + "\n".join(sorted(g_names))[:900] +
-                    "\n\nGUILD ({len(gu_names)}):\n" + "\n".join(sorted(gu_names))[:900]
-                )
-                await itx.followup.send(f"```\n{txt}\n```", ephemeral=True)
-            except Exception as e:
-                await itx.followup.send(f"❌ debug_pub: {e}", ephemeral=True)
-
-        @self.admin_group.command(name="publish_global", description="(Owner) Publie toutes les commandes en GLOBAL (à utiliser rarement).")
-        @app_commands.check(_owner_only)
-        async def admin_publish_global(itx: discord.Interaction):
-            await itx.response.defer(ephemeral=True)
-            try:
-                cmds = await itx.client.tree.sync()
-                await itx.followup.send(f"✅ Global sync OK — {len(cmds)} commande(s) publiées.", ephemeral=True)
-            except Exception as e:
-                await itx.followup.send(f"❌ Global sync a échoué: {e}", ephemeral=True)
-
-        @self.admin_group.command(name="cogs", description="(Owner) Liste les cogs chargés.")
-        @app_commands.check(_owner_only)
-        async def admin_cogs(itx: discord.Interaction):
-            names = sorted(self._loaded_cogs or [])
-            txt = "Aucun." if not names else "\n".join(names)
-            await itx.response.send_message(f"```\n{txt}\n```", ephemeral=True)
-
-        @self.admin_group.command(
-            name="test_alert",
-            description="(Owner) Envoie une carte d’alerte test dans ce salon (comme les alertes auto).",
-        )
-        @app_commands.check(_owner_only)
-        async def admin_test_alert(itx: discord.Interaction):
-            if not isinstance(itx.channel, discord.TextChannel):
-                await itx.response.send_message("❌ Utilise cette commande dans un salon texte.", ephemeral=True)
-                return
-            await itx.response.defer(ephemeral=True)
-            try:
-                item = core.get_my_next_airing_one()
-                if not item:
-                    await itx.followup.send(
-                        "Aucun prochain épisode à afficher (vérifie `ANILIST_USERNAME` / API AniList).",
-                        ephemeral=True,
-                    )
-                    return
-                item["when"] = core.format_airing_datetime_fr(item.get("airingAt"), "Europe/Paris")
-                img_path = generate_next_card(
-                    item,
-                    out_path=os.path.join(tempfile.gettempdir(), "test_alert.png"),
-                    scale=1.2,
-                    padding=40,
-                )
-                await itx.channel.send(
-                    "🧪 Test alerte (carte) :",
-                    file=discord.File(img_path, filename="test_alert.png"),
-                )
-                await itx.followup.send("✅ Carte envoyée dans ce salon.", ephemeral=True)
-            except Exception as e:
-                await itx.followup.send(f"❌ Erreur : `{type(e).__name__}: {e}`", ephemeral=True)
-
-        @self.admin_group.command(
-            name="show_channel",
-            description="(Owner) Salons configurés sur ce serveur (alertes, level-up, raid, legacy local).",
-        )
-        @app_commands.check(_owner_only)
-        async def admin_show_channel(itx: discord.Interaction):
-            if not itx.guild:
-                await itx.response.send_message(
-                    "❌ Utilise cette commande **sur un serveur** (pas en message privé).",
-                    ephemeral=True,
-                )
-                return
-            await itx.response.defer(ephemeral=True)
-            try:
-                summary = core.format_guild_channels_config_summary(itx.client, itx.guild.id)
-                await itx.followup.send(
-                    "**Salons de notification (ce serveur)**\n" + summary,
-                    ephemeral=True,
-                )
-            except Exception:
-                await itx.followup.send(
-                    "❌ Impossible de lire la config.",
-                    ephemeral=True,
-                )
-
-        @self.admin_group.command(
-            name="recap_mensuel",
-            description="(Owner) Stats internes : mois en cours / précédent, usages slash, pics serveurs & membres.",
-        )
-        @app_commands.check(_owner_only)
-        async def admin_recap_mensuel(itx: discord.Interaction):
-            await itx.response.defer(ephemeral=True)
-            try:
-                core.owner_telemetry_refresh_peaks(itx.client)
-            except Exception:
-                pass
-            data = core.owner_telemetry_summary()
-            cur_m = data.get("current_month", "?")
-            cur = data.get("current") or {}
-            cmds_cur = cur.get("commands") or {}
-            top_cur = sorted(cmds_cur.items(), key=lambda x: (-x[1], x[0]))[:15]
-            lines = [
-                f"**Mois courant** `{cur_m}`",
-                f"· Pic **serveurs** : **{cur.get('peak_guilds', 0)}**",
-                f"· Pic **membres** (somme des guilds, max vu) : **{cur.get('peak_members', 0)}**",
-            ]
-            if top_cur:
-                lines.append("· **Top commandes slash** (comptage local, depuis la dernière rotation de mois) :")
-                for k, v in top_cur:
-                    lines.append(f"  – `{k}` — **{v}**")
-            else:
-                lines.append(
-                    "· Aucun usage slash enregistré pour ce mois (le compteur démarre après mise à jour ; "
-                    "les membres rejoignent une guilde où le bot voit du trafic)."
-                )
-            prev_m = data.get("previous_month")
-            prev = data.get("previous") or {}
-            if prev_m and prev:
-                pc = prev.get("commands") or {}
-                ptop = sorted(pc.items(), key=lambda x: (-x[1], x[0]))[:10]
-                lines.append("")
-                lines.append(
-                    f"**Mois précédent** `{prev_m}` — pic serveurs **{prev.get('peak_guilds', 0)}**, "
-                    f"membres **{prev.get('peak_members', 0)}**"
-                )
-                if ptop:
-                    lines.append("· Top : " + " · ".join(f"`{a}`×{b}" for a, b in ptop))
-            await itx.followup.send("\n".join(lines)[:1950], ephemeral=True)
-
 
 # ========= INSTANCE =========
 bot = AnimeBot()

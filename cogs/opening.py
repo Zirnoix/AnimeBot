@@ -691,68 +691,6 @@ class Openings(commands.Cog):
             except Exception:
                 pass
 
-    @commands.hybrid_command(name="guessopdb", description="(Owner) Statistiques du catalogue Guess OP")
-    @commands.is_owner()
-    async def guessop_db(self, ctx: commands.Context) -> None:
-        if getattr(ctx, "interaction", None) and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(ephemeral=True)
-        st = gopc.stats()
-        lines = "\n".join(f"• **{s}** : {c}" for s, c in st.get("by_source", [])) or "—"
-        top = gopc.top_used(5)
-        top_txt = "\n".join(f"• {t} — {u}×" for t, u in top) if top else "—"
-        em = discord.Embed(
-            title="📚 Catalogue Guess OP",
-            description=f"**{st['total']}** openings uniques (URL) — même base sur **tous** les serveurs.",
-            color=discord.Color.blue(),
-        )
-        em.add_field(name="Par source", value=lines[:1024], inline=False)
-        em.add_field(name="Plus tirés", value=top_txt[:1024], inline=False)
-        await ctx.send(embed=em)
-
-    @commands.hybrid_command(
-        name="guessopharvest",
-        description="(Owner) Enrichit le catalogue (pages AnimeThemes + aléatoire) — compte les vraies nouvelles URLs",
-    )
-    @commands.is_owner()
-    async def guessop_harvest_manual(self, ctx: commands.Context) -> None:
-        if getattr(ctx, "interaction", None) and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(ephemeral=True)
-        before = gopc.count()
-        new_inserts = 0
-        max_page = await animethemes.anime_catalog_max_page(35)
-        if max_page <= 0:
-            max_page = 1
-        # Pages : URLs listées ; `?random` seul retombe souvent sur des doublons si la base est grosse
-        for _ in range(15):
-            page = random.randint(1, max_page)
-            try:
-                items = await animethemes.harvest_openings_from_page(page, 35)
-                for t, th, url in items:
-                    if url.startswith(("http://", "https://")):
-                        _, ins = gopc.add_opening(t, th, url, "manual_page")
-                        if ins:
-                            new_inserts += 1
-            except Exception:
-                pass
-            await asyncio.sleep(0.45)
-        for _ in range(35):
-            try:
-                got = await animethemes.random_opening()
-                if got:
-                    t, th, url = got
-                    if url.startswith(("http://", "https://")):
-                        _, ins = gopc.add_opening(t, th, url, "manual_random")
-                        if ins:
-                            new_inserts += 1
-            except Exception:
-                pass
-            await asyncio.sleep(1.0)
-        after = gopc.count()
-        await ctx.send(
-            f"✅ Catalogue : **{before}** → **{after}** openings.\n"
-            f"**+{new_inserts}** nouvelles URLs (le reste était déjà en base — normal avec ~2000+ entrées)."
-        )
-
     # --- DIAG AUDIO intégré au même Cog ---
     @commands.hybrid_command(name="voicediag", description="Diagnostic audio (ffmpeg/ffprobe/opus)")
     async def voice_diag(self, ctx: commands.Context):

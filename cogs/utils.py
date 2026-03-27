@@ -2,7 +2,7 @@
 Utility commands for configuration and bot status.
 
 This cog provides utility commands such as uptime, ping, source, and /setchannel.
-Owner debug commands (test alerte, salon notifications) are under `/admin`.
+Owner : panneau **`/owner`** (menu).
 """
 
 from __future__ import annotations
@@ -54,53 +54,12 @@ class Utils(commands.Cog):
             await ctx.send(
                 "✅ Ce salon recevra les **cartes « sortie d’épisode »** pour **ce serveur**.\n"
                 "• Liste des animés suivis : **`/airings`** (ex. **`/airings all`** pour les admins).\n"
-                "• **Indépendant** du salon du **raid boss** — celui-ci se règle avec **`/raidconfig`** (paramètre salon).\n"
-                "• Vérifier la config : **`/sorties`** (tout le monde)."
+                "• **Indépendant** du salon du **raid boss** (`/raidconfig`).\n"
+                "• Si tu n’as **aucune** annonce alors que la liste est remplie : vérifie les **permissions** du bot "
+                "dans ce salon, et que l’API AniList répond (les annonces utilisent la fenêtre après diffusion)."
             )
         except Exception:
             await ctx.send("❌ Une erreur s'est produite lors de la configuration.")
-
-    @commands.hybrid_command(
-        name="sorties",
-        description="État des annonces auto « sortie d’épisode » (salon /setchannel, liste /airings).",
-    )
-    async def sorties_episodes(self, ctx: commands.Context) -> None:
-        """Vérifie salon + liste pour les cartes de sortie (pas le raid)."""
-        if not ctx.guild:
-            await ctx.send("❌ Utilise cette commande dans un serveur.")
-            return
-        cid = core.get_guild_alert_channel_id(ctx.guild.id)
-        n_wl = len(core.guild_whitelist_list(ctx.guild.id))
-        legacy = core.guild_airings_ids(ctx.guild.id)
-        n_legacy = len(legacy)
-        parts: list[str] = []
-        if cid:
-            ch = ctx.guild.get_channel(int(cid))
-            if isinstance(ch, discord.TextChannel):
-                perms = ch.permissions_for(ctx.guild.me)
-                if not perms.send_messages:
-                    parts.append(
-                        f"• Salon d’annonces : {ch.mention} — ⚠️ le bot **ne peut pas envoyer** de message ici."
-                    )
-                else:
-                    parts.append(f"• Salon d’annonces : {ch.mention}")
-            else:
-                parts.append(
-                    f"• Salon enregistré (`{cid}`) **introuvable** — refais **`/setchannel`** dans un salon valide."
-                )
-        else:
-            parts.append(
-                "• **Aucun salon** pour les sorties — un admin doit taper **`/setchannel`** "
-                "dans le salon voulu (indépendant du **raid** : `/raidconfig`)."
-            )
-        parts.append(
-            f"• Animés dans la liste serveur (`/airings`) : **{n_wl}**"
-            + (f" (+ **{n_legacy}** ID(s) table legacy)" if n_legacy else "")
-        )
-        parts.append(
-            "• Les cartes partent après la **diffusion** (fenêtre de rattrapage ~18 h, fuseau AniList)."
-        )
-        await ctx.send("**📺 Annonces de sortie d’épisode**\n" + "\n".join(parts))
 
     @commands.hybrid_command(
         name="setlevelupchannel",
@@ -142,25 +101,5 @@ class Utils(commands.Cog):
             await ctx.send("❌ Une erreur s'est produite.")
 
 
-class BotAdmin(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-
-    @commands.hybrid_command(name="setavatar")
-    @commands.is_owner()
-    async def set_avatar(self, ctx: commands.Context):
-        """Change l'avatar du bot avec l'image attachée au message."""
-        if not ctx.message.attachments:
-            return await ctx.send("❌ Envoie l'image **dans le même message** que la commande.")
-        try:
-            avatar_bytes = await ctx.message.attachments[0].read()
-            await self.bot.user.edit(avatar=avatar_bytes)
-            await ctx.send("✅ Avatar du bot mis à jour avec succès !")
-        except Exception as e:
-            await ctx.send(f"❌ Erreur : {e}")
-
-
 async def setup(bot: commands.Bot):
-    # Un seul setup qui ajoute les deux cogs
     await bot.add_cog(Utils(bot))
-    await bot.add_cog(BotAdmin(bot))

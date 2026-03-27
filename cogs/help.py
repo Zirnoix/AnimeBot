@@ -37,7 +37,6 @@ DESC_OVERRIDE: Dict[str, str] = {
     "raid statut": "Salon, horaire, auto ou non, prochain créneau (fuseau du bot).",
     "raidconfig": "Admins : une commande — salon, lancement auto, jour, heure (paramètres omis = inchangés).",
     "raidstart": "Lance un raid boss (admin) : confirmation + max 1× par semaine / serveur.",
-    "owner_raidstart": "(OWNER_ID) Lance un raid test sans consommer la limite hebdomadaire /raidstart.",
     "raidalerttest": "Envoie un message de test type « raid dans 1 h » (admin).",
     "minijeux": "Deux menus : **Devinettes (Guess)** et **Autres** — choix = lance la partie (duel → /duel @membre).",
     "higherlower": "Jeu Higher/Lower version anime.",
@@ -74,8 +73,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "clear": "Efface le suivi.",
 
     # Utils
-    "setchannel": "Salon des cartes « sortie d’épisode » (liste /airings). Pas le salon du raid — voir /sorties.",
-    "sorties": "Vérifie salon /setchannel + nombre d’animes /airings (annonces auto, pas le raid).",
+    "setchannel": "Salon des cartes « sortie d’épisode » (liste /airings). Indépendant du salon raid (`/raidconfig`).",
     "setlevelupchannel": "Salon des annonces : nouveau titre global (XP) et nouveau titre quiz (sinon : salon de la partie).",
     "clearlevelupchannel": "Retire le salon dédié aux annonces de niveau XP (comportement par défaut).",
     "guide_admin": "(MP, admins) Configuration serveur : airings, setchannel, niveaux XP, raid.",
@@ -103,15 +101,8 @@ DESC_OVERRIDE: Dict[str, str] = {
     "help": "Aide du bot. /help [commande] pour le détail.",
     "guide": "(MP) Tutoriel joueur : XP, mini-jeux, AniList — pas la config serveur (voir /guide_admin).",
 
-    # Owner — /admin (bot.py)
-    "admin": "Owner uniquement : debug slash, sync globale, cogs, test d’alerte, salon /setchannel.",
-    "admin debug_tree": "Liste les commandes slash du tree local.",
-    "admin debug_pub": "Compare commandes publiées GLOBAL vs GUILD.",
-    "admin publish_global": "Sync globale (rarement ; risque 429).",
-    "admin cogs": "Liste des extensions chargées.",
-    "admin test_alert": "Envoie une carte d’alerte test dans le salon courant.",
-    "admin show_channel": "Affiche le salon enregistré pour les alertes (/setchannel).",
-    "admin recap_mensuel": "(Owner) Récap stats internes : usages slash, pics serveurs/membres, mois courant et précédent.",
+    # Owner (OWNER_ID)
+    "owner": "Panneau propriétaire : debug, sync, stats, tests, Guess OP, raid test — menu déroulant.",
 }
 
 # ===== Sections curatées (ordre d’affichage) =====
@@ -126,7 +117,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "guessop",
         "higherlower", "minijeux",
         "raid", "raid statut", "raidconfig",
-        "raidstart", "owner_raidstart", "raidalerttest",
+        "raidstart", "raidalerttest",
     ]),
     ("🔗 Pages Link", [
         "linkanilist", "verifyanilist", "unlink"
@@ -138,10 +129,13 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "track", "track add", "track list", "track remove", "track clear"
     ]),
     ("🧰 Pages Utils", [
-        "setchannel", "sorties", "setlevelupchannel", "clearlevelupchannel", "botinfo", "ping", "dailysummary", "setalert", "reminder", "source", "uptime"
+        "setchannel", "setlevelupchannel", "clearlevelupchannel", "botinfo", "ping", "dailysummary", "setalert", "reminder", "source", "uptime"
     ]),
     ("🛠️ Pages Admin (guide)", [
         "guide_admin",
+    ]),
+    ("🔐 Propriétaire du bot", [
+        "owner",
     ]),
 ]
 
@@ -321,7 +315,7 @@ class CoreHelpView(discord.ui.View):
 
 # ===== Cog =====
 class Help(commands.Cog):
-    """Aide du bot : /help (Essentiel + MP curaté), /help <commande>, /helpowner (owner/admin)."""
+    """Aide du bot : /help (Essentiel + MP curaté), /help <commande>. Owner : /owner."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -551,31 +545,6 @@ class Help(commands.Cog):
 
         view = CoreHelpView(self._build_curated_pages, ephemeral=ephemeral_ok)
         await self._send_embed_ctx_or_itx(target, embed=em, view=view, ephemeral=ephemeral_ok)
-
-    @commands.hybrid_command(name="helpowner", description="(Owner/Admin) Aide restreinte en MP (commandes limitées).")
-    @commands.is_owner()
-    async def help_owner(self, ctx: commands.Context):
-        try:
-            if getattr(ctx, "interaction", None):
-                await ctx.interaction.response.defer(ephemeral=True)
-            pages, labels = self._build_owner_pages()
-            nav = HelpNavigator(pages, labels)
-            first = nav._with_footer(pages[0])
-            await ctx.author.send(embed=first, view=nav)
-            if getattr(ctx, "interaction", None):
-                await ctx.interaction.followup.send("📬 Aide owner/admin envoyée en MP.", ephemeral=True)
-            else:
-                await ctx.send("📬 Aide owner/admin envoyée en MP.")
-        except discord.Forbidden:
-            if getattr(ctx, "interaction", None):
-                await ctx.interaction.followup.send("❌ Impossible d’envoyer un MP (paramètres).", ephemeral=True)
-            else:
-                await ctx.send("❌ Impossible d’envoyer un MP (paramètres).")
-        except Exception:
-            if getattr(ctx, "interaction", None):
-                await ctx.interaction.followup.send("❌ Erreur inconnue à l’envoi du MP.", ephemeral=True)
-            else:
-                await ctx.send("❌ Erreur inconnue à l’envoi du MP.")
 
 async def setup(bot: commands.Bot):
     # retirer toute ancienne commande textuelle `help` si présente

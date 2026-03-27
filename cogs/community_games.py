@@ -287,12 +287,6 @@ def _format_raid_status_message(guild: discord.Guild) -> str:
     )
 
 
-def _get_owner_id() -> Optional[int]:
-    """Même variable d’environnement que `bot.py` (OWNER_ID)."""
-    x = os.getenv("OWNER_ID", "").strip()
-    return int(x) if x.isdigit() else None
-
-
 def _raidstart_week_available(guild_id: int) -> bool:
     """True si `/raidstart` n’a pas encore été consommé pour la semaine ISO courante."""
     cfg = _load_raid_cfg()
@@ -2302,40 +2296,6 @@ class CommunityGames(commands.Cog):
         )
         view = RaidStartConfirmView(self, interaction.guild, target, wk, interaction.user.id)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-    @app_commands.command(
-        name="owner_raidstart",
-        description="(Propriétaire du bot) Lance un raid test sans limite hebdomadaire /raidstart.",
-    )
-    async def owner_raid_start(self, interaction: discord.Interaction) -> None:
-        oid = _get_owner_id()
-        if oid is None or interaction.user.id != oid:
-            await interaction.response.send_message(
-                "❌ Réservé au **propriétaire** du bot (`OWNER_ID` dans l’environnement, comme au démarrage).",
-                ephemeral=True,
-            )
-            return
-        if not interaction.guild:
-            await interaction.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        if _active_raids.get(interaction.guild.id):
-            await interaction.followup.send("Un raid est déjà en cours sur ce serveur.", ephemeral=True)
-            return
-        target = _raid_target_channel(interaction.guild)
-        if target is None:
-            await interaction.followup.send(
-                "❌ Aucun salon de raid configuré. Utilise **`/raidconfig`** avec le paramètre **salon**.",
-                ephemeral=True,
-            )
-            return
-        wk = _week_key(datetime.now(core.TIMEZONE))
-        await self._start_boss_raid(interaction.guild, target, wk)
-        await interaction.followup.send(
-            f"✅ **Raid lancé** (owner) dans {target.mention}.\n"
-            "_La limite **`/raidstart`** des admins **n’est pas** consommée._",
-            ephemeral=True,
-        )
 
     @app_commands.command(name="raidalerttest", description="Envoie un message type « raid dans 1 h » (test admin).")
     @app_commands.default_permissions(administrator=True)
