@@ -923,6 +923,7 @@ class CommunityGames(commands.Cog):
         self.bot = bot
         # Évite de spammer les logs si l’alerte est skip (déjà marquée pour la semaine).
         self._raid_alert_skip_logged: set[str] = set()
+        self._raid_cross_guild_logged: set[str] = set()
 
     async def cog_load(self) -> None:
         self.raid_scheduler.start()
@@ -2209,13 +2210,54 @@ class CommunityGames(commands.Cog):
                     gid_str,
                 )
                 continue
-            raw_ch = self.bot.get_channel(int(ch_id))
-            if raw_ch is None:
+            # Ne pas utiliser bot.get_channel seul : il peut résoudre un salon d’un **autre** serveur
+            # (ID unique global). Les alertes partaient alors ailleurs alors que alert_sent_* était
+            # enregistré sous la clé JSON du serveur de test — d’où « skip » sans message visible ici.
+            guild_obj = self.bot.get_guild(gid)
+            if guild_obj is None:
                 LOG.warning(
-                    "raid scheduler: salon %s introuvable (bot hors guilde ou ID invalide, guild_id=%s).",
-                    ch_id,
+                    "raid scheduler: le bot n’est pas dans la guilde %s — entrée ignorée.",
                     gid_str,
                 )
+                continue
+            raw_ch = guild_obj.get_channel(int(ch_id))
+            if raw_ch is None:
+                try:
+                    raw_ch = await guild_obj.fetch_channel(int(ch_id))
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    raw_ch = None
+            if raw_ch is None:
+                foreign = self.bot.get_channel(int(ch_id))
+                if foreign is not None and getattr(foreign, "guild", None) and foreign.guild.id != gid:
+                    cgk = f"{gid_str}:{ch_id}:{foreign.guild.id}"
+                    if cgk not in self._raid_cross_guild_logged:
+                        self._raid_cross_guild_logged.add(cgk)
+                        if len(self._raid_cross_guild_logged) > 500:
+                            self._raid_cross_guild_logged.clear()
+                        LOG.error(
+                            "raid scheduler: le salon %s est sur le serveur **%s**, pas **%s**. "
+                            "Avec l’ancienne logique, l’alerte partait sur l’autre serveur alors que "
+                            "« déjà envoyé » était enregistré pour le serveur de test — d’où aucun message ici. "
+                            "Refais **`/raidconfig`** en choisissant un salon **de ce serveur**.",
+                            ch_id,
+                            foreign.guild.id,
+                            gid_str,
+                        )
+                        with core.DATA_JSON_LOCK:
+                            cfg_clr = _load_raid_cfg()
+                            ent = cfg_clr.get(gid_str)
+                            if isinstance(ent, dict):
+                                ent.pop("alert_sent_for_week", None)
+                                ent.pop("alert_sent_message_id", None)
+                                cfg_clr[gid_str] = ent
+                                _save_raid_cfg(cfg_clr)
+                else:
+                    LOG.warning(
+                        "raid scheduler: salon %s introuvable **dans** la guilde %s — "
+                        "`/raidconfig` avec un salon de ce serveur (ou salon supprimé).",
+                        ch_id,
+                        gid_str,
+                    )
                 continue
             if not isinstance(raw_ch, discord.TextChannel):
                 LOG.warning(
@@ -2226,6 +2268,13 @@ class CommunityGames(commands.Cog):
                 continue
             channel = raw_ch
             guild = channel.guild
+            if guild.id != gid:
+                LOG.error(
+                    "raid scheduler: incohérence interne — guild.id=%s attendu=%s",
+                    guild.id,
+                    gid,
+                )
+                continue
             try:
                 weekday = int(c.get("weekday", 5))
                 hour = int(c.get("hour", 20))
@@ -2241,7 +2290,7 @@ class CommunityGames(commands.Cog):
 
             if sent_w != wkey and alert_at <= now < raid_at:
                 try:
-                    await channel.send(
+                    msg = await channel.send(
                         "@here ⏰ **Boss Raid** dans **1 h** — préparez-vous (quiz / persos AniList) !",
                         allowed_mentions=discord.AllowedMentions(everyone=True),
                     )
@@ -2255,26 +2304,42 @@ class CommunityGames(commands.Cog):
                         e,
                     )
                 else:
+                    link = f"https://discord.com/channels/{guild.id}/{channel.id}/{msg.id}"
                     LOG.info(
-                        "raid alert 1h: envoyé serveur=%r (%s) salon=%s semaine=%s créneau=%s",
+                        "raid alert 1h: envoyé serveur=%r (%s) salon=%s semaine=%s créneau=%s "
+                        "message_id=%s lien=%s",
                         guild.name,
                         gid,
                         ch_id,
                         wkey,
                         raid_at.isoformat(),
+                        msg.id,
+                        link,
                     )
                     with core.DATA_JSON_LOCK:
                         cfg2 = _load_raid_cfg()
                         if gid_str in cfg2:
                             cfg2[gid_str]["alert_sent_for_week"] = wkey
+                            cfg2[gid_str]["alert_sent_message_id"] = int(msg.id)
                         _save_raid_cfg(cfg2)
             elif alert_at <= now < raid_at and sent_w == wkey:
                 sk = f"{gid_str}:{wkey}"
                 if sk not in self._raid_alert_skip_logged:
+                    mid = c.get("alert_sent_message_id")
+                    link = (
+                        f"https://discord.com/channels/{gid}/{ch_id}/{int(mid)}"
+                        if mid is not None
+                        else "(inconnu — pas d’ID enregistré pour cette semaine)"
+                    )
                     LOG.info(
-                        "raid alert 1h: skip (déjà enregistré pour %s) guild=%s — pas de nouvel envoi.",
+                        "raid alert 1h: skip (déjà enregistré pour %s) guild=%s — pas de nouvel envoi. "
+                        "Dernier message d’alerte enregistré : message_id=%s lien=%s "
+                        "(si tu ne vois rien dans le salon : vérifie le salon `channel_id` dans data/boss_raid.json, "
+                        "les mentions @here, ou que le message n’a pas été supprimé).",
                         wkey,
                         gid,
+                        mid,
+                        link,
                     )
                     self._raid_alert_skip_logged.add(sk)
                     if len(self._raid_alert_skip_logged) > 500:
@@ -2369,6 +2434,12 @@ class CommunityGames(commands.Cog):
             return
         if minute is not None and (minute < 0 or minute > 59):
             await interaction.response.send_message("❌ Minute invalide (0–59).", ephemeral=True)
+            return
+        if salon is not None and salon.guild.id != interaction.guild.id:
+            await interaction.response.send_message(
+                "❌ Le salon doit appartenir à **ce** serveur (pas un salon d’un autre serveur).",
+                ephemeral=True,
+            )
             return
         with core.DATA_JSON_LOCK:
             cfg = _load_raid_cfg()

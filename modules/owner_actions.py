@@ -206,6 +206,56 @@ async def run_recap_mensuel(bot: commands.Bot, interaction: discord.Interaction)
     await interaction.followup.send("\n".join(lines)[:1950], ephemeral=True)
 
 
+async def run_raid_reset_week(_bot: commands.Bot, interaction: discord.Interaction) -> None:
+    """Efface les compteurs hebdo raid (alerte 1 h, auto, /raidstart) pour le serveur courant."""
+    if not interaction.guild:
+        await interaction.followup.send(
+            "❌ Utilise cette action **sur un serveur** (pas en MP).",
+            ephemeral=True,
+        )
+        return
+    gk = str(interaction.guild.id)
+    keys = (
+        "alert_sent_for_week",
+        "alert_sent_message_id",
+        "raid_started_for_week",
+        "raidstart_week_key",
+    )
+    removed: list[str] = []
+    missing_entry = False
+    with core.DATA_JSON_LOCK:
+        cfg = core.load_json(core.FileConfig.BOSS_RAID, {})
+        ent = cfg.get(gk)
+        if not isinstance(ent, dict):
+            missing_entry = True
+        else:
+            for k in keys:
+                if k in ent:
+                    ent.pop(k, None)
+                    removed.append(k)
+            cfg[gk] = ent
+            core.save_json(core.FileConfig.BOSS_RAID, cfg)
+    if missing_entry:
+        await interaction.followup.send(
+            "ℹ️ Aucune entrée raid pour ce serveur — rien à réinitialiser.",
+            ephemeral=True,
+        )
+        return
+    if not removed:
+        await interaction.followup.send(
+            "ℹ️ Aucun état de semaine n’était enregistré (alerte auto, lancement auto, limite /raidstart).",
+            ephemeral=True,
+        )
+        return
+    await interaction.followup.send(
+        f"✅ **Raid — état hebdo réinitialisé** pour **{interaction.guild.name}**.\n"
+        f"Champs effacés : `{'`, `'.join(removed)}`.\n"
+        "• Rappel **~1 h avant** + lancement **auto** : peuvent à nouveau s’appliquer pour la **semaine ISO en cours**.\n"
+        "• **`/raidstart`** (admin) : la limite **1× / semaine** est aussi effacée pour cette semaine.",
+        ephemeral=True,
+    )
+
+
 async def run_raid_owner_start(bot: commands.Bot, interaction: discord.Interaction) -> None:
     """Raid test sans consommer la limite /raidstart (logique identique à l’ancienne commande)."""
     from cogs.community_games import (  # noqa: PLC0415 — évite import circulaire au chargement
@@ -333,6 +383,7 @@ ACTIONS: list[tuple[str, str, str]] = [
     ("test_alert", "Test carte alerte", "Envoie la carte dans le salon /setchannel (sinon salon actuel)"),
     ("show_channel", "Salons config", "Récap salons alertes / XP / raid (ce serveur)"),
     ("recap_mensuel", "Stats internes", "Pics, usages slash, mois courant / précédent"),
+    ("raid_reset_week", "Raid — reset semaine", "Efface alerte 1 h / auto / limite /raidstart (ce serveur)"),
     ("raid_owner_start", "Raid test (owner)", "Lance un raid sans consommer /raidstart"),
     ("guessop_stats", "Guess OP — stats", "Statistiques du catalogue openings"),
     ("guessop_harvest", "Guess OP — enrichir", "Harvest AnimeThemes (long, ~1–2 min)"),
@@ -348,6 +399,7 @@ RUNNERS = {
     "test_alert": run_test_alert,
     "show_channel": run_show_channel,
     "recap_mensuel": run_recap_mensuel,
+    "raid_reset_week": run_raid_reset_week,
     "raid_owner_start": run_raid_owner_start,
     "guessop_stats": run_guessop_stats,
     "guessop_harvest": run_guessop_harvest,
