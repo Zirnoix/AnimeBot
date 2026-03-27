@@ -14,7 +14,7 @@ import logging
 import os
 import random
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from time import monotonic
 from typing import Any, Optional, Set
 
@@ -230,6 +230,26 @@ def _week_key(dt: datetime) -> str:
     return f"{y}-W{w:02d}"
 
 
+def _raid_cfg_enabled(c: dict[str, Any]) -> bool:
+    """True si le lancement auto raid est activé (tolère JSON mal édité : chaîne « true »/« false »)."""
+    v = c.get("enabled")
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "oui", "on")
+    return bool(v)
+
+
+def _raid_datetime_in_timezone(day: date, hour: int, minute: int) -> datetime:
+    """Heure locale (BOT_TIMEZONE) pour ce jour + heure — compatible pytz (évite les bugs de combine+tzinfo)."""
+    naive = datetime.combine(day, time(hour, minute))
+    tz = core.TIMEZONE
+    if hasattr(tz, "localize"):
+        try:
+            return tz.localize(naive, is_dst=None)
+        except Exception:
+            return tz.localize(naive, is_dst=False)
+    return naive.replace(tzinfo=tz)
+
+
 def _raid_target_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
     """Salon configuré pour le raid (`/raidconfig` → salon), sinon None."""
     cfg = _load_raid_cfg().get(str(guild.id), {})
@@ -244,13 +264,12 @@ def _raid_target_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
 
 def _next_raid_moment(now: datetime, weekday: int, hour: int, minute: int) -> datetime:
     """Prochaine occurrence weekday (0=lun) + heure:minute après `now`."""
-    tz = now.tzinfo or core.TIMEZONE
     wd = int(weekday) % 7
     for delta in range(14):
         day = (now + timedelta(days=delta)).date()
         if day.weekday() != wd:
             continue
-        cand = datetime.combine(day, time(hour, minute), tzinfo=tz)
+        cand = _raid_datetime_in_timezone(day, hour, minute)
         if cand > now:
             return cand
     return now + timedelta(days=7)
@@ -264,13 +283,12 @@ def _resolve_scheduled_raid_for_loop(now: datetime, weekday: int, hour: int, min
     d’alerte et peut faire rater le démarrage auto. Tant qu’on est encore dans
     ``[T - 1h, T + 4 min)`` pour un créneau T du calendrier, on retourne ce T.
     """
-    tz = now.tzinfo or core.TIMEZONE
     wd = int(weekday) % 7
     for delta in range(-7, 15):
         day = (now + timedelta(days=delta)).date()
         if day.weekday() != wd:
             continue
-        t = datetime.combine(day, time(hour, minute), tzinfo=tz)
+        t = _raid_datetime_in_timezone(day, hour, minute)
         if t - timedelta(hours=1) <= now < t + timedelta(minutes=4):
             return t
     return _next_raid_moment(now, weekday, hour, minute)
@@ -285,10 +303,11 @@ def _raid_status_embed(guild: discord.Guild) -> discord.Embed:
     wd = int(cfg.get("weekday", 5))
     h = int(cfg.get("hour", 20))
     mi = int(cfg.get("minute", 0))
-    nxt = _next_raid_moment(now, wd, h, mi)
+    # Même logique que `raid_scheduler` (pas seulement _next_raid_moment).
+    nxt = _resolve_scheduled_raid_for_loop(now, wd, h, mi)
     tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
     jname = core.JOURS_SEMAINE_FR[wd % 7]
-    auto = bool(cfg.get("enabled", False))
+    auto = _raid_cfg_enabled(cfg)
     cur_w = _week_key(now)
     rs_w = str(cfg.get("raidstart_week_key") or "")
     ts = int(nxt.timestamp())
@@ -314,12 +333,28 @@ def _raid_status_embed(guild: discord.Guild) -> discord.Embed:
         inline=True,
     )
     em.add_field(
-        name="⏱️ Prochaine occurrence",
+        name="⏱️ Créneau pris en compte par le bot",
         value=f"<t:{ts}:F>\n<t:{ts}:R>",
         inline=False,
     )
+    if auto and ch:
+        alert_dt = nxt - timedelta(hours=1)
+        ta = int(alert_dt.timestamp())
+        em.add_field(
+            name="🔔 Alerte @here (~1 h avant)",
+            value=f"<t:{ta}:F>\n<t:{ta}:R>",
+            inline=False,
+        )
+    elif auto and not ch:
+        em.add_field(
+            name="🔔 Alerte @here (~1 h avant)",
+            value="— *Configure un **salon** avec `/raidconfig` — sinon aucune annonce.*",
+            inline=False,
+        )
     em.add_field(name="🎯 /raidstart (manuel)", value=raidstart_val, inline=False)
-    em.set_footer(text="Rappel ~1 h avant dans le salon du raid si l’auto est activé.")
+    em.set_footer(
+        text="Fuseau : BOT_TIMEZONE · Les heures utilisent une localisation correcte (pytz). Logs « raid alert 1h » en INFO."
+    )
     return em
 
 
@@ -886,6 +921,8 @@ class CommunityGames(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        # Évite de spammer les logs si l’alerte est skip (déjà marquée pour la semaine).
+        self._raid_alert_skip_logged: set[str] = set()
 
     async def cog_load(self) -> None:
         self.raid_scheduler.start()
@@ -2156,7 +2193,9 @@ class CommunityGames(commands.Cog):
         cfg = _load_raid_cfg()
         now = datetime.now(core.TIMEZONE)
         for gid_str, c in list(cfg.items()):
-            if not c.get("enabled"):
+            if not isinstance(c, dict):
+                continue
+            if not _raid_cfg_enabled(c):
                 continue
             try:
                 gid = int(gid_str)
@@ -2164,19 +2203,43 @@ class CommunityGames(commands.Cog):
                 continue
             ch_id = c.get("channel_id")
             if not ch_id:
+                LOG.warning(
+                    "raid scheduler: lancement auto activé mais **aucun salon** (guild_id=%s) — "
+                    "utilise `/raidconfig` avec le paramètre **salon**.",
+                    gid_str,
+                )
                 continue
-            channel = self.bot.get_channel(int(ch_id))
-            if not isinstance(channel, discord.TextChannel):
+            raw_ch = self.bot.get_channel(int(ch_id))
+            if raw_ch is None:
+                LOG.warning(
+                    "raid scheduler: salon %s introuvable (bot hors guilde ou ID invalide, guild_id=%s).",
+                    ch_id,
+                    gid_str,
+                )
                 continue
+            if not isinstance(raw_ch, discord.TextChannel):
+                LOG.warning(
+                    "raid scheduler: salon %s n’est pas un salon texte (guild_id=%s).",
+                    ch_id,
+                    gid_str,
+                )
+                continue
+            channel = raw_ch
             guild = channel.guild
-            weekday = int(c.get("weekday", 5))
-            hour = int(c.get("hour", 20))
-            minute = int(c.get("minute", 0))
+            try:
+                weekday = int(c.get("weekday", 5))
+                hour = int(c.get("hour", 20))
+                minute = int(c.get("minute", 0))
+            except (TypeError, ValueError):
+                LOG.warning("raid scheduler: jour/heure/minute invalides (guild_id=%s)", gid_str)
+                continue
             raid_at = _resolve_scheduled_raid_for_loop(now, weekday, hour, minute)
             wkey = _week_key(raid_at)
             alert_at = raid_at - timedelta(hours=1)
+            sent_w = str(c.get("alert_sent_for_week") or "").strip()
+            started_w = str(c.get("raid_started_for_week") or "").strip()
 
-            if c.get("alert_sent_for_week") != wkey and alert_at <= now < raid_at:
+            if sent_w != wkey and alert_at <= now < raid_at:
                 try:
                     await channel.send(
                         "@here ⏰ **Boss Raid** dans **1 h** — préparez-vous (quiz / persos AniList) !",
@@ -2205,9 +2268,20 @@ class CommunityGames(commands.Cog):
                         if gid_str in cfg2:
                             cfg2[gid_str]["alert_sent_for_week"] = wkey
                         _save_raid_cfg(cfg2)
+            elif alert_at <= now < raid_at and sent_w == wkey:
+                sk = f"{gid_str}:{wkey}"
+                if sk not in self._raid_alert_skip_logged:
+                    LOG.info(
+                        "raid alert 1h: skip (déjà enregistré pour %s) guild=%s — pas de nouvel envoi.",
+                        wkey,
+                        gid,
+                    )
+                    self._raid_alert_skip_logged.add(sk)
+                    if len(self._raid_alert_skip_logged) > 500:
+                        self._raid_alert_skip_logged.clear()
 
             if (
-                c.get("raid_started_for_week") != wkey
+                started_w != wkey
                 and raid_at <= now < raid_at + timedelta(minutes=4)
                 and not _active_raids.get(guild.id)
             ):
