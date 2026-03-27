@@ -7,15 +7,20 @@ from discord.ext import commands, tasks
 from modules import core
 
 # —— CONFIG ——
-CYCLE_INTERVAL_HOURS = 6  # mets 12 pour un cycle 2x par jour
+CYCLE_INTERVAL_HOURS = 3  # rotation du statut toutes les 3 h
+# Texte affiché après « Regarde … » (limite Discord ~128 car.). Pas d’emoji obligatoire.
 PRESENCE_SCENES = [
-    "/help ✨",
-    "les commandes sur /help 🎮",
-    "/help pour commencer 🚀",
+    "/help — guide & nouveautés",
+    "Toujours en développement — idées bienvenues",
+    "Quiz · AniList · sorties · mini-jeux",
+    "Boss raid, devinettes, duels… voir /help",
+    "Une question ? Commence par /help",
+    "Améliorations régulières — restez à l’affût",
+    "Lien AniList, rappels, stats : /help",
 ]
 
 class Presence(commands.Cog):
-    """Présence rotative autour du /help."""
+    """Présence rotative (Watching) : variantes autour de /help, version, ton dev."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot

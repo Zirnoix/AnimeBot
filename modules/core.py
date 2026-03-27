@@ -714,6 +714,17 @@ def airing_item_to_card_dict(item: dict, *, tz_name: str = "Europe/Paris") -> di
     cov = m.get("cover")
     if not cov:
         cov = _best_anilist_cover_url(m)
+    ci = m.get("coverImage") or {}
+    cover_urls: list[str] = []
+    if isinstance(ci, dict):
+        for k in ("extraLarge", "large", "medium"):
+            u = ci.get(k)
+            if u and u not in cover_urls:
+                cover_urls.append(u)
+    if cov and cov not in cover_urls:
+        cover_urls.insert(0, cov)
+    elif not cover_urls and cov:
+        cover_urls = [cov]
     return {
         "title_romaji": t.get("romaji"),
         "title_english": t.get("english"),
@@ -721,8 +732,10 @@ def airing_item_to_card_dict(item: dict, *, tz_name: str = "Europe/Paris") -> di
         "episode": ep_disp,
         "airingAt": ts,
         "cover": cov,
+        "cover_urls": cover_urls,
         "genres": m.get("genres") or [],
         "when": when_str,
+        "siteUrl": m.get("siteUrl"),
     }
 
 

@@ -6,21 +6,40 @@ from io import BytesIO
 from PIL import Image, ImageFilter, ImageDraw, ImageFont, ImageOps
 import requests
 
+_IMG_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; AnimeBot/1.0; +https://anilist.co/)",
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Referer": "https://anilist.co/",
+}
+
+
 def _fetch_image(url: Optional[str]) -> Image.Image:
     """Télécharge la cover ; si échec (403, timeout, URL vide), fond gris foncé (comme avant)."""
     if not url:
         return Image.new("RGB", (1200, 675), (20, 22, 26))
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AnimeBot/1.0; +https://anilist.co/)",
-        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-        "Referer": "https://anilist.co/",
-    }
     try:
-        r = requests.get(url, timeout=12, headers=headers)
+        r = requests.get(url, timeout=12, headers=_IMG_HEADERS)
         r.raise_for_status()
         return Image.open(BytesIO(r.content)).convert("RGB")
     except Exception:
         return Image.new("RGB", (1200, 675), (20, 22, 26))
+
+
+def _fetch_cover_for_card(anime: Dict[str, Any]) -> Image.Image:
+    """Essaie plusieurs URLs AniList (extraLarge → large → medium) si présentes dans `cover_urls`."""
+    urls = anime.get("cover_urls")
+    if isinstance(urls, list) and urls:
+        for u in urls:
+            if not u:
+                continue
+            try:
+                r = requests.get(str(u), timeout=12, headers=_IMG_HEADERS)
+                r.raise_for_status()
+                return Image.open(BytesIO(r.content)).convert("RGB")
+            except Exception:
+                continue
+        return Image.new("RGB", (1200, 675), (20, 22, 26))
+    return _fetch_image(anime.get("cover") if isinstance(anime.get("cover"), str) else None)
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
     try:
@@ -44,7 +63,7 @@ def generate_next_card(
     # --- Canvas de travail (grand, puis on croppe) ---
     W, H = int(1400 * scale), int(800 * scale)
 
-    cover = _fetch_image(anime.get("cover"))
+    cover = _fetch_cover_for_card(anime)
     bg = cover.copy().resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(int(blur * scale))).convert("RGBA")
 
     # vignette douce
