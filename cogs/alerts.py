@@ -118,7 +118,7 @@ class Alerts(commands.Cog):
         except Exception as e:
             LOG.exception("Image alert failed, fallback texte: %s", e)
             title = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "Anime"
-            ep = anime.get("episode") or "?"
+            ep = core.format_episode_line_part(anime.get("episode"), anime)
             when = _fmt_when(anime)
             await ch.send(f"{header}\n**{title}** — Épisode **{ep}** • {when}")
             if media_id:

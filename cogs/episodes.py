@@ -237,7 +237,7 @@ class Episodes(commands.Cog):
                 media = ep.get("media") or ep
                 heure = dt.strftime("%H:%M")
                 title = _pick_title(media)
-                epnum = ep.get("episode") or "?"
+                epnum = core.format_episode_line_part(ep.get("episode"), media)
                 genres = media.get("genres") or []
                 emoji = genre_emoji(genres)
                 e.add_field(
@@ -307,9 +307,11 @@ class Episodes(commands.Cog):
             "title_romaji": tdict.get("romaji") or _pick_title(media),
             "title_english": tdict.get("english"),
             "title_native": tdict.get("native"),
-            "episode": epnum,
-            "genres": genres,
-            "when": when_str,
+                "episode": epnum,
+                "episodes": media.get("episodes"),
+                "format": media.get("format"),
+                "genres": genres,
+                "when": when_str,
         })
 
         await _send_dm(ctx, file=discord.File(img_path, filename="next.png"))
@@ -374,6 +376,8 @@ class Episodes(commands.Cog):
             "title_english": tdict.get("english"),
             "title_native": tdict.get("native"),
             "episode": epnum,
+            "episodes": first.get("episodes"),
+            "format": first.get("format"),
             "genres": first.get("genres") or [],
             "when": when_str,
         })
@@ -435,7 +439,7 @@ class Episodes(commands.Cog):
 
             for it, dt in jour_items[:10]:
                 title = _pick_title_from_any(it.get("title") or {})
-                epnum = it.get("episode") or "?"
+                epnum = core.format_episode_line_part(it.get("episode"), it)
                 heure = dt.strftime("%H:%M")
                 e.add_field(
                     name=f"🎬 {title} — Épisode {epnum}",

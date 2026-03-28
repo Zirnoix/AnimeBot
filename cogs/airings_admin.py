@@ -160,7 +160,7 @@ class PageAddSelect(discord.ui.Select):
             m = it.get("media") or {}
             mid = int(m.get("id"))
             name = _pick_title_obj(m.get("title"))
-            ep = str(it.get("episode") or "?")
+            ep = core.format_episode_line_part(it.get("episode"), m)
             in_wl = mid in parent.wl_ids
             label = (f"✓ {name}" if in_wl else name)[:100]
             opts.append(
@@ -310,7 +310,7 @@ class AllView(discord.ui.View):
             mid = int(m.get("id"))
             mark = "✅" if mid in self.wl_ids else "➕"
             name = _pick_title_obj(m.get("title"))
-            ep = it.get("episode") or "?"
+            ep = core.format_episode_line_part(it.get("episode"), m)
             link_txt = _md_link_title(name)
             url = _anilist_anime_url(mid)
             lines.append(f"**{i}.** {mark} [{link_txt}]({url}) — Ep **{ep}**")

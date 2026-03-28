@@ -405,7 +405,8 @@ class AnimeBot(commands.Bot):
             lines = []
             for ep in episodes[:10]:
                 title_md = core.format_anilist_episode_title_markdown(ep)
-                lines.append(f"• {title_md} — Épisode {ep.get('episode', '?')}")
+                ep_lbl = core.format_episode_line_part(ep.get("episode"), ep)
+                lines.append(f"• {title_md} — Épisode {ep_lbl}")
             trivia = await asyncio.to_thread(core.get_daily_anime_trivia_line)
             al_name = core.get_linked_username(int(user_id))
             if al_name:

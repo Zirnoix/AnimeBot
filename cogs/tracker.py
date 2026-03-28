@@ -245,7 +245,10 @@ class Tracker(commands.Cog):
                 title = match["title"]["romaji"]
                 info = []
                 if match.get("nextAiringEpisode"):
-                    info.append(f"Épisode {match['nextAiringEpisode']['episode']} à venir")
+                    ep_l = core.format_episode_line_part(
+                        match["nextAiringEpisode"].get("episode"), match
+                    )
+                    info.append(f"Épisode {ep_l} à venir")
                 elif match.get("episodes"):
                     info.append(f"{match['episodes']} épisodes")
                 if match.get("status"):
@@ -300,7 +303,10 @@ class Tracker(commands.Cog):
 
         info = []
         if selected.get("nextAiringEpisode"):
-            info.append(f"• Prochain : Épisode {selected['nextAiringEpisode']['episode']}")
+            ep_l = core.format_episode_line_part(
+                selected["nextAiringEpisode"].get("episode"), selected
+            )
+            info.append(f"• Prochain : Épisode {ep_l}")
         if selected.get("episodes"):
             info.append(f"• Épisodes : {selected['episodes']}")
         if selected.get("status"):
@@ -414,8 +420,8 @@ class Tracker(commands.Cog):
               id
               title { romaji english native }
               status
-              nextAiringEpisode { episode airingAt }
               format
+              nextAiringEpisode { episode airingAt }
               episodes
               season
               seasonYear
@@ -470,7 +476,8 @@ class Tracker(commands.Cog):
 
                 try:
                     tname = anime.get("title_romaji") or anime.get("title_english") or "Anime"
-                    line = f"📺 **Sortie** — **{tname}** · Épisode **{anime.get('episode')}**"
+                    ep_txt = core.format_episode_line_part(anime.get("episode"), anime)
+                    line = f"📺 **Sortie** — **{tname}** · Épisode **{ep_txt}**"
                     if img_path:
                         await user.send(
                             line,

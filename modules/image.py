@@ -7,6 +7,8 @@ from io import BytesIO
 from PIL import Image, ImageFilter, ImageDraw, ImageFont, ImageOps
 import requests
 
+from modules import core as _core
+
 _IMG_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; AnimeBot/1.0; +https://anilist.co/)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
@@ -125,7 +127,7 @@ def generate_next_card(
 
     # --- Textes ---
     title = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "Titre inconnu"
-    episode = anime.get("episode") or "?"
+    episode = _core.format_episode_line_part(anime.get("episode"), anime)
     when = anime.get("when") or "date inconnue"
     genres = anime.get("genres") or []
     genres_txt = " • ".join(genres[:4]) if genres else "—"

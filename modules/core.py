@@ -453,6 +453,8 @@ def get_airings_global(days: int = 14, limit: int = 200) -> List[dict]:
           media {
             id
             siteUrl
+            format
+            episodes
             title { romaji english native }
             coverImage { large }
             genres
@@ -481,6 +483,8 @@ def get_airings_global(days: int = 14, limit: int = 200) -> List[dict]:
                 "media": {
                     "id": m.get("id"),
                     "siteUrl": m.get("siteUrl"),
+                    "format": m.get("format"),
+                    "episodes": m.get("episodes"),
                     "title": m.get("title") or {},
                     "cover": (m.get("coverImage") or {}).get("large"),
                     "genres": m.get("genres") or [],
@@ -526,7 +530,7 @@ def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: i
     parts: List[str] = []
     for i, mid in enumerate(media_ids):
         parts.append(
-            f"a{i}: Media(id: {int(mid)}, type: ANIME) {{ id siteUrl bannerImage title {{ romaji english native }} "
+            f"a{i}: Media(id: {int(mid)}, type: ANIME) {{ id siteUrl bannerImage format episodes title {{ romaji english native }} "
             f"coverImage {{ extraLarge large medium }} genres nextAiringEpisode {{ episode airingAt }} }}"
         )
     query = "query { " + " ".join(parts) + " }"
@@ -554,6 +558,8 @@ def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: i
                     "id": m.get("id"),
                     "siteUrl": m.get("siteUrl"),
                     "title": t,
+                    "format": m.get("format"),
+                    "episodes": m.get("episodes"),
                     "cover": _best_anilist_cover_url(m),
                     "coverImage": m.get("coverImage") or {},
                     "bannerImage": m.get("bannerImage"),
@@ -596,6 +602,8 @@ def _fetch_airing_schedules_past_window(
                 id
                 siteUrl
                 bannerImage
+                format
+                episodes
                 title { romaji english native }
                 coverImage { extraLarge large medium }
                 genres
@@ -626,6 +634,8 @@ def _fetch_airing_schedules_past_window(
                         "id": m.get("id"),
                         "siteUrl": m.get("siteUrl"),
                         "title": m.get("title") or {},
+                        "format": m.get("format"),
+                        "episodes": m.get("episodes"),
                         "cover": _best_anilist_cover_url(m),
                         "coverImage": m.get("coverImage") or {},
                         "bannerImage": m.get("bannerImage"),
@@ -695,6 +705,8 @@ def get_recent_airings_for_guild(
                         "id": m.get("id"),
                         "siteUrl": m.get("siteUrl"),
                         "title": t,
+                        "format": m.get("format"),
+                        "episodes": m.get("episodes"),
                         "cover": _best_anilist_cover_url(m),
                         "coverImage": m.get("coverImage") or {},
                         "bannerImage": m.get("bannerImage"),
@@ -737,6 +749,7 @@ def airing_item_to_card_dict(item: dict, *, tz_name: str = "Europe/Paris") -> di
         bns = bn.strip()
         if bns not in cover_urls:
             cover_urls.append(bns)
+    media_format = m.get("format")
     mid = m.get("id")
     if (not cov or not cover_urls) and mid is not None:
         try:
@@ -754,6 +767,8 @@ def airing_item_to_card_dict(item: dict, *, tz_name: str = "Europe/Paris") -> di
             b2 = det.get("bannerImage")
             if isinstance(b2, str) and b2.strip() and b2.strip() not in cover_urls:
                 cover_urls.append(b2.strip())
+            if not media_format:
+                media_format = det.get("format")
     return {
         "title_romaji": t.get("romaji"),
         "title_english": t.get("english"),
@@ -765,6 +780,8 @@ def airing_item_to_card_dict(item: dict, *, tz_name: str = "Europe/Paris") -> di
         "genres": m.get("genres") or [],
         "when": when_str,
         "siteUrl": m.get("siteUrl"),
+        "episodes": m.get("episodes"),
+        "format": media_format,
     }
 
 
@@ -1500,6 +1517,8 @@ def get_upcoming_episodes(username: str, *, force: bool = False) -> list[dict]:
               siteUrl
               coverImage { large extraLarge }
               genres
+              format
+              episodes
               nextAiringEpisode { episode airingAt }
             }
           }
@@ -1549,6 +1568,8 @@ def get_upcoming_episodes(username: str, *, force: bool = False) -> list[dict]:
                         "siteUrl": m.get("siteUrl"),
                         "cover": cover.get("extraLarge") or cover.get("large"),
                         "genres": m.get("genres") or [],
+                        "format": m.get("format"),
+                        "episodes": m.get("episodes"),
                         "episode": nae.get("episode"),
                         "airingAt": nae.get("airingAt"),
                     })
@@ -1815,6 +1836,8 @@ def get_next_airing_one() -> Optional[Dict[str, Any]]:
             title{ romaji english native }
             coverImage{ extraLarge large }
             genres
+            format
+            episodes
           }
         }
       }
@@ -1836,6 +1859,8 @@ def get_next_airing_one() -> Optional[Dict[str, Any]]:
         "cover": ((m.get("coverImage") or {}).get("extraLarge")
                   or (m.get("coverImage") or {}).get("large")),
         "genres": m.get("genres") or [],
+        "episodes": m.get("episodes"),
+        "format": m.get("format"),
     }
 
 def get_next_airing_for_title(title: str):
@@ -1843,6 +1868,7 @@ def get_next_airing_for_title(title: str):
     query ($search: String) {
       Media(type: ANIME, search: $search) {
         title { romaji english native }
+        episodes
         nextAiringEpisode { episode airingAt }
         coverImage { large extraLarge }
         format
@@ -1868,6 +1894,7 @@ def get_next_airing_for_title(title: str):
             "episode": nae.get("episode"),
             "airingAt": nae.get("airingAt"),
             "cover": cover.get("extraLarge") or cover.get("large"),
+            "episodes": media.get("episodes"),
             "format": media.get("format"),
             "season": media.get("season"),
             "seasonYear": media.get("seasonYear")
@@ -1891,6 +1918,8 @@ def get_my_next_airing_one() -> Optional[Dict[str, Any]]:
             title{ romaji english native }
             coverImage{ extraLarge large }
             genres
+            format
+            episodes
             nextAiringEpisode{ airingAt episode }
           }
         }
@@ -1921,6 +1950,8 @@ def get_my_next_airing_one() -> Optional[Dict[str, Any]]:
                 "cover": ((m.get("coverImage") or {}).get("extraLarge")
                           or (m.get("coverImage") or {}).get("large")),
                 "genres": m.get("genres") or [],
+                "episodes": m.get("episodes"),
+                "format": m.get("format"),
             }
             if best is None or airing < best["airingAt"]:
                 best = item
@@ -2489,6 +2520,35 @@ def format_anilist_title_obj(title: Any) -> str:
             or "Titre inconnu"
         )
     return str(title or "Titre inconnu")
+
+
+def _media_is_movie_format(media: dict | None) -> bool:
+    """True si AniList indique un film (pas de mention « dernier épisode » pour les films)."""
+    if not media:
+        return False
+    fmt = (media.get("format") or "").strip().upper()
+    return fmt == "MOVIE"
+
+
+def format_episode_line_part(episode: Any, media: dict | None) -> str:
+    """
+    Numéro d'épisode pour affichage ; ajoute « (Dernier épisode) » si AniList connaît un total
+    et que l'épisode annoncé est ce total. Pas pour les **films** (`format: MOVIE`).
+    Si `episodes` est absent ou 0, pas de mention.
+    """
+    m = media or {}
+    total = m.get("episodes")
+    if not isinstance(total, int) or total <= 0:
+        total = None
+    try:
+        ep_disp = int(float(episode)) if episode is not None else None
+    except (TypeError, ValueError):
+        return str(episode) if episode is not None else "?"
+    if ep_disp is None:
+        return "?"
+    if total is not None and ep_disp == total and not _media_is_movie_format(m):
+        return f"{ep_disp} (Dernier épisode)"
+    return str(ep_disp)
 
 
 def format_anilist_episode_title_markdown(ep: dict) -> str:
