@@ -1,10 +1,13 @@
 # cogs/presence.py
 from __future__ import annotations
 import asyncio
+import logging
 import discord
 from discord.ext import commands, tasks
 
 from modules import core
+
+LOG = logging.getLogger(__name__)
 
 # —— CONFIG ——
 CYCLE_INTERVAL_HOURS = 3  # rotation du statut toutes les 3 h
@@ -45,7 +48,12 @@ class Presence(commands.Cog):
 
         if text != self._last_text:
             activity = discord.Activity(type=discord.ActivityType.watching, name=text)
-            await self.bot.change_presence(status=discord.Status.online, activity=activity)
+            try:
+                await self.bot.change_presence(status=discord.Status.online, activity=activity)
+            except Exception as e:
+                # Souvent après un blocage gateway ou une reconnexion : transport déjà fermé.
+                LOG.debug("rotate_presence: change_presence ignorée (%s)", e)
+                return
             self._last_text = text
 
     @rotate_presence.before_loop

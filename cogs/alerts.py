@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -97,7 +98,9 @@ class Alerts(commands.Cog):
                 tempfile.gettempdir(),
                 f"alert_{media_id}_{episode_key}_{ch.id}.png",
             )
-            img_path = generate_next_card(
+            # generate_next_card fait du HTTP + Pillow : ne pas bloquer l’event loop.
+            img_path = await asyncio.to_thread(
+                generate_next_card,
                 anime,
                 out_path=out_path,
                 scale=1.2,
@@ -140,7 +143,12 @@ class Alerts(commands.Cog):
                 continue
 
             try:
-                items = core.get_recent_airings_for_guild(guild.id, grace_sec=18 * 3600)
+                # get_recent_airings_for_guild → query_anilist (requests + time.sleep en retry) : hors event loop.
+                items = await asyncio.to_thread(
+                    core.get_recent_airings_for_guild,
+                    guild.id,
+                    grace_sec=18 * 3600,
+                )
             except Exception as e:
                 LOG.warning("get_recent_airings_for_guild(%s): %s", guild.id, e)
                 continue
