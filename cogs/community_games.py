@@ -215,6 +215,7 @@ class RaidBattleState:
     round_timer_task: Optional[asyncio.Task] = field(default=None)
     round_timer_generation: int = 0
     raid_start_ts: float = 0.0
+    raid_finished: bool = False
 
 
 def _load_raid_cfg() -> dict[str, Any]:
@@ -852,13 +853,6 @@ class PersonalRaidChallengeView(View):
             ch = self.cog.bot.get_channel(self.state.channel_id)
             if isinstance(ch, discord.TextChannel):
                 await self.cog._raid_refresh_hub(self.state)
-                await self.cog._raid_announce_wrong_button(
-                    ch,
-                    self.state,
-                    user_name=str(getattr(interaction.user, "display_name", None) or interaction.user),
-                    raid_mode=self.raid_mode,
-                    wrong_n=self.wrong_clicks,
-                )
             return
 
         dt_ms = int((monotonic() - self.t0) * 1000)
@@ -894,6 +888,10 @@ class PersonalRaidChallengeView(View):
         )
 
     async def on_timeout(self) -> None:
+        if self.state.raid_finished or self.state.hp <= 0:
+            return
+        if not _active_raids.get(self.state.guild_id):
+            return
         ch = self.cog.bot.get_channel(self.state.channel_id)
         nm = "?"
         if isinstance(ch, discord.TextChannel) and ch.guild:
@@ -907,12 +905,6 @@ class PersonalRaidChallengeView(View):
             self.state.log_lines = self.state.log_lines[-14:] + [f"⏰ **{nm}** — temps écoulé ({ml})"]
         if isinstance(ch, discord.TextChannel):
             await self.cog._raid_refresh_hub(self.state)
-            await self.cog._raid_announce_miss(
-                ch,
-                self.state,
-                user_name=nm,
-                kind="timeout_buttons",
-            )
             await self.cog._raid_maybe_finish_round_early(self.state, self.hub)
 
 
@@ -1431,63 +1423,6 @@ class CommunityGames(commands.Cog):
             except Exception:
                 pass
 
-    async def _raid_announce_miss(
-        self,
-        channel: discord.TextChannel,
-        state: RaidBattleState,
-        *,
-        user_name: str,
-        kind: str,
-    ) -> None:
-        """Message public — 0 dégâts (échec / timeout / pass). kind : voir ci-dessous."""
-        texts: dict[str, str] = {
-            "timeout_guesswho": f"⏰ **{user_name}** n’a pas répondu (qui est-ce) — **0** dégâts.",
-            "wrong_guesswho": f"💨 **{user_name}** rate le personnage — **0** dégâts.",
-            "timeout_anime": f"⏰ **{user_name}** n’a pas répondu (affiche) — **0** dégâts.",
-            "wrong_anime": f"❌ **{user_name}** ne trouve pas l’anime — **0** dégâts.",
-            "pass_anime": f"⏭️ **{user_name}** passe (**jsp**) — **0** dégâts.",
-            "timeout_buttons": f"⏰ **{user_name}** n’a pas cliqué à temps — **0** dégâts.",
-        }
-        text = texts.get(kind, f"💨 **{user_name}** — **0** dégâts ({kind}).")
-        if state.hub_message:
-            try:
-                await state.hub_message.reply(content=text, mention_author=False)
-                return
-            except Exception:
-                pass
-        try:
-            await channel.send(content=text)
-        except Exception:
-            pass
-
-    async def _raid_announce_wrong_button(
-        self,
-        channel: discord.TextChannel,
-        state: RaidBattleState,
-        *,
-        user_name: str,
-        raid_mode: str,
-        wrong_n: int,
-    ) -> None:
-        """Erreur sur un défi à choix (facile / moyen) : indique la pénalité si le joueur finit par réussir."""
-        lbl = RAID_MODE_LABEL_FR.get(raid_mode, raid_mode)
-        mult = _raid_wrong_penalty_multiplier(wrong_n)
-        pct = int(round(mult * 100))
-        text = (
-            f"📛 **{user_name}** se trompe (**{lbl}**) — erreur **#{wrong_n}**.\n"
-            f"📉 Si tu trouves ensuite : dégâts **~{pct}%** du tirage (plancher **25%**)."
-        )
-        if state.hub_message:
-            try:
-                await state.hub_message.reply(content=text, mention_author=False)
-                return
-            except Exception:
-                pass
-        try:
-            await channel.send(content=text)
-        except Exception:
-            pass
-
     async def _raid_after_join(self, guild_id: int, channel: discord.TextChannel, join_view: RaidJoinView) -> None:
         if getattr(join_view, "_raid_after_join_done", False):
             return
@@ -1530,7 +1465,7 @@ class CommunityGames(commands.Cog):
             "si quelqu’un n’a pas encore répondu.\n"
             "• Les **dégâts par bonne réponse** dépendent du **mode** choisi à l’inscription (voir ton message éphémère) "
             "— les modes plus difficiles frappent plus fort.\n"
-            "• **Chaque coup** (ou échec en guesswho) envoie un **message public** sous le boss — le salon voit le combat en direct."
+            "• Les **coups** et le **journal** (embed) montrent le combat ; les erreurs / temps écoulé restent dans le journal."
         )
         await self._raid_open_round(channel, state)
 
@@ -1613,6 +1548,7 @@ class CommunityGames(commands.Cog):
         )
 
         if state.hp <= 0:
+            state.raid_finished = True
             state.final_blow = (uid, raid_mode if raid_mode in RAID_DAMAGE_BY_MODE else RAID_MODE_DEFAULT)
             await self._raid_cancel_round_timer_async(state)
             hub.ended = True
@@ -1689,12 +1625,6 @@ class CommunityGames(commands.Cog):
             except Exception:
                 pass
             await self._raid_refresh_hub(state)
-            await self._raid_announce_miss(
-                ch,
-                state,
-                user_name=str(getattr(interaction.user, "display_name", None) or interaction.user),
-                kind="timeout_guesswho",
-            )
             await self._raid_maybe_finish_round_early(state, hub)
             return
 
@@ -1730,12 +1660,6 @@ class CommunityGames(commands.Cog):
             except Exception:
                 pass
             await self._raid_refresh_hub(state)
-            await self._raid_announce_miss(
-                ch,
-                state,
-                user_name=str(getattr(interaction.user, "display_name", None) or interaction.user),
-                kind="wrong_guesswho",
-            )
             await self._raid_maybe_finish_round_early(state, hub)
             return
 
@@ -1824,12 +1748,6 @@ class CommunityGames(commands.Cog):
             except Exception:
                 pass
             await self._raid_refresh_hub(state)
-            await self._raid_announce_miss(
-                ch,
-                state,
-                user_name=str(getattr(interaction.user, "display_name", None) or interaction.user),
-                kind="timeout_anime",
-            )
             await self._raid_maybe_finish_round_early(state, hub)
             return
 
@@ -1861,12 +1779,6 @@ class CommunityGames(commands.Cog):
             except Exception:
                 pass
             await self._raid_refresh_hub(state)
-            await self._raid_announce_miss(
-                ch,
-                state,
-                user_name=str(getattr(interaction.user, "display_name", None) or interaction.user),
-                kind="pass_anime",
-            )
             await self._raid_maybe_finish_round_early(state, hub)
             return
 
@@ -1900,12 +1812,6 @@ class CommunityGames(commands.Cog):
             except Exception:
                 pass
             await self._raid_refresh_hub(state)
-            await self._raid_announce_miss(
-                ch,
-                state,
-                user_name=str(getattr(interaction.user, "display_name", None) or interaction.user),
-                kind="wrong_anime",
-            )
             await self._raid_maybe_finish_round_early(state, hub)
             return
 
@@ -2028,6 +1934,7 @@ class CommunityGames(commands.Cog):
         *,
         extra_intro: str = "",
     ) -> None:
+        state.raid_finished = True
         await self._raid_cancel_round_timer_async(state)
         guild_id = state.guild_id
         participants = list(state.participants)

@@ -363,11 +363,8 @@ class AnimeBot(commands.Bot):
                 daily = user_settings.get("daily_summary")
                 if daily is None:
                     # Legacy preferences.json → garder le récap « Sorties du jour ».
-                    # Uniquement /reminder (sans prefs) → ne pas ajouter le 1er récap par défaut.
                     if user_id in prefs_all:
                         daily = True
-                    elif user_settings.get("reminder_on"):
-                        daily = False
                     else:
                         daily = True
                 if not daily:
@@ -415,7 +412,7 @@ class AnimeBot(commands.Bot):
                 color=discord.Color.blurple(),
             )
             em.set_footer(
-                text="Récap « Sorties du jour » — `/dailysummary` + `/setalert` (heure) + `/linkanilist`. Autre récap : `/reminder` (off par défaut). /help"
+                text="Récap « Sorties du jour » — `/recap` + `/setalert` (heure) + `/linkanilist`. /help"
             )
             await user.send(embed=em)
         except Exception as e:

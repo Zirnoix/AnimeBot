@@ -179,12 +179,12 @@ MISSION_DEFINITIONS: List[MissionDef] = [
     ),
     MissionDef(
         "use_reminder",
-        "Utilise `/reminder` ou `/setalert`",
-        _fs("reminder", "setalert"),
+        "Utilise `/recap` ou `/setalert`",
+        _fs("recap", "setalert"),
         1,
         "EASY",
         False,
-        "Configure ou consulte ton récap avec **`/reminder`** ou **`/setalert`**.",
+        "Configure ton récap MP avec **`/recap`** ou **`/setalert`**.",
     ),
     MissionDef(
         "use_track",

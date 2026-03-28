@@ -1,346 +1,198 @@
 # cogs/reminder_digest.py
 from __future__ import annotations
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta, timezone
-import os, json, logging, asyncio
+
+from typing import Any
 
 import discord
-from discord.ext import commands, tasks
-from discord import app_commands
+from discord.ext import commands
+from discord.ui import Select, View
 
 from modules import core
 
-LOG = logging.getLogger(__name__)
-
 COLOR_OK = discord.Color.blurple()
-COLOR_WARN = discord.Color.orange()
-SENT_PATH = "data/daily_sent.json"  # {user_id: "YYYY-MM-DD"} dernière date envoyée
 
-# ---------- persistence ----------
-def _load_sent() -> Dict[str, str]:
-    try:
-        with open(SENT_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
 
-def _save_sent(data: Dict[str, str]) -> None:
-    os.makedirs(os.path.dirname(SENT_PATH), exist_ok=True)
-    with open(SENT_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-# ---------- helpers ----------
-def _now_tz() -> datetime:
-    try:
-        tz = getattr(core, "TIMEZONE", timezone.utc)
-        return datetime.now(tz)
-    except Exception:
-        return datetime.now(timezone.utc)
-
-def _today_str_tz() -> str:
-    return _now_tz().strftime("%Y-%m-%d")
-
-def _is_today_ts(ts: int) -> bool:
-    try:
-        dt = datetime.fromtimestamp(int(ts), tz=getattr(core, "TIMEZONE", timezone.utc))
-        return dt.date() == _now_tz().date()
-    except Exception:
-        return False
-
-def _format_time(ts: int) -> str:
-    try:
-        dt = datetime.fromtimestamp(int(ts), tz=getattr(core, "TIMEZONE", timezone.utc))
-        return dt.strftime("%H:%M")
-    except Exception:
-        return "—"
-
-def _fmt_list(items: List[dict], limit: int = 25) -> List[tuple[str, str]]:
-    """Retourne [(name, value)] pour embed.add_field."""
-    out = []
-    for it in items[:limit]:
-        media = it.get("media") or {}
-        # cas items "perso" (get_upcoming_episodes) vs items "global" (get_airings_global)
-        title_dict = media.get("title") or it.get("title") or {}
-        if isinstance(title_dict, dict):
-            title = title_dict.get("romaji") or title_dict.get("english") or title_dict.get("native") or "Titre inconnu"
-        else:
-            title = str(title_dict or "Titre inconnu")
-        ep = it.get("episode") or "?"
-        ts = it.get("airingAt")
-        hour = _format_time(ts)
-        genres = (media.get("genres") if media else (it.get("genres") or [])) or []
-        emoji = core.genre_emoji(genres)
-        site_url = (media.get("siteUrl") or it.get("siteUrl") or "").strip()
-        mid = media.get("id") if media else it.get("id")
-        if not site_url and mid is not None:
-            try:
-                site_url = f"https://anilist.co/anime/{int(mid)}"
-            except (TypeError, ValueError):
-                pass
-        if site_url:
-            safe = title.replace("]", "›")
-            title_part = f"[**{safe}**]({site_url})"
-        else:
-            title_part = f"**{title}**"
-        name = f"{emoji} {title_part} — Épisode {ep}"
-        value = f"⏰ {hour}"
-        out.append((name, value))
-    return out
-
-# ---------- user settings (une seule source de vérité) ----------
 def _load_settings() -> dict:
     return core.load_user_settings() or {}
+
 
 def _save_settings(data: dict) -> None:
     core.save_user_settings(data or {})
 
+
 def _get_user_pref(uid: int) -> dict:
     return _load_settings().get(str(uid), {})
 
-def _set_user_pref(uid: int, **updates) -> None:
+
+def _set_user_pref(uid: int, **updates: Any) -> None:
     data = _load_settings()
     u = data.get(str(uid), {})
     u.update(updates)
     data[str(uid)] = u
     _save_settings(data)
 
+
 def _hhmm_valid(s: str) -> bool:
     try:
         hh, mm = s.split(":")
-        h = int(hh); m = int(mm)
+        h = int(hh)
+        m = int(mm)
         return 0 <= h <= 23 and 0 <= m <= 59
     except Exception:
         return False
 
+
+def _daily_summary_effective(uid: int, pref: dict) -> bool:
+    """Aligné sur bot.send_daily_summaries (legacy preferences.json)."""
+    daily = pref.get("daily_summary")
+    if daily is not None:
+        return bool(daily)
+    prefs_all = core.load_preferences() or {}
+    if str(uid) in prefs_all:
+        return True
+    return True
+
+
+class RecapSetupView(View):
+    """Menu éphémère : activer / désactiver / choisir une heure courante."""
+
+    def __init__(self, user_id: int) -> None:
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        opts: list[discord.SelectOption] = []
+        for label, val in (
+            ("✅ Activer le récap (MP)", "on_keep"),
+            ("⏹️ Désactiver le récap", "off"),
+        ):
+            opts.append(discord.SelectOption(label=label[:100], value=val))
+        for h in (6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23):
+            hhmm = f"{h:02d}:00"
+            opts.append(
+                discord.SelectOption(
+                    label=f"Activer à {hhmm}",
+                    value=f"on_{hhmm}",
+                    description="Heure d’envoi (fuseau du bot)",
+                )
+            )
+        self.add_item(RecapActionSelect(opts))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
+            return False
+        return True
+
+
+class RecapActionSelect(Select):
+    def __init__(self, options: list[discord.SelectOption]) -> None:
+        super().__init__(
+            placeholder="Choisir : activer / désactiver / heure…",
+            min_values=1,
+            max_values=1,
+            options=options[:25],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        v = self.values[0]
+        uid = interaction.user.id
+        if v == "off":
+            _set_user_pref(uid, daily_summary=False)
+            await interaction.response.edit_message(
+                content="⏹️ Récap **désactivé**. Tu peux rouvrir **`/recap`** pour le rallumer.",
+                embed=None,
+                view=None,
+            )
+            return
+        if v == "on_keep":
+            _set_user_pref(uid, daily_summary=True)
+            pref = _get_user_pref(uid)
+            hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
+            await interaction.response.edit_message(
+                content=(
+                    f"✅ Récap **activé** — envoi vers **`{hh}`** (fuseau du bot).\n"
+                    "Tu peux changer l’heure avec **`/setalert HH:MM`**."
+                ),
+                embed=None,
+                view=None,
+            )
+            return
+        if v.startswith("on_"):
+            hhmm = v[3:]
+            if _hhmm_valid(hhmm):
+                _set_user_pref(uid, daily_summary=True, alert_time=hhmm)
+                await interaction.response.edit_message(
+                    content=(
+                        f"✅ Récap **activé** — envoi vers **`{hhmm}`** (fuseau du bot).\n"
+                        "Pour une autre heure : **`/setalert HH:MM`**."
+                    ),
+                    embed=None,
+                    view=None,
+                )
+                return
+        await interaction.response.send_message("❌ Choix invalide.", ephemeral=True)
+
+
 class ReminderDigest(commands.Cog):
-    """Fusion: commandes /reminder & /setalert + envoi DU récap quotidien (joli), sans doublons."""
+    """Récap MP « sorties du jour » + /setalert (ancien /dailysummary ; /reminder supprimé)."""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.sent = _load_sent()
-        self._tick_lock = asyncio.Lock()
-        self.ticker.start()
-
-    def cog_unload(self):
-        try:
-            self.ticker.cancel()
-        except Exception:
-            pass
-        try:
-            _save_sent(self.sent)
-        except Exception:
-            pass
-
-    # ---------- commandes ----------
-    @staticmethod
-    def _reminder_on(state: str) -> bool:
-        return (state or "").strip().lower() == "on"
 
     @commands.hybrid_command(
-        name="reminder",
-        description="Récap MP détaillé (2e message). on|off + heure optionnelle en une commande : /reminder on 08:30",
+        name="recap",
+        description="Configurer le récap MP des sorties du jour (compte AniList lié). Menu éphémère.",
     )
-    @app_commands.describe(
-        state="on ou off",
-        heure="Optionnel (HH:MM) — même envoi que /setalert : règle l’heure des récaps MP en une fois.",
-    )
-    @app_commands.choices(
-        state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")]
-    )
-    async def reminder(
-        self,
-        ctx: commands.Context,
-        state: str,
-        heure: Optional[str] = None,
-    ):
-        on = self._reminder_on(state)
-        pref_updates: Dict[str, Any] = {"reminder_on": on}
-        if heure is not None and str(heure).strip():
-            hh = str(heure).strip()
-            if not _hhmm_valid(hh):
-                return await ctx.reply("❌ Heure invalide. Exemple : `08:00`", ephemeral=True)
-            pref_updates["alert_time"] = hh
-        _set_user_pref(ctx.author.id, **pref_updates)
-        if on:
-            linked = core.get_linked_username(ctx.author.id)
-            if not linked:
-                em = discord.Embed(
-                    title="🔔 Rappel activé — aucun compte AniList lié",
-                    description=(
-                        "Tu recevras un **récap global** (sorties du jour sur AniList, pas la **liste du serveur** `/airings`).\n"
-                        "Pour un récap basé sur **ta liste** AniList : `/linkanilist <pseudo>`."
-                    ),
-                    color=COLOR_WARN
-                )
-            else:
-                em = discord.Embed(
-                    title="🔔 Rappel activé",
-                    description=(
-                        f"Récap **personnalisé** : épisodes à venir liés à **ton** compte AniList (**{linked}**), "
-                        "pas celui du serveur."
-                    ),
-                    color=COLOR_OK
-                )
-            pref = _get_user_pref(ctx.author.id)
-            hhmm = pref.get("alert_time", core.get_config().get("default_alert_time", "08:00"))
-            em.add_field(name="Heure d’envoi", value=f"`{hhmm}` (fuseau du bot)", inline=False)
-            await ctx.reply(embed=em, ephemeral=True)
+    async def recap(self, ctx: commands.Context) -> None:
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(ephemeral=True)
+        pref = _get_user_pref(ctx.author.id)
+        on = _daily_summary_effective(ctx.author.id, pref)
+        hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
+        linked = core.get_linked_username(ctx.author.id)
+        link_txt = f"**{linked}**" if linked else "_(aucun — utilise `/linkanilist`)_"
+        em = discord.Embed(
+            title="📬 Récap quotidien — « Sorties du jour »",
+            description=(
+                "Un **message privé** chaque jour à l’heure choisie, avec les sorties qui t’intéressent "
+                "selon **ton** compte AniList.\n\n"
+                f"• Compte lié : {link_txt}\n"
+                f"• État : **{'activé' if on else 'désactivé'}** · heure : **`{hh}`** (fuseau du bot)\n\n"
+                "Utilise le **menu** ci-dessous pour activer / désactiver / choisir une heure.\n"
+                "Pour une heure précise (ex. **08:30**) : **`/setalert`** — tu peux la changer quand tu veux."
+            ),
+            color=COLOR_OK,
+        )
+        em.set_footer(text="/setalert HH:MM · /linkanilist")
+        view = RecapSetupView(ctx.author.id)
+        if ctx.interaction:
+            await ctx.followup.send(embed=em, view=view, ephemeral=True)
         else:
-            await ctx.reply("⏹️ Rappel **désactivé**.", ephemeral=True)
+            await ctx.reply(embed=em, view=view, delete_after=180)
 
     @commands.hybrid_command(
-        name="setalert",
-        description="Heure (HH:MM) du récap « Sorties du jour » et, si activé, du /reminder (fuseau du bot).",
+        name="dailysummary",
+        hidden=True,
+        description="(Obsolète) Utilise /recap à la place.",
     )
-    async def setalert(self, ctx: commands.Context, heure: str):
-        if not _hhmm_valid(heure):
-            return await ctx.reply("❌ Format invalide. Exemple : `08:00`", ephemeral=True)
-        _set_user_pref(ctx.author.id, alert_time=heure)
+    async def dailysummary_deprecated(self, ctx: commands.Context) -> None:
         await ctx.reply(
-            f"⏰ Heure réglée sur **{heure}** (fuseau du bot) — récap « Sorties du jour » (`/dailysummary`) "
-            f"et **/reminder** si tu l’as activé.",
+            "ℹ️ La commande **`/dailysummary`** a été renommée en **`/recap`**. Utilise **`/recap`** pour le menu.",
             ephemeral=True,
         )
 
     @commands.hybrid_command(
-        name="dailysummary",
-        description="Récap MP « Sorties du jour ». on|off + heure optionnelle : /dailysummary on 08:30 (comme /reminder).",
+        name="setalert",
+        description="Heure (HH:MM) du récap MP « sorties du jour » (/recap), fuseau du bot.",
     )
-    @app_commands.describe(
-        state="on ou off",
-        heure="Optionnel (HH:MM) — règle l’heure comme /setalert / /reminder, en une commande.",
-    )
-    @app_commands.choices(
-        state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")]
-    )
-    async def dailysummary(self, ctx: commands.Context, state: str, heure: Optional[str] = None):
-        on = self._reminder_on(state)
-        updates: Dict[str, Any] = {"daily_summary": on}
-        if heure is not None and str(heure).strip():
-            hh = str(heure).strip()
-            if not _hhmm_valid(hh):
-                return await ctx.reply("❌ Heure invalide. Exemple : `08:00`", ephemeral=True)
-            updates["alert_time"] = hh
-        _set_user_pref(ctx.author.id, **updates)
-        if on:
-            pref = _get_user_pref(ctx.author.id)
-            hhmm = pref.get("alert_time", core.get_config().get("default_alert_time", "08:00"))
-            await ctx.reply(
-                f"✅ Récap **« Sorties du jour »** activé — envoi vers **`{hhmm}`** (fuseau du bot). "
-                f"Compte AniList : **`/linkanilist`**. Le récap **/reminder** (2e message) est séparé : `/reminder off` si tu n’en veux qu’un.",
-                ephemeral=True,
-            )
-        else:
-            await ctx.reply(
-                "⏹️ Récap **« Sorties du jour »** désactivé. Tu peux le réactiver avec `/dailysummary on` (éventuellement avec une heure).",
-                ephemeral=True,
-            )
+    async def setalert(self, ctx: commands.Context, heure: str) -> None:
+        if not _hhmm_valid(heure):
+            return await ctx.reply("❌ Format invalide. Exemple : `08:00`", ephemeral=True)
+        _set_user_pref(ctx.author.id, alert_time=heure)
+        await ctx.reply(
+            f"⏰ Heure réglée sur **{heure}** (fuseau du bot) — utilisée par le récap **`/recap`**.",
+            ephemeral=True,
+        )
 
-    # ---------- boucle d'envoi ----------
-    @tasks.loop(minutes=1)
-    async def ticker(self):
-        # anti-réentrance (évite chevauchement si tick prend du temps)
-        if self._tick_lock.locked():
-            return
-        async with self._tick_lock:
-            await self._do_tick()
 
-    @ticker.before_loop
-    async def before_ticker(self):
-        await self.bot.wait_until_ready()
-
-    async def _do_tick(self):
-        now = _now_tz()
-        hhmm_now = now.strftime("%H:%M")
-        today = _today_str_tz()
-
-        settings = _load_settings()  # {uid: {"reminder_on":bool,"alert_time":"HH:MM"}}
-        if not settings:
-            return
-
-        for uid, cfg in settings.items():
-            try:
-                if not cfg.get("reminder_on"):
-                    continue
-                target_hhmm = cfg.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
-                if target_hhmm != hhmm_now:
-                    continue
-
-                # déjà envoyé aujourd'hui ?
-                if self.sent.get(uid) == today:
-                    continue
-
-                user = self.bot.get_user(int(uid))
-                if not user:
-                    try:
-                        user = await self.bot.fetch_user(int(uid))
-                    except Exception:
-                        continue
-                if not user:
-                    continue
-
-                embed = await self._build_daily_embed(int(uid))
-                try:
-                    await user.send(embed=embed)
-                    self.sent[uid] = today
-                    _save_sent(self.sent)
-                except discord.Forbidden:
-                    LOG.warning("MP refusé par %s", uid)
-                except Exception as e:
-                    LOG.warning("Envoi digest à %s échoué: %s", uid, e)
-            except Exception as e:
-                LOG.exception("Tick pour %s échoué: %s", uid, e)
-
-    # ---------- construction de l'embed (style daily_digest) ----------
-    async def _build_daily_embed(self, uid: int) -> discord.Embed:
-        now_tz = _now_tz()
-        linked = core.get_linked_username(uid)
-
-        if linked:
-            # perso: on prend get_upcoming_episodes puis on filtre "aujourd'hui"
-            try:
-                items = core.get_upcoming_episodes(linked) or []
-                today_eps = [ep for ep in items if _is_today_ts(ep.get("airingAt", 0))]
-            except Exception:
-                today_eps = []
-            title = "🗓️ Récap des sorties d'aujourd'hui — personnel"
-            descr = f"Compte lié : **{linked}**"
-        else:
-            # global: on prend le planning global sur 1 jour
-            try:
-                items = core.get_airings_global(days=1, limit=50) or []
-            except Exception:
-                items = []
-
-            # homogénéiser le format attendu par _fmt_list
-            today_eps = []
-            for it in items:
-                m = it.get("media") or {}
-                tdict = m.get("title") or {}
-                today_eps.append({
-                    "title": {
-                        "romaji": tdict.get("romaji") or tdict.get("english") or tdict.get("native")
-                    },
-                    "episode": it.get("episode"),
-                    "airingAt": it.get("airingAt"),
-                    "genres": m.get("genres") or [],
-                    "media": m,
-                })
-            title = "🗓️ Récap des sorties d'aujourd'hui"
-            descr = f"Fuseau : {now_tz.tzname()}"
-
-        em = discord.Embed(title=title, description=descr, color=COLOR_OK)
-
-        if not today_eps:
-            em.add_field(name="Aujourd’hui", value="Rien de prévu ✅", inline=False)
-            em.set_footer(text="Astuce : /monplanning · /next (mode global)")
-            return em
-
-        today_eps.sort(key=lambda e: e.get("airingAt", 0))
-        for name, value in _fmt_list(today_eps, limit=25):
-            em.add_field(name=name, value=value, inline=False)
-        em.set_footer(text="Astuce : /monnext · /planning")
-        return em
-
-async def setup(bot: commands.Bot):
+async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(ReminderDigest(bot))

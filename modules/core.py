@@ -555,6 +555,7 @@ def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: i
                     "siteUrl": m.get("siteUrl"),
                     "title": t,
                     "cover": _best_anilist_cover_url(m),
+                    "coverImage": m.get("coverImage") or {},
                     "genres": m.get("genres") or [],
                 },
             }
@@ -691,6 +692,7 @@ def get_recent_airings_for_guild(
                         "siteUrl": m.get("siteUrl"),
                         "title": t,
                         "cover": _best_anilist_cover_url(m),
+                        "coverImage": m.get("coverImage") or {},
                         "genres": m.get("genres") or [],
                     },
                 }

@@ -151,8 +151,8 @@ class Onboarding(commands.Cog):
                 title="🛎️ Rappels (MP)",
                 color=discord.Color.gold(),
                 description=(
-                    "• `/dailysummary on|off` + `/setalert HH:MM` — récap MP **« Sorties du jour »** (liste AniList liée).\n"
-                    "• `/reminder` — second récap (détail), **off** par défaut ; évite d’avoir les deux si tu n’en veux qu’un.\n"
+                    "• **`/recap`** — menu (éphémère) pour activer le récap **« Sorties du jour »** et choisir une heure ; "
+                    "**`/setalert HH:MM`** pour une heure précise.\n"
                     "• Indépendant des annonces du serveur (`/setchannel`).\n\n"
                     "**`/next` / `/planning`** — mode **serveur** = liste **`/airings`** · mode **global** = sorties générales.\n"
                     "**`/monnext` / `/monplanning`** — **ton** planning AniList (compte lié)."

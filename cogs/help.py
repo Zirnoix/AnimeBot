@@ -79,9 +79,9 @@ DESC_OVERRIDE: Dict[str, str] = {
     "guide_admin": "(MP, admins) Configuration serveur : airings, setchannel, niveaux XP, raid.",
     "botinfo": "Infos sur le bot (versions, créateur, etc.).",
     "ping": "Latence du bot.",
-    "reminder": "Récap MP détaillé (2e message). Même ergonomie qu’avant : /reminder on|off et heure optionnelle (ex. /reminder on 08:30).",
-    "setalert": "Heure HH:MM des récaps MP (fuseau du bot). Raccourci : /reminder ou /dailysummary avec l’argument heure.",
-    "dailysummary": "Récap « Sorties du jour » (liste liée). /dailysummary on|off et heure optionnelle (ex. /dailysummary on 08:30).",
+    "recap": "Récap MP « Sorties du jour » (compte AniList lié). Menu pour activer / désactiver / choisir une heure ; précision avec /setalert.",
+    "setalert": "Heure HH:MM du récap MP (fuseau du bot). Complète /recap pour une heure précise (ex. 08:30).",
+    "dailysummary": "(Obsolète) Renommé en /recap — affiche un rappel si tu l’utilises encore.",
     "source": "Lien vers le dépôt GitHub du bot.",
     "uptime": "Depuis combien de temps le bot tourne.",
 
@@ -129,7 +129,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "track", "track add", "track list", "track remove", "track clear"
     ]),
     ("🧰 Pages Utils", [
-        "setchannel", "setlevelupchannel", "clearlevelupchannel", "botinfo", "ping", "dailysummary", "setalert", "reminder", "source", "uptime"
+        "setchannel", "setlevelupchannel", "clearlevelupchannel", "botinfo", "ping", "recap", "setalert", "dailysummary", "source", "uptime"
     ]),
     ("🛠️ Pages Admin (guide)", [
         "guide_admin",
@@ -524,9 +524,8 @@ class Help(commands.Cog):
             ("/planning", DESC_OVERRIDE["planning"]),
             ("/mystats", DESC_OVERRIDE["mystats"]),
             ("/linkanilist", DESC_OVERRIDE["linkanilist"]),
-            ("/dailysummary", DESC_OVERRIDE["dailysummary"]),
+            ("/recap", DESC_OVERRIDE["recap"]),
             ("/setalert", DESC_OVERRIDE["setalert"]),
-            ("/reminder", DESC_OVERRIDE["reminder"]),
             ("/botinfo", DESC_OVERRIDE["botinfo"]),
         ]
         for name, desc in picks:
