@@ -78,6 +78,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "clearlevelupchannel": "Retire le salon dédié aux annonces de niveau XP (comportement par défaut).",
     "guide_admin": "(MP, admins) Configuration serveur : airings, setchannel, niveaux XP, raid.",
     "botinfo": "Infos sur le bot (versions, créateur, etc.).",
+    "vote": "Lien Top.gg, cooldown, récompense XP ; rappel MP quand tu peux revoter (boutons).",
     "ping": "Latence du bot.",
     "recap": "Récap MP « Sorties du jour » (compte AniList lié). Boutons + saisie HH:MM ; précision avec /setalert.",
     "setalert": "Heure HH:MM du récap MP (fuseau du bot). Complète /recap pour une heure précise (ex. 08:30).",
@@ -129,7 +130,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "track", "track add", "track list", "track remove", "track clear"
     ]),
     ("🧰 Pages Utils", [
-        "setchannel", "setlevelupchannel", "clearlevelupchannel", "botinfo", "ping", "recap", "setalert", "dailysummary", "source", "uptime"
+        "setchannel", "setlevelupchannel", "clearlevelupchannel", "botinfo", "vote", "ping", "recap", "setalert", "dailysummary", "source", "uptime"
     ]),
     ("🛠️ Pages Admin (guide)", [
         "guide_admin",
@@ -527,6 +528,7 @@ class Help(commands.Cog):
             ("/recap", DESC_OVERRIDE["recap"]),
             ("/setalert", DESC_OVERRIDE["setalert"]),
             ("/botinfo", DESC_OVERRIDE["botinfo"]),
+            ("/vote", DESC_OVERRIDE["vote"]),
         ]
         for name, desc in picks:
             em.add_field(name=name, value=_compact_one_line(desc), inline=False)

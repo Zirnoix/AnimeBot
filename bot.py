@@ -559,39 +559,148 @@ async def on_command_error(ctx: commands.Context, error: Exception) -> None:
         pass
 
 
-# ========= Healthcheck HTTP (Railway / hébergeurs qui exposent PORT) =========
+# ========= Healthcheck HTTP + webhook Top.gg (PORT / HEALTHCHECK_PORT) =========
 _health_runner: web.AppRunner | None = None
 
 
-async def _start_health_server_if_configured() -> None:
-    """Répond 200 sur / et /health si PORT ou HEALTHCHECK_PORT est défini (ex. Railway)."""
+async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -> None:
+    """Enregistre le vote, XP, mini-score ; MP de remerciement si possible."""
+    from modules import topgg_vote
+
+    xp = topgg_vote.vote_xp_amount()
+    if is_weekend:
+        try:
+            mult = float(os.getenv("TOPGG_WEEKEND_XP_MULT", "1.5"))
+        except ValueError:
+            mult = 1.5
+        xp = max(0, int(xp * mult))
+
+    topgg_vote.record_successful_vote(user_id)
+    try:
+        core.add_mini_score(user_id, "topgg_vote", 1)
+    except Exception:
+        pass
+    try:
+        await core.add_xp(bot, None, user_id, xp, announce=False)
+    except Exception as e:
+        LOG.warning("top.gg add_xp failed uid=%s: %s", user_id, e)
+
+    try:
+        u = await bot.fetch_user(user_id)
+        url = topgg_vote.vote_page_url(bot.user.id)
+        cd_sec = topgg_vote.cooldown_seconds()
+        cd_h = max(1, cd_sec // 3600)
+        await u.send(
+            f"🎉 Merci pour ton vote sur **Top.gg** ! +**{xp}** XP sur ta carte.\n"
+            f"Prochain vote possible dans environ **{cd_h} h**.\n{url}"
+        )
+    except Exception:
+        pass
+
+
+async def _topgg_post_handler(request: web.Request) -> web.Response:
+    """Webhook Top.gg : Authorization = TOPGG_WEBHOOK_SECRET ; JSON type test | upvote."""
+    from modules import topgg_vote
+
+    secret = topgg_vote.webhook_secret()
+    if not secret:
+        return web.Response(status=503, text="not configured")
+
+    auth = (request.headers.get("Authorization") or request.headers.get("authorization") or "").strip()
+    if auth != secret:
+        LOG.warning("top.gg webhook: Authorization invalide")
+        return web.Response(status=401, text="unauthorized")
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.Response(status=400, text="bad json")
+
+    bot = request.app.get("bot")
+    if not isinstance(bot, AnimeBot):
+        return web.Response(status=503, text="bot not ready")
+
+    typ = data.get("type")
+    if typ == "test":
+        return web.Response(text="ok")
+
+    if not bot.is_ready():
+        try:
+            await asyncio.wait_for(bot.wait_until_ready(), timeout=4.5)
+        except asyncio.TimeoutError:
+            LOG.warning("top.gg webhook: bot pas prêt (timeout)")
+            return web.Response(status=503, text="bot not ready")
+
+    bot_user = bot.user
+    if bot_user is None:
+        return web.Response(status=503, text="bot not ready")
+
+    try:
+        if str(data.get("bot")) != str(bot_user.id):
+            LOG.warning("top.gg webhook: bot id mismatch got=%s expected=%s", data.get("bot"), bot_user.id)
+            return web.Response(status=400, text="bad bot id")
+    except Exception:
+        return web.Response(status=400, text="bad bot id")
+
+    if typ != "upvote":
+        return web.Response(text="ignored")
+
+    try:
+        user_id = int(data["user"])
+    except (KeyError, TypeError, ValueError):
+        return web.Response(status=400, text="bad user")
+
+    is_weekend = bool(data.get("isWeekend"))
+
+    try:
+        await _process_topgg_upvote(bot, user_id, is_weekend)
+    except Exception:
+        LOG.exception("top.gg vote processing")
+        return web.Response(status=500, text="internal error")
+
+    LOG.info("top.gg upvote OK user_id=%s weekend=%s", user_id, is_weekend)
+    return web.Response(text="ok")
+
+
+async def _start_health_server_if_configured(bot_instance: AnimeBot) -> None:
+    """Répond 200 sur / et /health ; POST /topgg pour Top.gg si TOPGG_WEBHOOK_SECRET est défini."""
     global _health_runner
+    from modules import topgg_vote
+
     port_s = (os.getenv("PORT") or os.getenv("HEALTHCHECK_PORT") or "").strip()
     if not port_s:
+        if topgg_vote.webhook_secret():
+            LOG.warning(
+                "TOPGG_WEBHOOK_SECRET défini mais PORT absent — webhook Top.gg impossible "
+                "(définis PORT sur l’hébergeur pour exposer POST /topgg)."
+            )
         return
     try:
         port = int(port_s)
     except ValueError:
-        LOG.warning("PORT/HEALTHCHECK_PORT invalide (%r) — healthcheck HTTP désactivé.", port_s)
+        LOG.warning("PORT/HEALTHCHECK_PORT invalide (%r) — serveur HTTP désactivé.", port_s)
         return
 
     async def _ok(_: web.Request) -> web.Response:
         return web.Response(text="ok")
 
     app = web.Application()
+    app["bot"] = bot_instance
     app.router.add_get("/", _ok)
     app.router.add_get("/health", _ok)
+    app.router.add_post("/topgg", _topgg_post_handler)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     _health_runner = runner
-    LOG.info("Healthcheck HTTP sur 0.0.0.0:%s (/ et /health)", port)
+    hook = " + POST /topgg (Top.gg)" if topgg_vote.webhook_secret() else ""
+    LOG.info("HTTP sur 0.0.0.0:%s (/, /health%s)", port, hook)
 
 
 # ========= RUN =========
 async def _amain() -> None:
-    await _start_health_server_if_configured()
+    await _start_health_server_if_configured(bot)
     async with bot:
         await bot.start(TOKEN)
 
