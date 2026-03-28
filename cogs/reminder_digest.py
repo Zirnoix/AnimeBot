@@ -6,7 +6,7 @@ from typing import Any
 
 import discord
 from discord.ext import commands
-from discord.ui import Select, View
+from discord.ui import Button, Modal, TextInput, View
 
 from modules import core
 
@@ -36,12 +36,25 @@ def _set_user_pref(uid: int, **updates: Any) -> None:
 
 def _hhmm_valid(s: str) -> bool:
     try:
-        hh, mm = s.split(":")
+        hh, mm = (s or "").strip().split(":")
         h = int(hh)
         m = int(mm)
         return 0 <= h <= 23 and 0 <= m <= 59
     except Exception:
         return False
+
+
+def _normalize_hhmm(s: str) -> str | None:
+    """Retourne HH:MM normalisé ou None si invalide."""
+    if not _hhmm_valid(s):
+        return None
+    hh, mm = (s or "").strip().split(":")
+    return f"{int(hh):02d}:{int(mm):02d}"
+
+
+def _modal_default_hhmm(s: str) -> str:
+    """Valeur par défaut du champ heure (modal)."""
+    return _normalize_hhmm(s) or "08:00"
 
 
 def _daily_summary_effective(uid: int, pref: dict) -> bool:
@@ -55,28 +68,54 @@ def _daily_summary_effective(uid: int, pref: dict) -> bool:
     return True
 
 
-class RecapSetupView(View):
-    """Menu éphémère : activer / désactiver / choisir une heure courante."""
+class RecapTimeModal(Modal):
+    """Saisie HH:MM (fuseau du bot) — plus lisible qu’un long menu déroulant."""
 
-    def __init__(self, user_id: int) -> None:
+    def __init__(self, user_id: int, default_hhmm: str) -> None:
+        super().__init__(title="Heure du récap MP")
+        self.user_id = user_id
+        self._time = TextInput(
+            label="Heure (HH:MM)",
+            default=(default_hhmm or "08:00")[:5],
+            placeholder="ex. 08:00, 21:30",
+            min_length=4,
+            max_length=5,
+            required=True,
+        )
+        self.add_item(self._time)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Ce formulaire n’est pas pour toi.", ephemeral=True)
+            return
+        norm = _normalize_hhmm(self._time.value)
+        if not norm:
+            await interaction.response.send_message(
+                "❌ Heure invalide. Utilise **HH:MM** (ex. `08:00`, `21:30`). Réessaie avec **`/recap`**.",
+                ephemeral=True,
+            )
+            return
+        _set_user_pref(interaction.user.id, daily_summary=True, alert_time=norm)
+        await interaction.response.edit_message(
+            content=(
+                f"✅ Récap **activé** — envoi vers **`{norm}`** (fuseau du bot).\n"
+                "Tu peux aussi utiliser **`/setalert HH:MM`** pour modifier l’heure."
+            ),
+            embed=None,
+            view=None,
+        )
+
+
+class RecapSetupView(View):
+    """Boutons + modal de saisie : activer / désactiver / régler l’heure au clavier."""
+
+    def __init__(self, user_id: int, default_hhmm: str) -> None:
         super().__init__(timeout=300)
         self.user_id = user_id
-        opts: list[discord.SelectOption] = []
-        for label, val in (
-            ("✅ Activer le récap (MP)", "on_keep"),
-            ("⏹️ Désactiver le récap", "off"),
-        ):
-            opts.append(discord.SelectOption(label=label[:100], value=val))
-        for h in (6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23):
-            hhmm = f"{h:02d}:00"
-            opts.append(
-                discord.SelectOption(
-                    label=f"Activer à {hhmm}",
-                    value=f"on_{hhmm}",
-                    description="Heure d’envoi (fuseau du bot)",
-                )
-            )
-        self.add_item(RecapActionSelect(opts))
+        self.default_hhmm = default_hhmm
+        self.add_item(RecapEnableButton(user_id))
+        self.add_item(RecapDisableButton(user_id))
+        self.add_item(RecapTimeModalButton(user_id, default_hhmm))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -85,53 +124,68 @@ class RecapSetupView(View):
         return True
 
 
-class RecapActionSelect(Select):
-    def __init__(self, options: list[discord.SelectOption]) -> None:
+class RecapEnableButton(Button):
+    def __init__(self, user_id: int) -> None:
         super().__init__(
-            placeholder="Choisir : activer / désactiver / heure…",
-            min_values=1,
-            max_values=1,
-            options=options[:25],
+            label="Activer (heure actuelle)",
+            style=discord.ButtonStyle.success,
+            row=0,
         )
+        self.user_id = user_id
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        v = self.values[0]
-        uid = interaction.user.id
-        if v == "off":
-            _set_user_pref(uid, daily_summary=False)
-            await interaction.response.edit_message(
-                content="⏹️ Récap **désactivé**. Tu peux rouvrir **`/recap`** pour le rallumer.",
-                embed=None,
-                view=None,
-            )
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
             return
-        if v == "on_keep":
-            _set_user_pref(uid, daily_summary=True)
-            pref = _get_user_pref(uid)
-            hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
-            await interaction.response.edit_message(
-                content=(
-                    f"✅ Récap **activé** — envoi vers **`{hh}`** (fuseau du bot).\n"
-                    "Tu peux changer l’heure avec **`/setalert HH:MM`**."
-                ),
-                embed=None,
-                view=None,
-            )
+        _set_user_pref(interaction.user.id, daily_summary=True)
+        pref = _get_user_pref(interaction.user.id)
+        hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
+        await interaction.response.edit_message(
+            content=(
+                f"✅ Récap **activé** — envoi vers **`{hh}`** (fuseau du bot).\n"
+                "Pour une autre heure : bouton **Choisir l’heure** ou **`/setalert HH:MM`**."
+            ),
+            embed=None,
+            view=None,
+        )
+
+
+class RecapDisableButton(Button):
+    def __init__(self, user_id: int) -> None:
+        super().__init__(
+            label="Désactiver",
+            style=discord.ButtonStyle.danger,
+            row=0,
+        )
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
             return
-        if v.startswith("on_"):
-            hhmm = v[3:]
-            if _hhmm_valid(hhmm):
-                _set_user_pref(uid, daily_summary=True, alert_time=hhmm)
-                await interaction.response.edit_message(
-                    content=(
-                        f"✅ Récap **activé** — envoi vers **`{hhmm}`** (fuseau du bot).\n"
-                        "Pour une autre heure : **`/setalert HH:MM`**."
-                    ),
-                    embed=None,
-                    view=None,
-                )
-                return
-        await interaction.response.send_message("❌ Choix invalide.", ephemeral=True)
+        _set_user_pref(interaction.user.id, daily_summary=False)
+        await interaction.response.edit_message(
+            content="⏹️ Récap **désactivé**. Tu peux rouvrir **`/recap`** pour le rallumer.",
+            embed=None,
+            view=None,
+        )
+
+
+class RecapTimeModalButton(Button):
+    def __init__(self, user_id: int, default_hhmm: str) -> None:
+        super().__init__(
+            label="Choisir l’heure (HH:MM)",
+            style=discord.ButtonStyle.primary,
+            row=0,
+        )
+        self.user_id = user_id
+        self.default_hhmm = default_hhmm
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
+            return
+        await interaction.response.send_modal(RecapTimeModal(self.user_id, self.default_hhmm))
 
 
 class ReminderDigest(commands.Cog):
@@ -142,7 +196,7 @@ class ReminderDigest(commands.Cog):
 
     @commands.hybrid_command(
         name="recap",
-        description="Configurer le récap MP des sorties du jour (compte AniList lié). Menu éphémère.",
+        description="Configurer le récap MP des sorties du jour (compte AniList lié). Boutons + saisie d’heure.",
     )
     async def recap(self, ctx: commands.Context) -> None:
         """Slash : defer puis followup explicite (évite « réfléchit » infini si followup mal résolu)."""
@@ -163,13 +217,13 @@ class ReminderDigest(commands.Cog):
                     "Un **message privé** chaque jour à l’heure choisie, selon **ton** compte AniList.\n\n"
                     f"• Compte lié : {link_txt}\n"
                     f"• État : **{'activé' if on else 'désactivé'}** · heure : **`{hh}`** (fuseau du bot)\n\n"
-                    "Menu ci-dessous : activer / désactiver / heure pleine. "
-                    "Pour **08:30** etc. : **`/setalert`**."
+                    "Boutons ci-dessous : activer, désactiver, ou **saisir l’heure** (HH:MM). "
+                    "Tu peux aussi régler l’heure avec **`/setalert`**."
                 ),
                 color=COLOR_OK,
             )
             em.set_footer(text="/setalert HH:MM · /linkanilist")
-            view = RecapSetupView(ctx.author.id)
+            view = RecapSetupView(ctx.author.id, _modal_default_hhmm(hh))
 
             if ctx.interaction is not None:
                 await ctx.interaction.followup.send(embed=em, view=view, ephemeral=True)
@@ -201,7 +255,7 @@ class ReminderDigest(commands.Cog):
     )
     async def dailysummary_deprecated(self, ctx: commands.Context) -> None:
         await ctx.reply(
-            "ℹ️ La commande **`/dailysummary`** a été renommée en **`/recap`**. Utilise **`/recap`** pour le menu.",
+            "ℹ️ La commande **`/dailysummary`** a été renommée en **`/recap`**. Utilise **`/recap`** pour le panneau.",
             ephemeral=True,
         )
 

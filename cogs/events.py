@@ -151,7 +151,7 @@ class Onboarding(commands.Cog):
                 title="🛎️ Rappels (MP)",
                 color=discord.Color.gold(),
                 description=(
-                    "• **`/recap`** — menu (éphémère) pour activer le récap **« Sorties du jour »** et choisir une heure ; "
+                    "• **`/recap`** — panneau (boutons + saisie d’heure) pour activer le récap **« Sorties du jour »** ; "
                     "**`/setalert HH:MM`** pour une heure précise.\n"
                     "• Indépendant des annonces du serveur (`/setchannel`).\n\n"
                     "**`/next` / `/planning`** — mode **serveur** = liste **`/airings`** · mode **global** = sorties générales.\n"

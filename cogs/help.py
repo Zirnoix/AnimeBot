@@ -79,7 +79,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "guide_admin": "(MP, admins) Configuration serveur : airings, setchannel, niveaux XP, raid.",
     "botinfo": "Infos sur le bot (versions, créateur, etc.).",
     "ping": "Latence du bot.",
-    "recap": "Récap MP « Sorties du jour » (compte AniList lié). Menu pour activer / désactiver / choisir une heure ; précision avec /setalert.",
+    "recap": "Récap MP « Sorties du jour » (compte AniList lié). Boutons + saisie HH:MM ; précision avec /setalert.",
     "setalert": "Heure HH:MM du récap MP (fuseau du bot). Complète /recap pour une heure précise (ex. 08:30).",
     "dailysummary": "(Obsolète) Renommé en /recap — affiche un rappel si tu l’utilises encore.",
     "source": "Lien vers le dépôt GitHub du bot.",
