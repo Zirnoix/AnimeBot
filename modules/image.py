@@ -1,6 +1,7 @@
 # modules/image.py (extrait)
 import os
 import tempfile
+import time
 from typing import Dict, Any, Optional
 from io import BytesIO
 from PIL import Image, ImageFilter, ImageDraw, ImageFont, ImageOps
@@ -17,12 +18,15 @@ def _fetch_image(url: Optional[str]) -> Image.Image:
     """Télécharge la cover ; si échec (403, timeout, URL vide), fond gris foncé (comme avant)."""
     if not url:
         return Image.new("RGB", (1200, 675), (20, 22, 26))
-    try:
-        r = requests.get(url, timeout=12, headers=_IMG_HEADERS)
-        r.raise_for_status()
-        return Image.open(BytesIO(r.content)).convert("RGB")
-    except Exception:
-        return Image.new("RGB", (1200, 675), (20, 22, 26))
+    for attempt in range(3):
+        try:
+            r = requests.get(url, timeout=14, headers=_IMG_HEADERS)
+            r.raise_for_status()
+            return Image.open(BytesIO(r.content)).convert("RGB")
+        except Exception:
+            if attempt < 2:
+                time.sleep(0.35)
+    return Image.new("RGB", (1200, 675), (20, 22, 26))
 
 
 def _fetch_cover_for_card(anime: Dict[str, Any]) -> Image.Image:
@@ -32,12 +36,14 @@ def _fetch_cover_for_card(anime: Dict[str, Any]) -> Image.Image:
         for u in urls:
             if not u:
                 continue
-            try:
-                r = requests.get(str(u), timeout=12, headers=_IMG_HEADERS)
-                r.raise_for_status()
-                return Image.open(BytesIO(r.content)).convert("RGB")
-            except Exception:
-                continue
+            for attempt in range(2):
+                try:
+                    r = requests.get(str(u), timeout=14, headers=_IMG_HEADERS)
+                    r.raise_for_status()
+                    return Image.open(BytesIO(r.content)).convert("RGB")
+                except Exception:
+                    if attempt == 0:
+                        time.sleep(0.25)
         return Image.new("RGB", (1200, 675), (20, 22, 26))
     return _fetch_image(anime.get("cover") if isinstance(anime.get("cover"), str) else None)
 

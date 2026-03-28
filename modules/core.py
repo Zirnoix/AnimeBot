@@ -526,7 +526,7 @@ def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: i
     parts: List[str] = []
     for i, mid in enumerate(media_ids):
         parts.append(
-            f"a{i}: Media(id: {int(mid)}, type: ANIME) {{ id siteUrl title {{ romaji english native }} "
+            f"a{i}: Media(id: {int(mid)}, type: ANIME) {{ id siteUrl bannerImage title {{ romaji english native }} "
             f"coverImage {{ extraLarge large medium }} genres nextAiringEpisode {{ episode airingAt }} }}"
         )
     query = "query { " + " ".join(parts) + " }"
@@ -556,6 +556,7 @@ def _fetch_media_alert_candidates_batch(media_ids: List[int], now: int, grace: i
                     "title": t,
                     "cover": _best_anilist_cover_url(m),
                     "coverImage": m.get("coverImage") or {},
+                    "bannerImage": m.get("bannerImage"),
                     "genres": m.get("genres") or [],
                 },
             }
@@ -594,6 +595,7 @@ def _fetch_airing_schedules_past_window(
               media {
                 id
                 siteUrl
+                bannerImage
                 title { romaji english native }
                 coverImage { extraLarge large medium }
                 genres
@@ -625,6 +627,8 @@ def _fetch_airing_schedules_past_window(
                         "siteUrl": m.get("siteUrl"),
                         "title": m.get("title") or {},
                         "cover": _best_anilist_cover_url(m),
+                        "coverImage": m.get("coverImage") or {},
+                        "bannerImage": m.get("bannerImage"),
                         "genres": m.get("genres") or [],
                     },
                 }
@@ -693,6 +697,7 @@ def get_recent_airings_for_guild(
                         "title": t,
                         "cover": _best_anilist_cover_url(m),
                         "coverImage": m.get("coverImage") or {},
+                        "bannerImage": m.get("bannerImage"),
                         "genres": m.get("genres") or [],
                     },
                 }
@@ -727,6 +732,28 @@ def airing_item_to_card_dict(item: dict, *, tz_name: str = "Europe/Paris") -> di
         cover_urls.insert(0, cov)
     elif not cover_urls and cov:
         cover_urls = [cov]
+    bn = m.get("bannerImage")
+    if isinstance(bn, str) and bn.strip():
+        bns = bn.strip()
+        if bns not in cover_urls:
+            cover_urls.append(bns)
+    mid = m.get("id")
+    if (not cov or not cover_urls) and mid is not None:
+        try:
+            det = get_anime_details(int(mid))
+        except Exception:
+            det = None
+        if det:
+            ci2 = det.get("coverImage") or {}
+            for k in ("extraLarge", "large", "medium"):
+                u = ci2.get(k)
+                if u and u not in cover_urls:
+                    cover_urls.append(u)
+            if not cov:
+                cov = _best_anilist_cover_url(det) or cov
+            b2 = det.get("bannerImage")
+            if isinstance(b2, str) and b2.strip() and b2.strip() not in cover_urls:
+                cover_urls.append(b2.strip())
     return {
         "title_romaji": t.get("romaji"),
         "title_english": t.get("english"),
@@ -1731,7 +1758,7 @@ def get_anime_details(media_id: int) -> Optional[dict]:
         id
         title { romaji english native }
         description
-        coverImage { large }
+        coverImage { extraLarge large }
         bannerImage
         format
         episodes

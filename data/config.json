@@ -1,0 +1,8 @@
+{
+  "channel_id": null,
+  "guild_alert_channels": {},
+  "guild_levelup_channels": {},
+  "notification_delay": 10,
+  "daily_summary": true,
+  "default_alert_time": "08:00"
+}

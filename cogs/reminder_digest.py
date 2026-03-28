@@ -68,6 +68,30 @@ def _daily_summary_effective(uid: int, pref: dict) -> bool:
     return True
 
 
+def _recap_embed_for_user(uid: int) -> discord.Embed:
+    """Embed du panneau /recap (état courant)."""
+    pref = _get_user_pref(uid)
+    on = _daily_summary_effective(uid, pref)
+    hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
+    linked = core.get_linked_username(uid)
+    link_txt = f"**{linked}**" if linked else "_(aucun — utilise `/linkanilist`)_"
+    em = discord.Embed(
+        title="📬 Récap quotidien — « Sorties du jour »",
+        description=(
+            "Configure le **même** récap MP que l’embed **« Sorties du … »** (liste à puces, "
+            "pas l’ancien message détaillé supprimé).\n\n"
+            "Un **message privé** chaque jour à l’heure choisie, selon **ton** compte AniList.\n\n"
+            f"• Compte lié : {link_txt}\n"
+            f"• État : **{'activé' if on else 'désactivé'}** · heure : **`{hh}`** (fuseau du bot)\n\n"
+            "Boutons ci-dessous : activer, désactiver, ou **saisir l’heure** (HH:MM). "
+            "Tu peux aussi régler l’heure avec **`/setalert`**. Utilise **Fermer** quand tu as terminé."
+        ),
+        color=COLOR_OK,
+    )
+    em.set_footer(text="/setalert HH:MM · /linkanilist")
+    return em
+
+
 class RecapTimeModal(Modal):
     """Saisie HH:MM (fuseau du bot) — plus lisible qu’un long menu déroulant."""
 
@@ -96,14 +120,9 @@ class RecapTimeModal(Modal):
             )
             return
         _set_user_pref(interaction.user.id, daily_summary=True, alert_time=norm)
-        await interaction.response.edit_message(
-            content=(
-                f"✅ Récap **activé** — envoi vers **`{norm}`** (fuseau du bot).\n"
-                "Tu peux aussi utiliser **`/setalert HH:MM`** pour modifier l’heure."
-            ),
-            embed=None,
-            view=None,
-        )
+        em = _recap_embed_for_user(interaction.user.id)
+        view = _recap_view_for_user(interaction.user.id)
+        await interaction.response.edit_message(embed=em, view=view, content=None)
 
 
 class RecapSetupView(View):
@@ -116,6 +135,7 @@ class RecapSetupView(View):
         self.add_item(RecapEnableButton(user_id))
         self.add_item(RecapDisableButton(user_id))
         self.add_item(RecapTimeModalButton(user_id, default_hhmm))
+        self.add_item(RecapCloseButton(user_id))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -138,16 +158,9 @@ class RecapEnableButton(Button):
             await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
             return
         _set_user_pref(interaction.user.id, daily_summary=True)
-        pref = _get_user_pref(interaction.user.id)
-        hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
-        await interaction.response.edit_message(
-            content=(
-                f"✅ Récap **activé** — envoi vers **`{hh}`** (fuseau du bot).\n"
-                "Pour une autre heure : bouton **Choisir l’heure** ou **`/setalert HH:MM`**."
-            ),
-            embed=None,
-            view=None,
-        )
+        em = _recap_embed_for_user(interaction.user.id)
+        view = _recap_view_for_user(interaction.user.id)
+        await interaction.response.edit_message(embed=em, view=view, content=None)
 
 
 class RecapDisableButton(Button):
@@ -188,6 +201,32 @@ class RecapTimeModalButton(Button):
         await interaction.response.send_modal(RecapTimeModal(self.user_id, self.default_hhmm))
 
 
+class RecapCloseButton(Button):
+    def __init__(self, user_id: int) -> None:
+        super().__init__(
+            label="Fermer",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
+            return
+        await interaction.response.edit_message(
+            content="✅ Panneau fermé. Rouvre **`/recap`** pour modifier.",
+            embed=None,
+            view=None,
+        )
+
+
+def _recap_view_for_user(uid: int) -> RecapSetupView:
+    pref = _get_user_pref(uid)
+    hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
+    return RecapSetupView(uid, _modal_default_hhmm(hh))
+
+
 class ReminderDigest(commands.Cog):
     """Récap MP « sorties du jour » + /setalert (ancien /dailysummary ; /reminder supprimé)."""
 
@@ -204,26 +243,8 @@ class ReminderDigest(commands.Cog):
             if ctx.interaction is not None:
                 await ctx.defer(ephemeral=True)
 
-            pref = _get_user_pref(ctx.author.id)
-            on = _daily_summary_effective(ctx.author.id, pref)
-            hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
-            linked = core.get_linked_username(ctx.author.id)
-            link_txt = f"**{linked}**" if linked else "_(aucun — utilise `/linkanilist`)_"
-            em = discord.Embed(
-                title="📬 Récap quotidien — « Sorties du jour »",
-                description=(
-                    "Configure le **même** récap MP que l’embed **« Sorties du … »** (liste à puces, "
-                    "pas l’ancien message détaillé supprimé).\n\n"
-                    "Un **message privé** chaque jour à l’heure choisie, selon **ton** compte AniList.\n\n"
-                    f"• Compte lié : {link_txt}\n"
-                    f"• État : **{'activé' if on else 'désactivé'}** · heure : **`{hh}`** (fuseau du bot)\n\n"
-                    "Boutons ci-dessous : activer, désactiver, ou **saisir l’heure** (HH:MM). "
-                    "Tu peux aussi régler l’heure avec **`/setalert`**."
-                ),
-                color=COLOR_OK,
-            )
-            em.set_footer(text="/setalert HH:MM · /linkanilist")
-            view = RecapSetupView(ctx.author.id, _modal_default_hhmm(hh))
+            em = _recap_embed_for_user(ctx.author.id)
+            view = _recap_view_for_user(ctx.author.id)
 
             if ctx.interaction is not None:
                 await ctx.interaction.followup.send(embed=em, view=view, ephemeral=True)
