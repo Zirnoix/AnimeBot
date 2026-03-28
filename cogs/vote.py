@@ -104,7 +104,20 @@ class Vote(commands.Cog):
 
     @app_commands.command(name="vote", description="Voter sur Top.gg, voir le cooldown et gérer le rappel MP.")
     async def vote_cmd(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
+        # Éphémère = pertinent en serveur uniquement ; en MP le salon est déjà privé.
+        # 10062 = interaction expirée si > ~3s avant defer (latence hébergeur, etc.).
+        ephemeral = interaction.guild is not None
+        try:
+            await interaction.response.defer(ephemeral=ephemeral)
+        except discord.NotFound:
+            LOG.info("/vote: interaction expirée ou invalide (10062) — réessaie.")
+            return
+        except discord.HTTPException as e:
+            if getattr(e, "code", None) == 10062:
+                LOG.info("/vote: interaction inconnue (10062) — réessaie.")
+                return
+            raise
+
         uid = interaction.user.id
         url = topgg_vote.vote_page_url(self.bot.user.id)
         cd = topgg_vote.cooldown_seconds()
@@ -152,7 +165,7 @@ class Vote(commands.Cog):
         )
         em.set_footer(text="Vote sur top.gg · Pas besoin d’être sur un serveur précis · Cooldown configurable")
 
-        await interaction.followup.send(embed=em, view=VoteReminderView(uid), ephemeral=True)
+        await interaction.followup.send(embed=em, view=VoteReminderView(uid), ephemeral=ephemeral)
 
 
 async def setup(bot: commands.Bot) -> None:

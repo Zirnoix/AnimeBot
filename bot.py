@@ -590,12 +590,44 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
         url = topgg_vote.vote_page_url(bot.user.id)
         cd_sec = topgg_vote.cooldown_seconds()
         cd_h = max(1, cd_sec // 3600)
-        await u.send(
-            f"🎉 Merci pour ton vote sur **Top.gg** ! +**{xp}** XP sur ta carte.\n"
-            f"Prochain vote possible dans environ **{cd_h} h**.\n{url}"
+        base_xp = topgg_vote.vote_xp_amount()
+        bonus_line = ""
+        if is_weekend and xp != base_xp:
+            bonus_line = f"\n*(Bonus week-end : base {base_xp} XP → **{xp}** XP.)*"
+
+        em = discord.Embed(
+            title="🗳️ Tu viens de voter pour AnimeBot",
+            description=(
+                f"Ton vote sur **Top.gg** est bien enregistré — merci !\n\n"
+                f"**Récompense :** +**{xp}** XP ajoutés à ta carte (ex. `/mycard`).\n"
+                f"**Prochain vote possible** dans environ **{cd_h} h**.\n\n"
+                f"🔗 [Lien pour revoter quand le cooldown est passé]({url})"
+                f"{bonus_line}"
+            ),
+            color=discord.Color.green(),
+            url=url,
         )
-    except Exception:
-        pass
+        em.set_footer(text="Message privé — visible uniquement par toi.")
+
+        dm = await u.create_dm()
+        await dm.send(embed=em)
+        LOG.info("top.gg thank-you DM envoyé uid=%s", user_id)
+    except discord.Forbidden:
+        LOG.info(
+            "top.gg thank-you DM refusé uid=%s — MP fermés, bot bloqué, ou pas de serveur commun avec le bot "
+            "(rejoins un serveur où AnimeBot est présent et autorise les MP des membres du serveur).",
+            user_id,
+        )
+    except discord.HTTPException as e:
+        if getattr(e, "code", None) == 50007:
+            LOG.info(
+                "top.gg thank-you DM impossible uid=%s (50007 : utilisateur injoignable en MP).",
+                user_id,
+            )
+        else:
+            LOG.warning("top.gg thank-you DM HTTPException uid=%s: %s", user_id, e)
+    except Exception as e:
+        LOG.warning("top.gg thank-you DM échec uid=%s: %s", user_id, e, exc_info=True)
 
 
 async def _topgg_post_handler(request: web.Request) -> web.Response:
