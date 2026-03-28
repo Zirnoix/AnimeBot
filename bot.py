@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import asyncio
+import hmac
 import logging
 import types
 from datetime import datetime, timezone
@@ -640,6 +641,24 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
         LOG.warning("top.gg thank-you DM échec uid=%s: %s", user_id, e, exc_info=True)
 
 
+def _topgg_auth_matches(secret: str, auth_header: str) -> bool:
+    """Top.gg envoie souvent `Authorization: Bearer whs_...` ; la variable d’env peut être sans préfixe."""
+
+    def _norm(s: str) -> str:
+        t = (s or "").strip()
+        if t.lower().startswith("bearer "):
+            t = t[7:].strip()
+        return t
+
+    a = _norm(auth_header)
+    b = _norm(secret)
+    if not a or not b:
+        return False
+    if len(a) != len(b):
+        return False
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
 async def _topgg_post_handler(request: web.Request) -> web.Response:
     """Webhook Top.gg : Authorization = TOPGG_WEBHOOK_SECRET ; JSON type test | upvote."""
     from modules import topgg_vote
@@ -648,9 +667,13 @@ async def _topgg_post_handler(request: web.Request) -> web.Response:
     if not secret:
         return web.Response(status=503, text="not configured")
 
-    auth = (request.headers.get("Authorization") or request.headers.get("authorization") or "").strip()
-    if auth != secret:
-        LOG.warning("top.gg webhook: Authorization invalide")
+    auth = request.headers.get("Authorization") or request.headers.get("authorization") or ""
+    if not _topgg_auth_matches(secret, auth):
+        LOG.warning(
+            "top.gg webhook: Authorization invalide — vérifie que TOPGG_WEBHOOK_SECRET sur Render "
+            "est exactement le secret affiché sur Top.gg (copier-coller, sans guillemets ; "
+            "avec ou sans préfixe Bearer, les deux sont acceptés)."
+        )
         return web.Response(status=401, text="unauthorized")
 
     try:
@@ -713,8 +736,11 @@ async def _start_health_server_if_configured(bot_instance: AnimeBot) -> None:
     if not port_s:
         if topgg_vote.webhook_secret():
             LOG.warning(
-                "TOPGG_WEBHOOK_SECRET défini mais PORT absent — webhook Top.gg impossible "
-                "(définis PORT sur l’hébergeur pour exposer POST /topgg)."
+                "TOPGG_WEBHOOK_SECRET défini mais PORT absent — aucun serveur HTTP, webhook Top.gg impossible "
+                "(pas d’URL /topgg, donc pas d’XP automatique). "
+                "Render Web Service : vérifie que le service est bien **Web** (pas Worker) ; "
+                "sinon ajoute la variable PORT (Render l’injecte en général). "
+                "En local : mets PORT=8080 (ou autre) dans .env."
             )
         return
     try:
