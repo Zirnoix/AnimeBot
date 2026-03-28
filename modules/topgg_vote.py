@@ -7,7 +7,10 @@ import logging
 import os
 import threading
 import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 LOG = logging.getLogger(__name__)
 
@@ -44,7 +47,50 @@ def cooldown_seconds() -> int:
 
 
 def vote_xp_amount() -> int:
-    return max(0, int(os.getenv("TOPGG_VOTE_XP", "45")))
+    return max(0, int(os.getenv("TOPGG_VOTE_XP", "65")))
+
+
+def _bot_tz() -> ZoneInfo:
+    name = (os.getenv("BOT_TIMEZONE") or "Europe/Paris").strip() or "Europe/Paris"
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo("Europe/Paris")
+
+
+def _calendar_date(ts: int) -> date:
+    return datetime.fromtimestamp(int(ts), tz=_bot_tz()).date()
+
+
+def streak_bonus_xp(streak_days: int) -> int:
+    """XP bonus selon la série de jours consécutifs (au moins un vote / jour)."""
+    per = max(0, int(os.getenv("TOPGG_STREAK_BONUS_PER_DAY", "4")))
+    cap = max(0, int(os.getenv("TOPGG_STREAK_BONUS_CAP", "40")))
+    return min(cap, max(0, int(streak_days)) * per)
+
+
+def loyalty_bonus_xp(total_votes: int) -> int:
+    """XP bonus selon le nombre total de votes (fidélité)."""
+    every = max(1, int(os.getenv("TOPGG_LOYALTY_EVERY_VOTES", "10")))
+    cap = max(0, int(os.getenv("TOPGG_LOYALTY_BONUS_CAP", "30")))
+    per = max(0, int(os.getenv("TOPGG_LOYALTY_PER_BONUS", "2")))
+    return min(cap, (max(0, int(total_votes)) // every) * per)
+
+
+@dataclass(frozen=True)
+class VoteReward:
+    total_votes: int
+    streak: int
+    best_streak: int
+    base_xp: int
+    streak_bonus: int
+    loyalty_bonus: int
+    subtotal_xp: int
+
+    def total_after_weekend(self, is_weekend: bool, mult: float) -> int:
+        if not is_weekend:
+            return max(0, self.subtotal_xp)
+        return max(0, int(self.subtotal_xp * mult))
 
 
 def webhook_secret() -> str:
@@ -63,6 +109,9 @@ def _ensure_user(data: dict[str, Any], uid: int) -> dict[str, Any]:
     u.setdefault("last_vote_ts", 0)
     u.setdefault("reminder", False)
     u.setdefault("reminder_sent_for_eligible", None)
+    u.setdefault("vote_count", 0)
+    u.setdefault("vote_streak", 0)
+    u.setdefault("best_streak", 0)
     return u
 
 
@@ -92,14 +141,62 @@ def next_vote_ts(uid: int) -> int:
     return lv + cooldown_seconds()
 
 
-def record_successful_vote(uid: int) -> None:
-    """Après un upvote confirmé par Top.gg."""
+def get_vote_stats(uid: int) -> dict[str, int]:
+    data = load_vote_data()
+    u = _ensure_user(data, uid)
+    return {
+        "vote_count": int(u.get("vote_count") or 0),
+        "streak": int(u.get("vote_streak") or 0),
+        "best_streak": int(u.get("best_streak") or 0),
+    }
+
+
+def record_successful_vote(uid: int) -> VoteReward:
+    """Après un upvote Top.gg : met à jour série / totaux et calcule l’XP (avant bonus week-end)."""
     data = load_vote_data()
     now = int(time.time())
     u = _ensure_user(data, uid)
+    prev_ts = int(u.get("last_vote_ts") or 0)
+    old_streak = int(u.get("vote_streak") or 0)
+
+    vote_count = int(u.get("vote_count") or 0) + 1
+    today = _calendar_date(now)
+
+    if prev_ts <= 0:
+        new_streak = 1
+    else:
+        prev_date = _calendar_date(prev_ts)
+        if today == prev_date:
+            new_streak = max(1, old_streak)
+        elif today == prev_date + timedelta(days=1):
+            new_streak = old_streak + 1
+        else:
+            new_streak = 1
+
+    best_streak = max(int(u.get("best_streak") or 0), new_streak)
+
     u["last_vote_ts"] = now
+    u["vote_count"] = vote_count
+    u["vote_streak"] = new_streak
+    u["best_streak"] = best_streak
     u["reminder_sent_for_eligible"] = None
+
+    base = vote_xp_amount()
+    sb = streak_bonus_xp(new_streak)
+    lb = loyalty_bonus_xp(vote_count)
+    subtotal = base + sb + lb
+
     save_vote_data(data)
+
+    return VoteReward(
+        total_votes=vote_count,
+        streak=new_streak,
+        best_streak=best_streak,
+        base_xp=base,
+        streak_bonus=sb,
+        loyalty_bonus=lb,
+        subtotal_xp=subtotal,
+    )
 
 
 def mark_reminder_sent(uid: int, eligible_ts: int) -> None:

@@ -567,15 +567,14 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
     """Enregistre le vote, XP, mini-score ; MP de remerciement si possible."""
     from modules import topgg_vote
 
-    xp = topgg_vote.vote_xp_amount()
-    if is_weekend:
-        try:
-            mult = float(os.getenv("TOPGG_WEEKEND_XP_MULT", "1.5"))
-        except ValueError:
-            mult = 1.5
-        xp = max(0, int(xp * mult))
+    try:
+        mult_w = float(os.getenv("TOPGG_WEEKEND_XP_MULT", "1.5"))
+    except ValueError:
+        mult_w = 1.5
 
-    topgg_vote.record_successful_vote(user_id)
+    reward = topgg_vote.record_successful_vote(user_id)
+    xp = reward.total_after_weekend(is_weekend, mult_w)
+
     try:
         core.add_mini_score(user_id, "topgg_vote", 1)
     except Exception:
@@ -590,19 +589,30 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
         url = topgg_vote.vote_page_url(bot.user.id)
         cd_sec = topgg_vote.cooldown_seconds()
         cd_h = max(1, cd_sec // 3600)
-        base_xp = topgg_vote.vote_xp_amount()
-        bonus_line = ""
-        if is_weekend and xp != base_xp:
-            bonus_line = f"\n*(Bonus week-end : base {base_xp} XP → **{xp}** XP.)*"
+        sub = reward.subtotal_xp
+        weekend_line = ""
+        if is_weekend and xp != sub:
+            weekend_line = f"\n_Bonus week-end : {sub} XP → **{xp}** XP._"
+
+        detail = (
+            f"**Détail XP :** {reward.base_xp} base + {reward.streak_bonus} série "
+            f"+ {reward.loyalty_bonus} fidélité = **{sub}** XP"
+        )
+        stats = (
+            f"**Série :** {reward.streak} jour(s) · **Record :** {reward.best_streak} · "
+            f"**Votes totaux :** {reward.total_votes}"
+        )
 
         em = discord.Embed(
             title="🗳️ Tu viens de voter pour AnimeBot",
             description=(
                 f"Ton vote sur **Top.gg** est bien enregistré — merci !\n\n"
-                f"**Récompense :** +**{xp}** XP ajoutés à ta carte (ex. `/mycard`).\n"
+                f"**Récompense :** +**{xp}** XP sur ta carte (ex. `/mycard`).\n"
+                f"{detail}\n"
+                f"{stats}\n"
                 f"**Prochain vote possible** dans environ **{cd_h} h**.\n\n"
                 f"🔗 [Lien pour revoter quand le cooldown est passé]({url})"
-                f"{bonus_line}"
+                f"{weekend_line}"
             ),
             color=discord.Color.green(),
             url=url,

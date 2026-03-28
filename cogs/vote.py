@@ -127,6 +127,10 @@ class Vote(commands.Cog):
         now = int(datetime.now(timezone.utc).timestamp())
         next_ts = topgg_vote.next_vote_ts(uid)
         rem = topgg_vote.get_reminder(uid)
+        stats = topgg_vote.get_vote_stats(uid)
+        streak = stats["streak"]
+        best = stats["best_streak"]
+        total_v = stats["vote_count"]
 
         if lv <= 0:
             status = "Tu n’as pas encore de vote enregistré par le bot (après ton **premier** vote sur Top.gg, le cooldown s’affichera ici)."
@@ -147,10 +151,20 @@ class Vote(commands.Cog):
                 "(voir doc projet / `.env.example`)."
             )
 
+        reward_hint = (
+            f"🎁 **XP :** base **{xp_amt}** + bonus **série** (jours consécutifs) + **fidélité** (votes totaux) "
+            f"· week-end possible selon Top.gg."
+        )
+        stats_line = (
+            f"📊 **Tes stats :** {total_v} vote(s) enregistré(s) · série **{streak}** jour(s) · "
+            f"record **{best}** · (mis à jour après chaque vote reçu par le bot)."
+        )
+
         lines = [
             f"**[Voter sur Top.gg]({url})**",
             "",
-            f"🎁 Récompense : **+{xp_amt} XP** par vote (dès que Top.gg notifie le bot).",
+            reward_hint,
+            stats_line,
             "",
             status,
             eta_txt,
@@ -163,7 +177,7 @@ class Vote(commands.Cog):
             description="\n".join(lines).strip(),
             color=discord.Color.blurple(),
         )
-        em.set_footer(text="Vote sur top.gg · Pas besoin d’être sur un serveur précis · Cooldown configurable")
+        em.set_footer(text="Bonus série + fidélité · Fuseau BOT_TIMEZONE · Cooldown configurable")
 
         await interaction.followup.send(embed=em, view=VoteReminderView(uid), ephemeral=ephemeral)
 
