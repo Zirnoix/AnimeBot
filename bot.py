@@ -406,9 +406,24 @@ class AnimeBot(commands.Bot):
             for ep in episodes[:10]:
                 title_md = core.format_anilist_episode_title_markdown(ep)
                 lines.append(f"• {title_md} — Épisode {ep.get('episode', '?')}")
+            trivia = await asyncio.to_thread(core.get_daily_anime_trivia_line)
+            al_name = core.get_linked_username(int(user_id))
+            if al_name:
+                safe_anilist = discord.utils.escape_markdown(al_name)
+                intro = (
+                    f"📌 Récap basé sur **ta liste AniList** ({safe_anilist}) — "
+                    "ce qui correspond à ce que tu suis en **En cours** / **En relecture**.\n\n"
+                )
+            else:
+                intro = (
+                    "📌 Récap basé sur **ta liste AniList** — utilise `/linkanilist` pour lier ton compte "
+                    "et personnaliser cette liste.\n\n"
+                )
+            body = "\n".join(lines)
+            desc = f"{intro}{body}\n\n💡 **Le saviez-vous ?** {trivia}"
             em = discord.Embed(
                 title=f"🗓️ Sorties du {day_fr}",
-                description="\n".join(lines),
+                description=desc,
                 color=discord.Color.blurple(),
             )
             em.set_footer(

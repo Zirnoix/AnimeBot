@@ -23,7 +23,7 @@ import unicodedata
 import random
 import time
 import difflib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any, Optional, Dict, List, Set, Union, Tuple, Iterable
 import sqlite3
@@ -1330,6 +1330,119 @@ def query_anilist(query: str, variables: dict = None) -> dict:
 
     # si on sort de la boucle sans avoir retourné
     return {}
+
+# ================= RÉCAP QUOTIDIEN : anecdote « ce jour-là » (AniList) =================
+_DAILY_TRIVIA_CACHE: dict[str, str] = {}
+_DAILY_TRIVIA_LOCK = threading.Lock()
+
+_ANIME_TRIVIA_FALLBACK = [
+    "Au Japon, le mot « anime » désigne toute l’animation, pas seulement les séries qu’on regarde ici.",
+    "Beaucoup de génériques d’anime sont des chansons originales créées pour la série.",
+    "Les saisons d’anime sont souvent nommées d’après les mois (ex. janvier, avril, juillet, octobre).",
+    "Les studios d’animation collaborent souvent : une série peut mélanger plusieurs maisons de production.",
+    "Le format « cours » désigne un bloc de diffusion d’environ 11–13 épisodes.",
+    "Les light novels et mangas restent des sources très courantes pour les adaptations en anime.",
+    "La qualité d’un épisode peut varier selon les invités réalisateurs ou les équipes par épisode.",
+    "Les simulcasts permettent de suivre une série en même temps que sa diffusion au Japon.",
+]
+
+_ANIME_TRIVIA_QUERY = """
+query ($page: Int) {
+  Page(page: $page, perPage: 50) {
+    pageInfo { hasNextPage }
+    media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+      id
+      title { romaji english }
+      startDate { year month day }
+      endDate { year month day }
+    }
+  }
+}
+"""
+
+
+def _format_anime_anniversary_line(kind: str, title: str, year: int, today: date) -> str:
+    """Une ligne courte en français ; `kind` = 'start' ou 'end'."""
+    safe = discord.utils.escape_markdown((title or "?").strip()[:120] or "?")
+    if year > today.year:
+        return ""
+    if year == today.year:
+        if kind == "start":
+            return f"À cette date en **{year}**, **{safe}** ouvrait sa diffusion."
+        return f"À cette date en **{year}**, **{safe}** diffusait son dernier épisode."
+    n = today.year - year
+    if n == 1:
+        lead = "Il y a **1** an"
+    else:
+        lead = f"Il y a **{n}** ans"
+    if kind == "start":
+        return f"{lead}, **{safe}** débutait sa diffusion (**{year}**)."
+    return f"{lead}, **{safe}** diffusait son dernier épisode (**{year}**)."
+
+
+def _compute_daily_anime_trivia_line(today: date) -> str | None:
+    """Cherche un anime populaire dont la date de début ou de fin tombe sur ce jour calendaire."""
+    month, day = today.month, today.day
+    candidates: list[tuple[str, int, str]] = []
+    seen: set[tuple[int, str, int]] = set()
+    page = 1
+    max_pages = 6
+    while page <= max_pages:
+        data = query_anilist(_ANIME_TRIVIA_QUERY, {"page": page}) or {}
+        if isinstance(data, dict) and data.get("errors"):
+            break
+        pg = (data.get("data") or {}).get("Page") or {}
+        for m in pg.get("media") or []:
+            mid = m.get("id")
+            if not isinstance(mid, int):
+                continue
+            t = m.get("title") or {}
+            title = (t.get("romaji") or t.get("english") or "").strip() or "?"
+            for kind, d in (("start", m.get("startDate") or {}), ("end", m.get("endDate") or {})):
+                y = d.get("year")
+                mm = d.get("month")
+                dd = d.get("day")
+                if not (isinstance(y, int) and isinstance(mm, int) and isinstance(dd, int)):
+                    continue
+                if mm != month or dd != day:
+                    continue
+                key = (mid, kind, y)
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append((kind, y, title))
+        pinfo = pg.get("pageInfo") or {}
+        if not pinfo.get("hasNextPage"):
+            break
+        page += 1
+    if not candidates:
+        return None
+    rng = random.Random(today.toordinal())
+    kind, y, title = rng.choice(candidates)
+    line = _format_anime_anniversary_line(kind, title, y, today)
+    return line or None
+
+
+def get_daily_anime_trivia_line() -> str:
+    """
+    Une courte phrase « animé » pour le jour courant (fuseau BOT_TIMEZONE).
+    Mise en cache une fois par date ; essaie un fait historique via AniList, sinon une phrase générique.
+    """
+    with _DAILY_TRIVIA_LOCK:
+        today = datetime.now(TIMEZONE).date()
+        key = today.isoformat()
+        if key in _DAILY_TRIVIA_CACHE:
+            return _DAILY_TRIVIA_CACHE[key]
+        line = ""
+        try:
+            line = _compute_daily_anime_trivia_line(today) or ""
+        except Exception as e:
+            LOG.debug("get_daily_anime_trivia_line: %s", e)
+        if not line:
+            line = random.Random(today.toordinal()).choice(_ANIME_TRIVIA_FALLBACK)
+        _DAILY_TRIVIA_CACHE[key] = line
+        return line
+
 
 def load_cached_titles() -> List[dict]:
     if os.path.exists(CACHE_FILE):

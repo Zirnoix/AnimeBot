@@ -1,6 +1,7 @@
 # cogs/reminder_digest.py
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import discord
@@ -9,6 +10,7 @@ from discord.ui import Select, View
 
 from modules import core
 
+LOG = logging.getLogger(__name__)
 COLOR_OK = discord.Color.blurple()
 
 
@@ -143,31 +145,54 @@ class ReminderDigest(commands.Cog):
         description="Configurer le récap MP des sorties du jour (compte AniList lié). Menu éphémère.",
     )
     async def recap(self, ctx: commands.Context) -> None:
-        if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(ephemeral=True)
-        pref = _get_user_pref(ctx.author.id)
-        on = _daily_summary_effective(ctx.author.id, pref)
-        hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
-        linked = core.get_linked_username(ctx.author.id)
-        link_txt = f"**{linked}**" if linked else "_(aucun — utilise `/linkanilist`)_"
-        em = discord.Embed(
-            title="📬 Récap quotidien — « Sorties du jour »",
-            description=(
-                "Un **message privé** chaque jour à l’heure choisie, avec les sorties qui t’intéressent "
-                "selon **ton** compte AniList.\n\n"
-                f"• Compte lié : {link_txt}\n"
-                f"• État : **{'activé' if on else 'désactivé'}** · heure : **`{hh}`** (fuseau du bot)\n\n"
-                "Utilise le **menu** ci-dessous pour activer / désactiver / choisir une heure.\n"
-                "Pour une heure précise (ex. **08:30**) : **`/setalert`** — tu peux la changer quand tu veux."
-            ),
-            color=COLOR_OK,
-        )
-        em.set_footer(text="/setalert HH:MM · /linkanilist")
-        view = RecapSetupView(ctx.author.id)
-        if ctx.interaction:
-            await ctx.followup.send(embed=em, view=view, ephemeral=True)
-        else:
-            await ctx.reply(embed=em, view=view, delete_after=180)
+        """Slash : defer puis followup explicite (évite « réfléchit » infini si followup mal résolu)."""
+        try:
+            if ctx.interaction is not None:
+                await ctx.defer(ephemeral=True)
+
+            pref = _get_user_pref(ctx.author.id)
+            on = _daily_summary_effective(ctx.author.id, pref)
+            hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
+            linked = core.get_linked_username(ctx.author.id)
+            link_txt = f"**{linked}**" if linked else "_(aucun — utilise `/linkanilist`)_"
+            em = discord.Embed(
+                title="📬 Récap quotidien — « Sorties du jour »",
+                description=(
+                    "Configure le **même** récap MP que l’embed **« Sorties du … »** (liste à puces, "
+                    "pas l’ancien message détaillé supprimé).\n\n"
+                    "Un **message privé** chaque jour à l’heure choisie, selon **ton** compte AniList.\n\n"
+                    f"• Compte lié : {link_txt}\n"
+                    f"• État : **{'activé' if on else 'désactivé'}** · heure : **`{hh}`** (fuseau du bot)\n\n"
+                    "Menu ci-dessous : activer / désactiver / heure pleine. "
+                    "Pour **08:30** etc. : **`/setalert`**."
+                ),
+                color=COLOR_OK,
+            )
+            em.set_footer(text="/setalert HH:MM · /linkanilist")
+            view = RecapSetupView(ctx.author.id)
+
+            if ctx.interaction is not None:
+                await ctx.interaction.followup.send(embed=em, view=view, ephemeral=True)
+            else:
+                await ctx.reply(embed=em, view=view, delete_after=180)
+        except Exception as e:
+            LOG.exception("recap: %s", e)
+            try:
+                if ctx.interaction is not None:
+                    if ctx.interaction.response.is_done():
+                        await ctx.interaction.followup.send(
+                            f"❌ Erreur `/recap` : `{type(e).__name__}: {e}`",
+                            ephemeral=True,
+                        )
+                    else:
+                        await ctx.interaction.response.send_message(
+                            f"❌ Erreur `/recap` : `{type(e).__name__}: {e}`",
+                            ephemeral=True,
+                        )
+                else:
+                    await ctx.reply(f"❌ Erreur `/recap` : `{type(e).__name__}: {e}`")
+            except Exception:
+                LOG.exception("recap: échec envoi message d’erreur")
 
     @commands.hybrid_command(
         name="dailysummary",
