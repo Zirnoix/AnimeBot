@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import asyncio
-import hmac
+import json
 import logging
 import types
 from datetime import datetime, timezone
@@ -667,48 +667,39 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
     )
 
 
-def _topgg_auth_matches(secret: str, auth_header: str) -> bool:
-    """Top.gg envoie souvent `Authorization: Bearer whs_...` ; normalisation via `normalize_webhook_token`."""
-    from modules import topgg_vote
-
-    a = topgg_vote.normalize_webhook_token(auth_header)
-    b = topgg_vote.normalize_webhook_token(secret)
-    if not a or not b:
-        return False
-    if len(a) != len(b):
-        return False
-    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
-
-
 async def _topgg_post_handler(request: web.Request) -> web.Response:
-    """Webhook Top.gg : Authorization = TOPGG_WEBHOOK_SECRET ; JSON type test | upvote."""
+    """Webhook Top.gg : TOPGG_WEBHOOK_SECRET via `Authorization` ou `X-TopGG-Signature` (HMAC ou secret brut)."""
     from modules import topgg_vote
 
     secret = topgg_vote.webhook_secret()
     if not secret:
         return web.Response(status=503, text="not configured")
 
+    raw = await request.read()
     auth = (
         request.headers.get("Authorization")
         or request.headers.get("authorization")
         or request.headers.get("X-TopGG-Authorization")
         or ""
     )
-    if not _topgg_auth_matches(secret, auth):
+    sig = request.headers.get("X-TopGG-Signature") or request.headers.get("X-Topgg-Signature") or ""
+
+    if not topgg_vote.webhook_request_authorized(secret, raw, auth, sig):
         la = len(topgg_vote.normalize_webhook_token(auth))
+        ls = len((sig or "").strip())
         lb = len(topgg_vote.normalize_webhook_token(secret))
         hnames = sorted(request.headers.keys())
         extra = ""
         if la == 0 and lb > 0:
             extra = (
-                " L’en-tête Authorization semble absent ou vide côté serveur "
-                "(proxy qui le supprime ?) — sinon vérifie TOPGG_WEBHOOK_SECRET."
+                " Authorization vide (souvent supprimé par le proxy) — "
+                "on accepte aussi X-TopGG-Signature (secret ou HMAC du corps). "
             )
         LOG.warning(
-            "top.gg webhook: Authorization invalide (longueurs après normalisation: header=%s env=%s)%s — "
-            "TOPGG_WEBHOOK_SECRET sur Render = même chaîne que sur Top.gg (sans guillemets dans le champ Render). "
-            "Noms d’en-têtes reçus: %s",
+            "top.gg webhook: refusé (auth_len=%s sig_len=%s env_len=%s)%s — "
+            "TOPGG_WEBHOOK_SECRET = valeur Top.gg ; noms d’en-têtes: %s",
             la,
+            ls,
             lb,
             extra,
             hnames,
@@ -716,7 +707,7 @@ async def _topgg_post_handler(request: web.Request) -> web.Response:
         return web.Response(status=401, text="unauthorized")
 
     try:
-        data = await request.json()
+        data = json.loads(raw.decode("utf-8"))
     except Exception:
         return web.Response(status=400, text="bad json")
 

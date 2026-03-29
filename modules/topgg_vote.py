@@ -2,6 +2,9 @@
 """Persistance votes Top.gg + helpers (webhook, cooldown, rappels MP)."""
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -117,6 +120,87 @@ def normalize_webhook_token(s: str) -> str:
 
 def webhook_secret() -> str:
     return normalize_webhook_token(os.getenv("TOPGG_WEBHOOK_SECRET") or "")
+
+
+def authorization_header_matches(secret: str, auth_header: str) -> bool:
+    """`Authorization` = secret (normalisé), longueurs identiques."""
+    a = normalize_webhook_token(auth_header)
+    b = normalize_webhook_token(secret)
+    if not a or not b:
+        return False
+    if len(a) != len(b):
+        return False
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+def _signature_header_matches(secret: str, raw_body: bytes, sig_header: str) -> bool:
+    """Top.gg peut envoyer le secret dans `X-TopGG-Signature` (proxy supprime `Authorization`) ou un HMAC-SHA256 du corps."""
+    if not sig_header:
+        return False
+    ns = normalize_webhook_token(secret)
+    if not ns:
+        return False
+    sig_plain = normalize_webhook_token(sig_header)
+    if sig_plain and len(sig_plain) == len(ns) and hmac.compare_digest(
+        sig_plain.encode("utf-8"), ns.encode("utf-8")
+    ):
+        return True
+    if not raw_body:
+        return False
+    key = ns.encode("utf-8")
+    mac = hmac.new(key, raw_body, hashlib.sha256).digest()
+    hex_d = mac.hex()
+    b64_std = base64.b64encode(mac).decode("ascii")
+    b64_nopad = b64_std.rstrip("=")
+    b64_url = base64.urlsafe_b64encode(mac).decode("ascii").rstrip("=")
+    raw = sig_header.strip()
+    variants: list[str] = [raw]
+    lr = raw.lower()
+    if lr.startswith("sha256="):
+        variants.append(raw[7:].strip())
+    if lr.startswith("v1="):
+        variants.append(raw[3:].strip())
+    if "," in raw:
+        for part in raw.split(","):
+            part = part.strip()
+            if "=" in part:
+                _, v = part.split("=", 1)
+                variants.append(v.strip())
+            else:
+                variants.append(part)
+    seen: set[str] = set()
+    for cand in variants:
+        if not cand or cand in seen:
+            continue
+        seen.add(cand)
+        if hmac.compare_digest(cand.lower(), hex_d):
+            return True
+        if len(cand) == 64:
+            try:
+                if hmac.compare_digest(bytes.fromhex(cand), mac):
+                    return True
+            except ValueError:
+                pass
+        if (
+            hmac.compare_digest(cand, b64_std)
+            or hmac.compare_digest(cand, b64_nopad)
+            or hmac.compare_digest(cand, b64_url)
+        ):
+            return True
+    return False
+
+
+def webhook_request_authorized(
+    secret: str, raw_body: bytes, auth_header: str, signature_header: str
+) -> bool:
+    """True si `Authorization` ou `X-TopGG-Signature` valide le secret (ou HMAC du corps)."""
+    if not secret:
+        return False
+    if authorization_header_matches(secret, auth_header):
+        return True
+    if _signature_header_matches(secret, raw_body, signature_header):
+        return True
+    return False
 
 
 def vote_page_url(bot_user_id: int) -> str:
