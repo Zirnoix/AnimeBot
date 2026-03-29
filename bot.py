@@ -575,6 +575,7 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
 
     reward = topgg_vote.record_successful_vote(user_id)
     xp = reward.total_after_weekend(is_weekend, mult_w)
+    sub = reward.subtotal_xp
 
     try:
         core.add_mini_score(user_id, "topgg_vote", 1)
@@ -590,7 +591,6 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
         url = topgg_vote.vote_page_url(bot.user.id)
         cd_sec = topgg_vote.cooldown_seconds()
         cd_h = max(1, cd_sec // 3600)
-        sub = reward.subtotal_xp
         weekend_line = ""
         if is_weekend and xp != sub:
             weekend_line = f"\n_Bonus week-end : {sub} XP → **{xp}** XP._"
@@ -639,6 +639,32 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
             LOG.warning("top.gg thank-you DM HTTPException uid=%s: %s", user_id, e)
     except Exception as e:
         LOG.warning("top.gg thank-you DM échec uid=%s: %s", user_id, e, exc_info=True)
+
+    try:
+        topgg_vote.set_pending_vote_recap(
+            user_id,
+            {
+                "xp": int(xp),
+                "subtotal": int(sub),
+                "base_xp": int(reward.base_xp),
+                "streak_bonus": int(reward.streak_bonus),
+                "loyalty_bonus": int(reward.loyalty_bonus),
+                "streak": int(reward.streak),
+                "best_streak": int(reward.best_streak),
+                "total_votes": int(reward.total_votes),
+                "weekend": bool(is_weekend),
+            },
+        )
+    except Exception as e:
+        LOG.warning("top.gg set_pending_vote_recap uid=%s: %s", user_id, e)
+
+    LOG.info(
+        "top.gg vote traité uid=%s xp=%s streak=%s votes=%s",
+        user_id,
+        xp,
+        reward.streak,
+        reward.total_votes,
+    )
 
 
 def _topgg_auth_matches(secret: str, auth_header: str) -> bool:

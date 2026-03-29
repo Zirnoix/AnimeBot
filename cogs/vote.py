@@ -179,6 +179,33 @@ class Vote(commands.Cog):
         )
         em.set_footer(text="Bonus série + fidélité · Fuseau BOT_TIMEZONE · Cooldown configurable")
 
+        recap = topgg_vote.pop_pending_vote_recap(uid)
+        if recap:
+            try:
+                xp_r = int(recap.get("xp", 0))
+                sub_r = int(recap.get("subtotal", 0))
+                base_r = int(recap.get("base_xp", 0))
+                sb_r = int(recap.get("streak_bonus", 0))
+                lb_r = int(recap.get("loyalty_bonus", 0))
+                st_r = int(recap.get("streak", 0))
+                bst_r = int(recap.get("best_streak", 0))
+                tv_r = int(recap.get("total_votes", 0))
+                wk_txt = ""
+                if recap.get("weekend"):
+                    wk_txt = "\n_Bonus week-end appliqué sur le total._"
+                recap_val = (
+                    f"**+{xp_r} XP** ajoutés sur ta carte.\n"
+                    f"{base_r} base + {sb_r} série + {lb_r} fidélité = **{sub_r}** XP avant multi.{wk_txt}\n"
+                    f"Série **{st_r}** j · record **{bst_r}** · **{tv_r}** votes au total."
+                )
+                em.add_field(
+                    name="🎉 Récap de ton dernier vote (toi seul·e le vois ici)",
+                    value=recap_val,
+                    inline=False,
+                )
+            except Exception as e:
+                LOG.warning("vote recap embed: %s", e)
+
         await interaction.followup.send(embed=em, view=VoteReminderView(uid), ephemeral=ephemeral)
 
 

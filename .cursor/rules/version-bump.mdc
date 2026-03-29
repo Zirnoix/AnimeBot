@@ -1,5 +1,5 @@
 ---
-description: Bump project VERSION (semver) when changing AnimeBot code
+description: Bump project VERSION when changing AnimeBot code
 alwaysApply: true
 ---
 
@@ -7,16 +7,34 @@ alwaysApply: true
 
 La version affichée (`/botinfo`, `modules.core.__version__`) vient du fichier **`VERSION`**. À **chaque modification de code** qui part en prod ou qui mérite un suivi, **mettre à jour ce fichier** (pas seul le code).
 
+## Format : `X.Y.Z` (chiffres raisonnables)
+
+- **X** = majeur (1, 2, 3… — pas de plafond artificiel).
+- **Y** = mineur : **un seul chiffre, de 0 à 9** (pas de `1.26`, `1.935847`, etc.).
+- **Z** = patch : **un seul chiffre, de 0 à 9**.
+
+Exemples valides : `2.0.0`, `2.3.7`, `9.9.9`.  
+Exemples à éviter : `1.26.0`, `2.15.3` (mineur ou patch à deux chiffres).
+
+### Enchaînement (roll-over)
+
+| Situation | Action |
+|-----------|--------|
+| Patch **9** → patch suivant | **Y+1**, **Z=0** (ex. `2.3.9` → `2.4.0`) |
+| Mineur **9** et besoin d’un mineur suivant | **X+1**, **Y=0**, **Z=0** (ex. `2.9.9` → `3.0.0`) |
+
+*(Si tu es déjà à `X.9.9` et tu veux seulement un patch : passe en `(X+1).0.0`.)*
+
 ## Semver (jugement)
 
-| Changement | Bump | Exemples |
-|------------|------|----------|
-| **Patch** (Z) | +1 sur Z | bugfix, typo, petit réglage, log, config mineure |
-| **Minor** (Y) | Y+1, Z=0 | nouvelle commande / feature, refacto visible, nouveau comportement utilisateur |
-| **Major** (X) | X+1, Y=0, Z=0 | breaking API, gros redesign, changement incompatible pour les serveurs / données |
+| Changement | Bump typique | Exemples |
+|------------|----------------|----------|
+| **Patch** (Z) | +1 sur Z (max 9, puis roll) | bugfix, typo, petit réglage, log |
+| **Minor** (Y) | +1 sur Y, Z=0 | nouvelle commande / feature visible |
+| **Major** (X) | X+1, Y=0, Z=0 | breaking, gros redesign, données incompatibles |
 
 Si plusieurs types dans le même lot : viser le **plus haut** niveau touché.
 
 ## Après le bump
 
-- Ne pas dupliquer la version ailleurs sauf si le projet ajoute un second manifeste (pyproject, etc.) : **`VERSION` est la source**.
+- Ne pas dupliquer la version ailleurs sauf second manifeste : **`VERSION` est la source**.

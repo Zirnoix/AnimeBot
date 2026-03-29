@@ -151,6 +151,25 @@ def get_vote_stats(uid: int) -> dict[str, int]:
     }
 
 
+def set_pending_vote_recap(uid: int, info: dict[str, Any]) -> None:
+    """Récap du dernier vote (affiché une fois dans /vote, éphémère en serveur)."""
+    data = load_vote_data()
+    u = _ensure_user(data, uid)
+    u["pending_vote_recap"] = dict(info)
+    save_vote_data(data)
+
+
+def pop_pending_vote_recap(uid: int) -> dict[str, Any] | None:
+    """Retourne et efface le récap en attente, s’il existe."""
+    data = load_vote_data()
+    u = _ensure_user(data, uid)
+    p = u.pop("pending_vote_recap", None)
+    if not p or not isinstance(p, dict):
+        return None
+    save_vote_data(data)
+    return p
+
+
 def record_successful_vote(uid: int) -> VoteReward:
     """Après un upvote Top.gg : met à jour série / totaux et calcule l’XP (avant bonus week-end)."""
     data = load_vote_data()

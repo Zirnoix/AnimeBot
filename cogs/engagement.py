@@ -183,8 +183,20 @@ class Engagement(commands.Cog):
         )
 
     # ------------- DAILY MISSION -------------
-    def _roll_new_mission_payload(self, *, carry_last_rr: Any, today: str) -> Dict[str, Any]:
+    def _roll_new_mission_payload(
+        self,
+        *,
+        carry_last_rr: Any,
+        today: str,
+        avoid_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Évite de retomber sur la même mission qu’hier (ou la mission en cours au reroll) si le tirage le permet."""
         d = pick_weighted_random_mission()
+        if avoid_key:
+            for _ in range(40):
+                if d.key != avoid_key:
+                    break
+                d = pick_weighted_random_mission()
         base = mission_state_from_def(d, reward_xp=_roll_reward(d.difficulty))
         return {"date": today, "last_reroll": carry_last_rr, **base}
 
@@ -207,7 +219,10 @@ class Engagement(commands.Cog):
 
             prev = self.missions.get(uid) or {}
             carry_last_rr = prev.get("last_reroll")
-            m = self._roll_new_mission_payload(carry_last_rr=carry_last_rr, today=today)
+            avoid_yesterday = prev.get("key") if isinstance(prev.get("key"), str) else None
+            m = self._roll_new_mission_payload(
+                carry_last_rr=carry_last_rr, today=today, avoid_key=avoid_yesterday
+            )
             self.missions[uid] = m
             core.save_json(MISSIONS_PATH, self.missions)
             return m
@@ -361,16 +376,14 @@ class Engagement(commands.Cog):
                 send = ctx.send if not ctx.interaction else ctx.interaction.followup.send
                 return await send(msg)
 
-            # autorisé → regénère
-            d = pick_weighted_random_mission()
-            base = mission_state_from_def(d, reward_xp=_roll_reward(d.difficulty))
-            m.update(
-                {
-                    **base,
-                    "date": _today_str(),
-                    "last_reroll": today.isoformat(),
-                }
+            # autorisé → regénère (évite de retomber sur la même mission qu’avant le reroll)
+            old_key = str(m.get("key") or "")
+            rolled = self._roll_new_mission_payload(
+                carry_last_rr=m.get("last_reroll"),
+                today=_today_str(),
+                avoid_key=old_key or None,
             )
+            m.update({**rolled, "last_reroll": today.isoformat()})
             with core.DATA_JSON_LOCK:
                 self.missions = core.load_json(MISSIONS_PATH, {})
                 self.missions[uid] = m
