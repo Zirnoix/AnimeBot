@@ -668,7 +668,7 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
 
 
 async def _topgg_post_handler(request: web.Request) -> web.Response:
-    """Webhook Top.gg : TOPGG_WEBHOOK_SECRET via `Authorization` ou `X-TopGG-Signature` (HMAC ou secret brut)."""
+    """Webhook Top.gg : secret en `Authorization` ou signature V2 `t=…,v1=…` (HMAC du corps, doc Top.gg)."""
     from modules import topgg_vote
 
     secret = topgg_vote.webhook_secret()
@@ -692,8 +692,7 @@ async def _topgg_post_handler(request: web.Request) -> web.Response:
         extra = ""
         if la == 0 and lb > 0:
             extra = (
-                " Authorization vide (souvent supprimé par le proxy) — "
-                "on accepte aussi X-TopGG-Signature (secret ou HMAC du corps). "
+                " Authorization vide (proxy) — vérifier X-TopGG-Signature au format t=unix,v1=hex (HMAC t.corps). "
             )
         LOG.warning(
             "top.gg webhook: refusé (auth_len=%s sig_len=%s env_len=%s)%s — "
@@ -716,7 +715,53 @@ async def _topgg_post_handler(request: web.Request) -> web.Response:
         return web.Response(status=503, text="bot not ready")
 
     typ = data.get("type")
+    # Webhooks V2 (docs Top.gg)
+    if typ == "webhook.test":
+        return web.Response(text="ok")
+    # Ancien schéma
     if typ == "test":
+        return web.Response(text="ok")
+
+    if typ == "vote.create":
+        if not bot.is_ready():
+            try:
+                await asyncio.wait_for(bot.wait_until_ready(), timeout=4.5)
+            except asyncio.TimeoutError:
+                LOG.warning("top.gg webhook: bot pas prêt (timeout)")
+                return web.Response(status=503, text="bot not ready")
+        bot_user = bot.user
+        if bot_user is None:
+            return web.Response(status=503, text="bot not ready")
+        d = data.get("data")
+        if not isinstance(d, dict):
+            return web.Response(status=400, text="bad payload")
+        proj = d.get("project") or {}
+        u = d.get("user") or {}
+        try:
+            if str(proj.get("platform_id")) != str(bot_user.id):
+                LOG.warning(
+                    "top.gg webhook: bot id mismatch (V2) got=%s expected=%s",
+                    proj.get("platform_id"),
+                    bot_user.id,
+                )
+                return web.Response(status=400, text="bad bot id")
+        except Exception:
+            return web.Response(status=400, text="bad bot id")
+        try:
+            user_id = int(u.get("platform_id"))
+        except (TypeError, ValueError):
+            return web.Response(status=400, text="bad user")
+        try:
+            w = int(d.get("weight") or 1)
+        except (TypeError, ValueError):
+            w = 1
+        is_weekend = w >= 2
+        try:
+            await _process_topgg_upvote(bot, user_id, is_weekend)
+        except Exception:
+            LOG.exception("top.gg vote processing")
+            return web.Response(status=500, text="internal error")
+        LOG.info("top.gg vote.create OK user_id=%s weight=%s", user_id, w)
         return web.Response(text="ok")
 
     if not bot.is_ready():

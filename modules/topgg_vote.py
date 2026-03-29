@@ -2,7 +2,6 @@
 """Persistance votes Top.gg + helpers (webhook, cooldown, rappels MP)."""
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
@@ -133,8 +132,49 @@ def authorization_header_matches(secret: str, auth_header: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
+def _parse_topgg_v2_signature(sig_header: str) -> tuple[str, str] | None:
+    """Format officiel : `t={unix},v1={hmac_sha256_hex}` (voir docs Top.gg Webhooks V2)."""
+    parts: dict[str, str] = {}
+    for part in sig_header.split(","):
+        part = part.strip()
+        if "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        parts[k.strip()] = v.strip()
+    t = parts.get("t")
+    v1 = parts.get("v1")
+    if not t or not v1:
+        return None
+    return t, v1
+
+
+def _topgg_v2_signature_valid(secret: str, raw_body: bytes, sig_header: str) -> bool:
+    """HMAC-SHA256(secret, `{t}.{rawBody}`) en hex — même construction que l’exemple Node Top.gg."""
+    parsed = _parse_topgg_v2_signature(sig_header)
+    if not parsed:
+        return False
+    ts, sig_hex = parsed
+    ns = normalize_webhook_token(secret)
+    if not ns:
+        return False
+    try:
+        body_str = raw_body.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    msg = f"{ts}.{body_str}".encode("utf-8")
+    key = ns.encode("utf-8")
+    expected = hmac.new(key, msg, hashlib.sha256).hexdigest()
+    if len(sig_hex) != 64:
+        return False
+    try:
+        int(sig_hex, 16)
+    except ValueError:
+        return False
+    return hmac.compare_digest(expected, sig_hex.lower())
+
+
 def _signature_header_matches(secret: str, raw_body: bytes, sig_header: str) -> bool:
-    """Top.gg peut envoyer le secret dans `X-TopGG-Signature` (proxy supprime `Authorization`) ou un HMAC-SHA256 du corps."""
+    """V2 : `t=...,v1=...` + HMAC ; secours : secret brut dans l’en-tête (proxy sans Authorization)."""
     if not sig_header:
         return False
     ns = normalize_webhook_token(secret)
@@ -145,48 +185,8 @@ def _signature_header_matches(secret: str, raw_body: bytes, sig_header: str) -> 
         sig_plain.encode("utf-8"), ns.encode("utf-8")
     ):
         return True
-    if not raw_body:
-        return False
-    key = ns.encode("utf-8")
-    mac = hmac.new(key, raw_body, hashlib.sha256).digest()
-    hex_d = mac.hex()
-    b64_std = base64.b64encode(mac).decode("ascii")
-    b64_nopad = b64_std.rstrip("=")
-    b64_url = base64.urlsafe_b64encode(mac).decode("ascii").rstrip("=")
-    raw = sig_header.strip()
-    variants: list[str] = [raw]
-    lr = raw.lower()
-    if lr.startswith("sha256="):
-        variants.append(raw[7:].strip())
-    if lr.startswith("v1="):
-        variants.append(raw[3:].strip())
-    if "," in raw:
-        for part in raw.split(","):
-            part = part.strip()
-            if "=" in part:
-                _, v = part.split("=", 1)
-                variants.append(v.strip())
-            else:
-                variants.append(part)
-    seen: set[str] = set()
-    for cand in variants:
-        if not cand or cand in seen:
-            continue
-        seen.add(cand)
-        if hmac.compare_digest(cand.lower(), hex_d):
-            return True
-        if len(cand) == 64:
-            try:
-                if hmac.compare_digest(bytes.fromhex(cand), mac):
-                    return True
-            except ValueError:
-                pass
-        if (
-            hmac.compare_digest(cand, b64_std)
-            or hmac.compare_digest(cand, b64_nopad)
-            or hmac.compare_digest(cand, b64_url)
-        ):
-            return True
+    if raw_body and _topgg_v2_signature_valid(secret, raw_body, sig_header):
+        return True
     return False
 
 
