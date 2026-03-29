@@ -668,16 +668,11 @@ async def _process_topgg_upvote(bot: AnimeBot, user_id: int, is_weekend: bool) -
 
 
 def _topgg_auth_matches(secret: str, auth_header: str) -> bool:
-    """Top.gg envoie souvent `Authorization: Bearer whs_...` ; la variable d’env peut être sans préfixe."""
+    """Top.gg envoie souvent `Authorization: Bearer whs_...` ; normalisation via `normalize_webhook_token`."""
+    from modules import topgg_vote
 
-    def _norm(s: str) -> str:
-        t = (s or "").strip()
-        if t.lower().startswith("bearer "):
-            t = t[7:].strip()
-        return t
-
-    a = _norm(auth_header)
-    b = _norm(secret)
+    a = topgg_vote.normalize_webhook_token(auth_header)
+    b = topgg_vote.normalize_webhook_token(secret)
     if not a or not b:
         return False
     if len(a) != len(b):
@@ -693,12 +688,30 @@ async def _topgg_post_handler(request: web.Request) -> web.Response:
     if not secret:
         return web.Response(status=503, text="not configured")
 
-    auth = request.headers.get("Authorization") or request.headers.get("authorization") or ""
+    auth = (
+        request.headers.get("Authorization")
+        or request.headers.get("authorization")
+        or request.headers.get("X-TopGG-Authorization")
+        or ""
+    )
     if not _topgg_auth_matches(secret, auth):
+        la = len(topgg_vote.normalize_webhook_token(auth))
+        lb = len(topgg_vote.normalize_webhook_token(secret))
+        hnames = sorted(request.headers.keys())
+        extra = ""
+        if la == 0 and lb > 0:
+            extra = (
+                " L’en-tête Authorization semble absent ou vide côté serveur "
+                "(proxy qui le supprime ?) — sinon vérifie TOPGG_WEBHOOK_SECRET."
+            )
         LOG.warning(
-            "top.gg webhook: Authorization invalide — vérifie que TOPGG_WEBHOOK_SECRET sur Render "
-            "est exactement le secret affiché sur Top.gg (copier-coller, sans guillemets ; "
-            "avec ou sans préfixe Bearer, les deux sont acceptés)."
+            "top.gg webhook: Authorization invalide (longueurs après normalisation: header=%s env=%s)%s — "
+            "TOPGG_WEBHOOK_SECRET sur Render = même chaîne que sur Top.gg (sans guillemets dans le champ Render). "
+            "Noms d’en-têtes reçus: %s",
+            la,
+            lb,
+            extra,
+            hnames,
         )
         return web.Response(status=401, text="unauthorized")
 

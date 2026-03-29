@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import threading
+import unicodedata
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -93,8 +94,29 @@ class VoteReward:
         return max(0, int(self.subtotal_xp * mult))
 
 
+def normalize_webhook_token(s: str) -> str:
+    """Nettoie secret env / valeur `Authorization` (NFC, guillemets, CRLF, espaces invisibles, Bearer)."""
+    if not s:
+        return ""
+    t = unicodedata.normalize("NFC", str(s)).strip()
+    for ch in "\u200b\u200c\u200d\ufeff":
+        t = t.replace(ch, "")
+    t = t.replace("\r", "").replace("\n", "").strip()
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'":
+        t = t[1:-1].strip()
+        for ch in "\u200b\u200c\u200d\ufeff":
+            t = t.replace(ch, "")
+        t = t.replace("\r", "").replace("\n", "").strip()
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+        for ch in "\u200b\u200c\u200d\ufeff":
+            t = t.replace(ch, "")
+        t = t.replace("\r", "").replace("\n", "").strip()
+    return t
+
+
 def webhook_secret() -> str:
-    return (os.getenv("TOPGG_WEBHOOK_SECRET") or "").strip()
+    return normalize_webhook_token(os.getenv("TOPGG_WEBHOOK_SECRET") or "")
 
 
 def vote_page_url(bot_user_id: int) -> str:
