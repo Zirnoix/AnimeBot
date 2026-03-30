@@ -151,11 +151,23 @@ def _md_link_title(s: str, max_len: int = 72) -> str:
     return t
 
 
-def _planning_field_name(emoji: str, title: str, epnum: str, media_id: int | None) -> str:
-    ep_part = f"Épisode {epnum}"
-    if media_id is not None:
-        return f"{emoji} [{_md_link_title(title)}]({_anilist_anime_url(int(media_id))}) — {ep_part}"
-    return f"{emoji} {title} — {ep_part}"
+def _chunk_lines_for_embed(lines: List[str], max_chars: int = 1020) -> List[str]:
+    """Découpe en blocs ≤ ~1024 car. (limite d’un field Discord) — même logique que /airings all."""
+    chunks: List[str] = []
+    buf: List[str] = []
+    size = 0
+    for line in lines:
+        add = len(line) + (1 if buf else 0)
+        if buf and size + add > max_chars:
+            chunks.append("\n".join(buf))
+            buf = [line]
+            size = len(line)
+        else:
+            buf.append(line)
+            size += add
+    if buf:
+        chunks.append("\n".join(buf))
+    return chunks
 
 
 def _group_by_day_user(items: list[dict]) -> dict[str, list[tuple[dict, datetime]]]:
@@ -251,8 +263,9 @@ class Episodes(commands.Cog):
             episodes_jour = sorted(planning[jour], key=lambda x: x[1])[:10]
             e = discord.Embed(
                 title=f"📅 Planning {jour} ({'liste du serveur' if scope_val=='server' else 'global'})",
-                color=COLOR_PRIMARY
+                color=COLOR_PRIMARY,
             )
+            lines: List[str] = []
             for ep, dt in episodes_jour:
                 media = ep.get("media") or ep
                 heure = dt.strftime("%H:%M")
@@ -265,11 +278,20 @@ class Episodes(commands.Cog):
                     mid_i = int(mid) if mid is not None else None
                 except (TypeError, ValueError):
                     mid_i = None
-                e.add_field(
-                    name=_planning_field_name(emoji, title, epnum, mid_i),
-                    value=f"⏰ {heure}",
-                    inline=False
-                )
+                if mid_i is not None:
+                    line1 = (
+                        f"{emoji} [{_md_link_title(title)}]({_anilist_anime_url(mid_i)}) — Ep **{epnum}**"
+                    )
+                else:
+                    line1 = f"{emoji} {title} — Ep **{epnum}**"
+                lines.append(f"{line1}\n⏰ {heure}")
+            chunks = _chunk_lines_for_embed(lines)
+            for ci, chunk in enumerate(chunks):
+                if len(chunks) == 1:
+                    fname = f"{jour} · {len(episodes_jour)} sortie(s)"
+                else:
+                    fname = f"{jour} · partie {ci + 1}/{len(chunks)}"
+                e.add_field(name=fname[:256], value=chunk[:1024], inline=False)
             embeds.append(e)
 
         await _send_dm_multi(ctx, embeds)
@@ -459,9 +481,9 @@ class Episodes(commands.Cog):
             e = discord.Embed(
                 title=f"📅 Ton planning {jour_fr}",
                 description="",
-                color=COLOR_PRIMARY
+                color=COLOR_PRIMARY,
             )
-
+            lines: List[str] = []
             for it, dt in jour_items[:10]:
                 title = _pick_title_from_any(it.get("title") or {})
                 epnum = core.format_episode_line_part(it.get("episode"), it)
@@ -471,11 +493,20 @@ class Episodes(commands.Cog):
                     mid_i = int(raw_id) if raw_id is not None else None
                 except (TypeError, ValueError):
                     mid_i = None
-                e.add_field(
-                    name=_planning_field_name("🎬", title, epnum, mid_i),
-                    value=f"⏰ {heure}",
-                    inline=False
-                )
+                if mid_i is not None:
+                    line1 = (
+                        f"🎬 [{_md_link_title(title)}]({_anilist_anime_url(mid_i)}) — Ep **{epnum}**"
+                    )
+                else:
+                    line1 = f"🎬 {title} — Ep **{epnum}**"
+                lines.append(f"{line1}\n⏰ {heure}")
+            chunks = _chunk_lines_for_embed(lines)
+            for ci, chunk in enumerate(chunks):
+                if len(chunks) == 1:
+                    fname = f"{jour_fr} · {len(jour_items[:10])} sortie(s)"
+                else:
+                    fname = f"{jour_fr} · partie {ci + 1}/{len(chunks)}"
+                e.add_field(name=fname[:256], value=chunk[:1024], inline=False)
 
             embeds.append(e)
 
