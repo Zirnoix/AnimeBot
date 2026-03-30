@@ -301,6 +301,13 @@ class MiniGames(commands.Cog):
     async def _run_minigame_choice(self, interaction: discord.Interaction, key: str) -> None:
         """Lance un mini-jeu depuis un menu (Select) : même logique que les commandes slash."""
         await interaction.response.defer(thinking=True)
+        # Retire le message « choisis un mini-jeu » pour ne pas encombrer le salon
+        try:
+            msg = interaction.message
+            if msg is not None:
+                await msg.delete()
+        except (discord.HTTPException, discord.NotFound):
+            pass
         ctx: commands.Context = MiniGamesInteractionContext(self.bot, interaction)  # type: ignore[assignment]
         try:
             if key == "duel":
