@@ -138,6 +138,26 @@ def _pick_title(media_title_dict_or_media: dict) -> str:
     t = media_title_dict_or_media.get("title", media_title_dict_or_media) or {}
     return t.get("romaji") or t.get("english") or t.get("native") or "Anime"
 
+
+def _anilist_anime_url(media_id: int) -> str:
+    return f"https://anilist.co/anime/{int(media_id)}"
+
+
+def _md_link_title(s: str, max_len: int = 72) -> str:
+    """Comme /airings all : titre dans un lien Markdown (évite [] qui cassent le rendu)."""
+    t = (s or "—").replace("[", "(").replace("]", ")")
+    if len(t) > max_len:
+        return t[: max_len - 1] + "…"
+    return t
+
+
+def _planning_field_name(emoji: str, title: str, epnum: str, media_id: int | None) -> str:
+    ep_part = f"Épisode {epnum}"
+    if media_id is not None:
+        return f"{emoji} [{_md_link_title(title)}]({_anilist_anime_url(int(media_id))}) — {ep_part}"
+    return f"{emoji} {title} — {ep_part}"
+
+
 def _group_by_day_user(items: list[dict]) -> dict[str, list[tuple[dict, datetime]]]:
     """items issus de core.get_upcoming_episodes(username)."""
     out: dict[str, list[tuple[dict, datetime]]] = {}
@@ -240,8 +260,13 @@ class Episodes(commands.Cog):
                 epnum = core.format_episode_line_part(ep.get("episode"), media)
                 genres = media.get("genres") or []
                 emoji = genre_emoji(genres)
+                mid = media.get("id")
+                try:
+                    mid_i = int(mid) if mid is not None else None
+                except (TypeError, ValueError):
+                    mid_i = None
                 e.add_field(
-                    name=f"{emoji} {title} — Épisode {epnum}",
+                    name=_planning_field_name(emoji, title, epnum, mid_i),
                     value=f"⏰ {heure}",
                     inline=False
                 )
@@ -441,8 +466,13 @@ class Episodes(commands.Cog):
                 title = _pick_title_from_any(it.get("title") or {})
                 epnum = core.format_episode_line_part(it.get("episode"), it)
                 heure = dt.strftime("%H:%M")
+                raw_id = it.get("id")
+                try:
+                    mid_i = int(raw_id) if raw_id is not None else None
+                except (TypeError, ValueError):
+                    mid_i = None
                 e.add_field(
-                    name=f"🎬 {title} — Épisode {epnum}",
+                    name=_planning_field_name("🎬", title, epnum, mid_i),
                     value=f"⏰ {heure}",
                     inline=False
                 )
