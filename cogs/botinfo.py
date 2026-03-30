@@ -73,6 +73,13 @@ class BotInfo(commands.Cog):
             inline=False,
         )
 
+        embed.add_field(
+            name="⭐ Soutenir AnimeBot",
+            value="**`/vote`** — vote gratuit sur **Top.gg** (visibilité + **XP** bonus sur ta carte). "
+            "Pense à y passer de temps en temps ; rappel MP optionnel dans la commande.",
+            inline=False,
+        )
+
         try:
             uid = interaction.user.id
             linked = core.get_linked_username(uid)
@@ -91,7 +98,7 @@ class BotInfo(commands.Cog):
         except Exception:
             pass
 
-        embed.set_footer(text="/help · liste du serveur = /airings · lien AniList = /linkanilist")
+        embed.set_footer(text="/help · /vote · /airings · /linkanilist")
         try:
             if self.bot.user and self.bot.user.display_avatar:
                 embed.set_thumbnail(url=self.bot.user.display_avatar.url)

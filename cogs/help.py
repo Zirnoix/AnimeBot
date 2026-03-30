@@ -78,7 +78,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "clearlevelupchannel": "Retire le salon dédié aux annonces de niveau XP (comportement par défaut).",
     "guide_admin": "(MP, admins) Configuration serveur : airings, setchannel, niveaux XP, raid.",
     "botinfo": "Infos sur le bot (versions, créateur, etc.).",
-    "vote": "Lien Top.gg, cooldown, récompense XP ; rappel MP quand tu peux revoter (boutons).",
+    "vote": "⭐ Soutenir le bot sur Top.gg : lien, XP bonus, cooldown ; rappel MP (boutons).",
     "ping": "Latence du bot.",
     "recap": "Récap MP « Sorties du jour » (compte AniList lié). Boutons + saisie HH:MM ; précision avec /setalert.",
     "setalert": "Heure HH:MM du récap MP (fuseau du bot). Complète /recap pour une heure précise (ex. 08:30).",

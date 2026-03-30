@@ -61,7 +61,7 @@ def build_anilist_stats_embed(
     completed: int,
     current: int,
 ) -> discord.Embed:
-    """Embed unique pour /mystats et /stats (mise en page lisible)."""
+    """Embed pour /mystats et /stats — champs lisibles, miniature, titre cliquable vers AniList."""
     approx = bool(profile.get("_approx"))
     prefix = "≈ " if approx else ""
 
@@ -76,33 +76,57 @@ def build_anilist_stats_embed(
 
     display = brief_user.get("name") or target
     note_s = f"{mean:.1f}" if mean > 0 else "—"
-    line_a = (
-        f"**{prefix}{fmt_int(count)}** titres · **{prefix}{human_minutes_compact(minutes)}** · "
-        f"moyenne **{prefix}{note_s}**/100"
-    )
-    line_b = (
-        f"**{fmt_int(completed)}** terminés · **{fmt_int(current)}** en cours · "
-        f"**{fmt_int(total)}** entrées dans la liste"
-    )
-    desc_parts = []
-    if approx:
-        desc_parts.append("ℹ️ Profil AniList partiel : chiffres **approximatifs** (liste).")
-    desc_parts.extend([line_a, line_b])
-    if fav != "—":
-        desc_parts.append(f"Genre favori (profil) : **{fav}**")
-    description = "\n".join(desc_parts)
-
-    e = discord.Embed(
-        title="📊 Statistiques AniList",
-        description=description,
-        color=color,
-    )
-    url = brief_user.get("siteUrl")
+    site_url = brief_user.get("siteUrl")
     av = brief_user.get("avatar")
-    e.set_author(name=display, url=url if url else None, icon_url=av if av else None)
+
+    desc_lines: list[str] = []
+    if approx:
+        desc_lines.append("ℹ️ Profil **partiel** : chiffres **approximatifs** (source liste).")
+        desc_lines.append("")
+    if site_url:
+        desc_lines.append(f"🔗 Fiche · [**{display}**]({site_url})")
+    else:
+        desc_lines.append(f"👤 **{display}**")
+
+    kw: dict = {
+        "title": f"📊 {display}",
+        "description": "\n".join(desc_lines) if desc_lines else None,
+        "color": color,
+    }
+    if site_url:
+        kw["url"] = site_url
+    e = discord.Embed(**kw)
+
+    if av:
+        e.set_thumbnail(url=av)
 
     e.add_field(
-        name="Complétion (terminés / entrées liste)",
+        name="🎬 Activité",
+        value=(
+            f"• **{prefix}{fmt_int(count)}** titres (comptés)\n"
+            f"• **{prefix}{human_minutes_compact(minutes)}** de visionnage\n"
+            f"• **{prefix}{note_s}**/100 note moyenne"
+        ),
+        inline=True,
+    )
+    e.add_field(
+        name="📚 Liste",
+        value=(
+            f"• **{fmt_int(completed)}** terminés\n"
+            f"• **{fmt_int(current)}** en cours\n"
+            f"• **{fmt_int(total)}** entrées au total"
+        ),
+        inline=True,
+    )
+    if fav != "—":
+        e.add_field(
+            name="❤️ Genre favori (profil)",
+            value=f"**{fav}**",
+            inline=False,
+        )
+
+    e.add_field(
+        name="📈 Complétion (terminés / entrées)",
         value=f"{bar_txt(completed, total)} **{done_pct}%**",
         inline=False,
     )
@@ -118,8 +142,8 @@ def build_anilist_stats_embed(
                     gn = x.get("genre") or "—"
                     c = int(x.get("count") or 0)
                     p = int(round(100 * c / total_g))
-                    lines.append(f"**{gn}** · {fmt_int(c)} ({p}%)")
-                e.add_field(name="Répartition (top 5 genres)", value="\n".join(lines)[:1024], inline=False)
+                    lines.append(f"▸ **{gn}** · {fmt_int(c)} · _{p}%_")
+                e.add_field(name="🎭 Top genres (sur ton profil)", value="\n".join(lines)[:1024], inline=False)
         except Exception:
             pass
 
@@ -127,7 +151,7 @@ def build_anilist_stats_embed(
     viewer_al = core.get_linked_username(ctx.author.id)
     tgt = (target or "").strip().lower()
     if viewer_al and viewer_al.lower() == tgt:
-        footer_parts.append("Profil = ton compte AniList lié (/linkanilist)")
+        footer_parts.append("Compte lié · 💡 Soutiens AnimeBot avec **`/vote`** (Top.gg)")
     elif not viewer_al:
         footer_parts.append("/linkanilist pour /mystats sans pseudo, récaps MP, /monnext…")
     e.set_footer(text=" · ".join(footer_parts)[:2048])

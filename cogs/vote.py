@@ -30,12 +30,23 @@ def _fmt_remaining(seconds: int) -> str:
     return " ".join(parts) if parts else "bientôt"
 
 
-class VoteReminderView(View):
-    """Active / désactive le MP « tu peux revoter »."""
+VOTE_EMBED_COLOR = 0xFEE75C  # jaune « appel à l’action », bien visible dans le fil
 
-    def __init__(self, user_id: int) -> None:
+
+class VoteReminderView(View):
+    """Bouton lien Top.gg + rappels MP."""
+
+    def __init__(self, user_id: int, vote_url: str) -> None:
         super().__init__(timeout=180)
         self.user_id = user_id
+        self.add_item(
+            discord.ui.Button(
+                label="🗳️ Voter sur Top.gg",
+                style=discord.ButtonStyle.link,
+                url=vote_url,
+                row=0,
+            )
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -43,7 +54,7 @@ class VoteReminderView(View):
             return False
         return True
 
-    @discord.ui.button(label="🔔 Activer rappel MP", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="🔔 Activer rappel MP", style=discord.ButtonStyle.success, row=1)
     async def enable_reminder(self, interaction: discord.Interaction, button: Button) -> None:
         topgg_vote.set_reminder(interaction.user.id, True)
         await interaction.response.edit_message(
@@ -52,7 +63,7 @@ class VoteReminderView(View):
             view=None,
         )
 
-    @discord.ui.button(label="🔕 Désactiver le rappel", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="🔕 Désactiver le rappel", style=discord.ButtonStyle.secondary, row=1)
     async def disable_reminder(self, interaction: discord.Interaction, button: Button) -> None:
         topgg_vote.set_reminder(interaction.user.id, False)
         await interaction.response.edit_message(
@@ -102,7 +113,10 @@ class Vote(commands.Cog):
     async def _vote_reminder_before(self) -> None:
         await self.bot.wait_until_ready()
 
-    @app_commands.command(name="vote", description="Voter sur Top.gg, voir le cooldown et gérer le rappel MP.")
+    @app_commands.command(
+        name="vote",
+        description="⭐ Soutenir le bot sur Top.gg (XP bonus) — lien, cooldown, rappel MP.",
+    )
     async def vote_cmd(self, interaction: discord.Interaction) -> None:
         # Éphémère = pertinent en serveur uniquement ; en MP le salon est déjà privé.
         # 10062 = interaction expirée si > ~3s avant defer (latence hébergeur, etc.).
@@ -152,32 +166,35 @@ class Vote(commands.Cog):
             )
 
         reward_hint = (
-            f"🎁 **XP :** base **{xp_amt}** + bonus **série** (jours consécutifs) + **fidélité** (votes totaux) "
-            f"· week-end possible selon Top.gg."
+            f"🎁 **XP :** **{xp_amt}** de base + bonus **série** + **fidélité** "
+            f"· multiplicateur week-end possible."
         )
         stats_line = (
-            f"📊 **Tes stats :** {total_v} vote(s) enregistré(s) · série **{streak}** jour(s) · "
-            f"record **{best}** · (mis à jour après chaque vote reçu par le bot)."
+            f"📊 **Tes votes :** **{total_v}** enregistré(s) · série **{streak}** j · record **{best}** "
+            f"_(mis à jour après chaque vote reçu par le bot)._"
         )
 
-        lines = [
-            f"**[Voter sur Top.gg]({url})**",
-            "",
-            reward_hint,
-            stats_line,
-            "",
-            status,
-            eta_txt,
-            "",
-            f"🔔 Rappel MP : **{'activé' if rem else 'désactivé'}** — boutons ci-dessous.",
-            hook_hint,
-        ]
-        em = discord.Embed(
-            title="🗳️ Soutenir AnimeBot",
-            description="\n".join(lines).strip(),
-            color=discord.Color.blurple(),
+        intro = (
+            "**Gratuit**, sans inscription spéciale : le bouton **ci-dessous** ouvre Top.gg. "
+            "Ça aide le bot à être **mieux classé** et découvert."
         )
-        em.set_footer(text="Bonus série + fidélité · Fuseau BOT_TIMEZONE · Cooldown configurable")
+        rem_line = f"🔔 Rappel MP quand tu peux revoter : **{'activé' if rem else 'désactivé'}** (boutons)."
+        desc_parts = [intro, "", reward_hint, "", stats_line, "", f"**Statut**\n{status}\n{eta_txt}", "", rem_line]
+        if hook_hint:
+            desc_parts.extend(["", hook_hint.strip()])
+        em = discord.Embed(
+            title="⭐ Soutiens AnimeBot (Top.gg)",
+            description="\n".join(desc_parts).strip(),
+            color=discord.Color(VOTE_EMBED_COLOR),
+            url=url,
+        )
+        try:
+            u = interaction.client.user
+            if u and u.display_avatar:
+                em.set_thumbnail(url=u.display_avatar.url)
+        except Exception:
+            pass
+        em.set_footer(text="Pense à /vote de temps en temps — merci 💙 · Cooldown & fuseau configurables")
 
         recap = topgg_vote.pop_pending_vote_recap(uid)
         if recap:
@@ -206,7 +223,7 @@ class Vote(commands.Cog):
             except Exception as e:
                 LOG.warning("vote recap embed: %s", e)
 
-        await interaction.followup.send(embed=em, view=VoteReminderView(uid), ephemeral=ephemeral)
+        await interaction.followup.send(embed=em, view=VoteReminderView(uid, url), ephemeral=ephemeral)
 
 
 async def setup(bot: commands.Bot) -> None:
