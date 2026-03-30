@@ -28,6 +28,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
+from modules import anilist_gate
 from modules import core
 from modules import minigame_lock
 from modules.core import normalize
@@ -379,11 +380,13 @@ class Quiz(commands.Cog):
     )
     async def animequiz(self, ctx: commands.Context, difficulty: str = "medium") -> None:
         uid = ctx.author.id
+        await _maybe_defer(ctx)
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
         if not minigame_lock.try_begin(uid, "animequiz"):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            await _maybe_defer(ctx)
             await ctx.send("🎮 Préparation du quiz...")
 
             sort_option = SORT_BY_DIFF.get((difficulty or "medium").lower(), "SCORE_DESC")
@@ -467,11 +470,13 @@ class Quiz(commands.Cog):
     @commands.hybrid_command(name="animequizmulti", description="Quiz multi (1 à 20) — easy/medium/hard aléatoires.")
     async def animequizmulti(self, ctx: commands.Context, nb_questions: int = 5) -> None:
         uid = ctx.author.id
+        await _maybe_defer(ctx)
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
         if not minigame_lock.try_begin(uid, "animequizmulti"):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            await _maybe_defer(ctx)
             if not 1 <= nb_questions <= 20:
                 await ctx.send("❌ Choisis un nombre entre 1 et 20.")
                 return
@@ -482,6 +487,7 @@ class Quiz(commands.Cog):
             total_xp = 0
             combo = 0
             combo_bonus_total = 0
+            rounds_with_anime = 0
 
             for i in range(nb_questions):
                 try:
@@ -492,6 +498,7 @@ class Quiz(commands.Cog):
                     if not anime:
                         await asyncio.sleep(0.6)
                         continue
+                    rounds_with_anime += 1
 
                     correct_titles = self._titles_set(anime)
                     image = (anime.get("coverImage", {}) or {}).get("extraLarge") or (anime.get("coverImage", {}) or {}).get("large")
@@ -548,13 +555,20 @@ class Quiz(commands.Cog):
 
                 await asyncio.sleep(1.2)
 
+            if rounds_with_anime == 0:
+                await ctx.send(
+                    "📡 **Aucune question** n’a pu être chargée (AniList indisponible ou dégradé). "
+                    "**Aucun point** de classement quiz n’a été modifié."
+                )
+                return
+
             # scoreboard global
             penalty = 0
             with core.DATA_JSON_LOCK:
                 scores = core.load_scores()
                 uid_str = str(ctx.author.id)
                 old_q = int(scores.get(uid_str, 0))
-                if score < (nb_questions / 2):
+                if score < (rounds_with_anime / 2):
                     penalty = 1
                     scores[uid_str] = max(0, old_q - penalty)
                 else:
@@ -562,22 +576,23 @@ class Quiz(commands.Cog):
                 new_q = int(scores[uid_str])
                 core.save_scores(scores)
             if penalty:
-                await ctx.send(f"⚠️ Moins de 50% de bonnes réponses, -{penalty} point retiré.")
+                await ctx.send(f"⚠️ Moins de 50% de bonnes réponses sur les questions jouées, -{penalty} point retiré.")
             await core.announce_quiz_title_if_changed(self.bot, ctx.channel, ctx.author.id, old_q, new_q)
 
             total_xp += combo_bonus_total
             if total_xp > 0:
                 await core.add_xp(self.bot, ctx.channel, ctx.author.id, total_xp)
 
-            precision = (score / nb_questions * 100) if nb_questions > 0 else 0.0
+            precision = (score / rounds_with_anime * 100) if rounds_with_anime > 0 else 0.0
             # Mission: win multi si ≥ 50%
-            if score >= max(1, nb_questions // 2):
+            if score >= max(1, rounds_with_anime // 2):
                 self.bot.dispatch("mission_progress", ctx.author.id, "_custom:quiz_win")
 
             embed = discord.Embed(
                 title="🏁 Quiz terminé !",
                 description=(
-                    f"Score final : **{score}/{nb_questions}**\n"
+                    f"Score final : **{score}/{rounds_with_anime}** questions jouées "
+                    f"(sur **{nb_questions}** prévues)\n"
                     f"XP gagnés : **{total_xp}** *(dont **{combo_bonus_total}** en combos)*\n"
                     f"Précision : **{precision:.1f}%**"
                 ),
@@ -622,7 +637,9 @@ class Quiz(commands.Cog):
         """
         try:
             await _maybe_defer(ctx)
-    
+            if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+                return
+
             # Garde-fous
             if opponent.bot:
                 await ctx.send("🤖 Tu ne peux pas défier un bot.")

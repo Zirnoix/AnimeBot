@@ -16,6 +16,7 @@ import asyncio
 import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select
+from modules import anilist_gate
 from modules import core
 from modules import higherlower_combine
 from modules import minigame_lock
@@ -300,6 +301,8 @@ class MiniGames(commands.Cog):
 
     async def _run_minigame_choice(self, interaction: discord.Interaction, key: str) -> None:
         """Lance un mini-jeu depuis un menu (Select) : même logique que les commandes slash."""
+        if not await anilist_gate.ensure_anilist_for_interaction(self.bot, interaction):
+            return
         await interaction.response.defer(thinking=True)
         # Retire le message « choisis un mini-jeu » pour ne pas encombrer le salon
         try:
@@ -372,14 +375,14 @@ class MiniGames(commands.Cog):
     @commands.hybrid_command(name="higherlower", description="Quel anime est le plus populaire ?")
     async def higher_lower(self, ctx: commands.Context):
         uid = ctx.author.id
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=True)
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
         if not minigame_lock.try_begin(uid, "higherlower"):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            # Appelée en slash ? On évite le timeout 3s
-            if ctx.interaction and not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer(thinking=True)
-
             await ctx.send("🎲 Préparation du mini-jeu…")
 
             page = random.randint(1, 10)
@@ -438,13 +441,14 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     async def _guess_year(self, ctx: commands.Context) -> None:
         uid = ctx.author.id
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=True)
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
         if not minigame_lock.try_begin(uid, "guessyear"):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            if ctx.interaction and not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer(thinking=True)
-
             await ctx.send("🗓️ Chargement d'un anime…")
             linked = core.get_linked_username(uid)
             list_source = False
@@ -540,13 +544,14 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     async def _guess_episodes(self, ctx: commands.Context) -> None:
         uid = ctx.author.id
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=True)
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
         if not minigame_lock.try_begin(uid, "guessepisodes"):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            if ctx.interaction and not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer(thinking=True)
-
             await ctx.send("🎬 Sélection d'un anime…")
             linked = core.get_linked_username(uid)
             list_source = False
@@ -646,14 +651,15 @@ class MiniGames(commands.Cog):
             await minigame_lock.reply_guessgenre_cooldown(ctx, uid, remaining)
             return
 
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=True)
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
         if not minigame_lock.try_begin(uid, "guessgenre"):
             await minigame_lock.reply_busy(ctx)
             return
 
         try:
-            if ctx.interaction and not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer(thinking=True)
-
             await ctx.send("🎭 Sélection d'un anime…")
             anime = None
             linked = core.get_linked_username(uid)
@@ -849,13 +855,14 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     async def _guess_character(self, ctx: commands.Context) -> None:
         uid = ctx.author.id
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=True)
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
         if not minigame_lock.try_begin(uid, "guesscharacter"):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            if ctx.interaction and not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer(thinking=True)
-
             linked = core.get_linked_username(uid)
             list_choice = core.build_guess_character_from_user_list(linked) if linked else None
 

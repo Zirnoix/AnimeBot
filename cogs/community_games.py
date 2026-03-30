@@ -26,6 +26,7 @@ from discord.ui import Button, Select, View
 from PIL import Image, ImageFilter
 
 from modules import abuse
+from modules import anilist_gate
 from modules import core
 from modules import higherlower_combine
 from modules import minigame_lock
@@ -2466,12 +2467,14 @@ class CommunityGames(commands.Cog):
         if not await _require_slash(ctx, "chainquiz"):
             return
         uid = ctx.author.id
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=True)
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
         if not minigame_lock.try_begin(uid, "chainquiz"):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            if ctx.interaction and not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer(thinking=True)
             qz = self.bot.get_cog("Quiz")
             if not qz:
                 await ctx.send("❌ Module quiz indisponible.")
@@ -2551,13 +2554,14 @@ class CommunityGames(commands.Cog):
         if not await _require_slash(ctx, "guesswho"):
             return
         uid = ctx.author.id
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(thinking=True)
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
         if not minigame_lock.try_begin(uid, "guesswho"):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            if ctx.interaction and not ctx.interaction.response.is_done():
-                await ctx.interaction.response.defer(thinking=True)
-
             div, blur_r, timeout_sec, xp_win = GUESSWHO_MODES.get(difficulte, GUESSWHO_MODES["medium"])
             diff_label = {"easy": "Facile", "medium": "Normal", "hard": "Difficile"}.get(difficulte, "Normal")
 

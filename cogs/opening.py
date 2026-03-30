@@ -15,6 +15,7 @@ import aiohttp
 import discord
 from discord.ext import commands, tasks
 
+from modules import anilist_gate
 from modules import core
 from modules import voice              # ensure_connected + make_source précis/robuste
 from modules import animethemes        # provider AnimeThemes + filtres AniList
@@ -338,6 +339,9 @@ class Openings(commands.Cog):
                 await ctx.interaction.response.defer()
             except Exception:
                 pass
+
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
 
         send = (ctx.interaction.followup.send if getattr(ctx, "interaction", None) else ctx.send)
 
