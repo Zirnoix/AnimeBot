@@ -77,6 +77,9 @@ CATALOG_MIN_FOR_BIAS = int(os.getenv("GUESSOP_CATALOG_MIN", "5"))
 # Guess OP chaîne : plafond de sécurité (manches avec au moins un gagnant)
 MAX_GUESSOP_CHAIN_ROUNDS = int(os.getenv("GUESSOP_CHAIN_MAX_ROUNDS", "25"))
 
+# XP bonus par palier de série (manche 2 d’affilée = 1 palier, etc.)
+GUESSOP_CHAIN_STREAK_XP_PER = int(os.getenv("GUESSOP_CHAIN_STREAK_XP", "5"))
+
 # AnimeThemes + filtre AniList : tentatives max (chaque tentative = API + GraphQL si besoin)
 GUESSOP_FILTER_MAX_ATTEMPTS = int(os.getenv("GUESSOP_FILTER_MAX_ATTEMPTS", "10"))
 
@@ -280,6 +283,36 @@ def _guessop_schedule_question_delete(msg: discord.Message | None, delay: float 
     asyncio.create_task(_go())
 
 
+async def _safe_delete_message(msg: discord.Message | None) -> None:
+    if not msg:
+        return
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+
+async def _guessop_send_cooldown_notice(ctx: commands.Context, left_go: float) -> None:
+    """Message vu uniquement par l’auteur : slash = éphémère ; préfixe = MP ou message effacé."""
+    msg = (
+        f"⏳ Attends **{int(left_go) + 1}s** après la fin du dernier Guess OP avant de relancer."
+    )
+    itx = getattr(ctx, "interaction", None)
+    if itx:
+        try:
+            await itx.followup.send(msg, ephemeral=True)
+        except Exception:
+            pass
+        return
+    try:
+        await ctx.author.send(msg)
+    except Exception:
+        try:
+            await ctx.reply(msg, mention_author=False, delete_after=15)
+        except Exception:
+            pass
+
+
 # ================== COG ==================
 class Openings(commands.Cog):
     """Mini-jeu GuessOP (openings d’anime, boutons, multi-joueurs, audio)."""
@@ -410,6 +443,136 @@ class Openings(commands.Cog):
             res.set_footer(text=source_footer)
         await send(embed=res)
         _guessop_schedule_question_delete(view.message)
+
+    async def _guessop_chain_award_round(
+        self,
+        ctx: commands.Context,
+        send,
+        outcome: GuessOPRoundOutcome,
+        round_manche: int,
+        chain_streaks: dict[int, int],
+        max_streak_ever: dict[int, int],
+        totals_xp: dict[int, int],
+        wins: dict[int, int],
+    ) -> discord.Message | None:
+        """Récompenses manche chaîne + bonus de série ; met à jour totaux / séries."""
+        view = outcome.view
+        correct_anime = outcome.correct_anime
+        theme_label = outcome.theme_label
+        source_footer = outcome.source_footer
+        podium_xp = [15, 10, 7]
+        others_xp = 3
+
+        correct_ids: set[int] = set()
+        for u in view.winners_order:
+            correct_ids.add(u.id)
+        for u in view.others_correct:
+            correct_ids.add(u.id)
+
+        tracked = set(chain_streaks.keys()) | correct_ids
+        for uid in tracked:
+            if uid in correct_ids:
+                ns = chain_streaks.get(uid, 0) + 1
+                chain_streaks[uid] = ns
+                max_streak_ever[uid] = max(max_streak_ever.get(uid, 0), ns)
+            else:
+                chain_streaks[uid] = 0
+
+        award_lines: list[str] = []
+        streak_lines: list[str] = []
+
+        for rank, user in enumerate(view.winners_order, start=1):
+            base = podium_xp[rank - 1]
+            uid = user.id
+            st = chain_streaks.get(uid, 0)
+            extra = max(0, st - 1) * GUESSOP_CHAIN_STREAK_XP_PER if st >= 2 else 0
+            total_u = base + extra
+            totals_xp[uid] = totals_xp.get(uid, 0) + total_u
+            wins[uid] = wins.get(uid, 0) + 1
+            line = f"**#{rank}** {user.mention} — +{base} XP"
+            if extra > 0:
+                line += f" · **+{extra} XP** série (×{st})"
+                streak_lines.append(f"{user.mention} — série **{st}** → +{extra} XP")
+            try:
+                await core.add_xp(self.bot, ctx.channel, user.id, total_u)
+            except Exception:
+                pass
+            try:
+                core.add_mini_score(user.id, "guessop", 1)
+            except Exception:
+                pass
+            award_lines.append(line)
+
+        for user in view.others_correct:
+            uid = user.id
+            base = others_xp
+            st = chain_streaks.get(uid, 0)
+            extra = max(0, st - 1) * GUESSOP_CHAIN_STREAK_XP_PER if st >= 2 else 0
+            total_u = base + extra
+            totals_xp[uid] = totals_xp.get(uid, 0) + total_u
+            wins[uid] = wins.get(uid, 0) + 1
+            line = f"• {user.mention} — +{base} XP"
+            if extra > 0:
+                line += f" · **+{extra} XP** série (×{st})"
+                streak_lines.append(f"{user.mention} — série **{st}** → +{extra} XP")
+            try:
+                await core.add_xp(self.bot, ctx.channel, user.id, total_u)
+            except Exception:
+                pass
+            try:
+                core.add_mini_score(user.id, "guessop", 1)
+            except Exception:
+                pass
+            award_lines.append(line)
+
+        fast_line = f"⚡ Plus rapide : {view.winners_order[0].mention}" if view.winners_order else None
+        title_res = f"🏁 Résultats — Guess OP · Manche {round_manche}"
+        res = discord.Embed(
+            title=title_res,
+            description=f"✅ **Réponse :** {correct_anime}",
+            color=discord.Color.gold(),
+        )
+        if theme_label:
+            res.add_field(name="Opening", value=theme_label, inline=False)
+        if fast_line:
+            res.add_field(name="Vitesse", value=fast_line, inline=False)
+        if award_lines:
+            res.add_field(name="Récompenses", value="\n".join(award_lines), inline=False)
+        if streak_lines:
+            res.add_field(name="Bonus série", value="\n".join(streak_lines), inline=False)
+        if source_footer:
+            res.set_footer(text=source_footer)
+        sent = await send(embed=res)
+        return sent if isinstance(sent, discord.Message) else None
+
+    def _guessop_chain_recap_embed(
+        self,
+        ctx: commands.Context,
+        totals_xp: dict[int, int],
+        wins: dict[int, int],
+        max_streak_ever: dict[int, int],
+        *,
+        title: str,
+        description: str | None,
+    ) -> discord.Embed:
+        emb = discord.Embed(title=title, description=description, color=discord.Color.dark_gold())
+        if not totals_xp:
+            emb.add_field(name="Totaux", value="Aucun point marqué sur la chaîne.", inline=False)
+            return emb
+        guild = ctx.guild
+        rows: list[tuple[int, int, int, int]] = []
+        for uid, tx in totals_xp.items():
+            rows.append((uid, tx, wins.get(uid, 0), max_streak_ever.get(uid, 0)))
+        rows.sort(key=lambda x: -x[1])
+        lines: list[str] = []
+        for uid, tx, wn, ms in rows[:20]:
+            mem = guild.get_member(uid) if guild else None
+            mention = mem.mention if mem else f"<@{uid}>"
+            lines.append(f"{mention} — **{tx} XP** · {wn} victoire(s) · série max **{ms}**")
+        if len(rows) > 20:
+            lines.append(f"*… et {len(rows) - 20} autre(s)*")
+        emb.add_field(name="Totaux sur la chaîne", value="\n".join(lines), inline=False)
+        return emb
 
     async def _run_one_guessop_round(
         self,
@@ -563,6 +726,7 @@ class Openings(commands.Cog):
             except Exception as e:
                 _mark_guessop_end(ctx.author.id)
                 await send(f"❌ Impossible de rejoindre le vocal : {e}")
+                await _safe_delete_message(view.message)
                 return None
 
         async def _tick_embed():
@@ -737,9 +901,8 @@ class Openings(commands.Cog):
 
         left_go = _guessop_cooldown_remaining(ctx.author.id)
         if left_go > 0:
-            return await send(
-                f"⏳ Attends **{int(left_go) + 1}s** après la fin du dernier Guess OP avant de relancer."
-            )
+            await _guessop_send_cooldown_notice(ctx, left_go)
+            return
 
         linked_anilist = core.get_linked_username(ctx.author.id)
         user_romaji_list: list[str] = []
@@ -801,9 +964,8 @@ class Openings(commands.Cog):
 
         left_go = _guessop_cooldown_remaining(ctx.author.id)
         if left_go > 0:
-            return await send(
-                f"⏳ Attends **{int(left_go) + 1}s** après la fin du dernier Guess OP avant de relancer."
-            )
+            await _guessop_send_cooldown_notice(ctx, left_go)
+            return
 
         linked_anilist = core.get_linked_username(ctx.author.id)
         user_romaji_list: list[str] = []
@@ -819,9 +981,18 @@ class Openings(commands.Cog):
         async with self._guild_lock(ctx.guild.id):
             vc: discord.VoiceClient | None = None
             round_num = 0
+            last_result_msg: discord.Message | None = None
+            chain_streaks: dict[int, int] = {}
+            max_streak_ever: dict[int, int] = {}
+            totals_xp: dict[int, int] = {}
+            wins: dict[int, int] = {}
 
             while round_num < MAX_GUESSOP_CHAIN_ROUNDS:
                 round_num += 1
+
+                await _safe_delete_message(last_result_msg)
+                last_result_msg = None
+
                 outcome = await self._run_one_guessop_round(
                     ctx,
                     voice_channel,
@@ -845,18 +1016,37 @@ class Openings(commands.Cog):
                 vc = outcome.vc
 
                 if not outcome.view.winners_order and not outcome.view.others_correct:
+                    await _safe_delete_message(outcome.view.message)
                     try:
                         if vc and vc.is_connected():
                             await vc.disconnect(force=False)
                     except Exception:
                         pass
                     _mark_guessop_end(ctx.author.id)
-                    return await send(
-                        "⏰ **Chaîne terminée** — personne n'a trouvé cette manche ! "
-                        f"La bonne réponse était : **{outcome.correct_anime}**"
+                    recap = self._guessop_chain_recap_embed(
+                        ctx,
+                        totals_xp,
+                        wins,
+                        max_streak_ever,
+                        title="📊 Guess OP chaîne — fin",
+                        description=(
+                            "⏰ **Personne n'a trouvé** cette manche.\n"
+                            f"Réponse : **{outcome.correct_anime}**"
+                        ),
                     )
+                    return await send(embed=recap)
 
-                await self._guessop_award_and_embed(ctx, send, outcome, round_manche=round_num)
+                await _safe_delete_message(outcome.view.message)
+                last_result_msg = await self._guessop_chain_award_round(
+                    ctx,
+                    send,
+                    outcome,
+                    round_num,
+                    chain_streaks,
+                    max_streak_ever,
+                    totals_xp,
+                    wins,
+                )
 
             try:
                 if vc and vc.is_connected():
@@ -864,9 +1054,19 @@ class Openings(commands.Cog):
             except Exception:
                 pass
             _mark_guessop_end(ctx.author.id)
-            await send(
-                f"🔚 Limite de **{MAX_GUESSOP_CHAIN_ROUNDS}** manches atteinte — le bot quitte le vocal."
+
+            await _safe_delete_message(last_result_msg)
+            recap = self._guessop_chain_recap_embed(
+                ctx,
+                totals_xp,
+                wins,
+                max_streak_ever,
+                title="📊 Guess OP chaîne — fin",
+                description=(
+                    f"🔚 Limite de **{MAX_GUESSOP_CHAIN_ROUNDS}** manches atteintes — le bot a quitté le vocal."
+                ),
             )
+            await send(embed=recap)
 
     # --- DIAG AUDIO intégré au même Cog ---
     @commands.hybrid_command(name="voicediag", description="Diagnostic audio (ffmpeg/ffprobe/opus)")
