@@ -233,6 +233,7 @@ class Link(commands.Cog):
         name="duelstats",
         description="Compare ton engagement AniList avec un ami (complétés, en cours, temps, épisodes).",
     )
+    @commands.cooldown(1, 15, commands.BucketType.user)
     @app_commands.describe(adversaire="Le membre à affronter (compte AniList lié)")
     async def duelstats(self, ctx: commands.Context, adversaire: discord.Member | None = None) -> None:
         """Compare l’engagement AniList (complétés, en cours, temps, épisodes) — pas le genre ni un score vide."""
@@ -266,7 +267,7 @@ class Link(commands.Cog):
         """
         stats: dict[str, dict] = {}
         for u in [user1, user2]:
-            res = core.query_anilist(query, {"name": u})
+            res = await core.query_anilist_async(query, {"name": u}, queue_ctx=ctx)
             try:
                 a = res["data"]["User"]["statistics"]["anime"]
                 st = a.get("statuses") or []

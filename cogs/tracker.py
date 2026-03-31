@@ -227,7 +227,7 @@ class Tracker(commands.Cog):
     async def track_add(self, ctx: commands.Context, *, anime: str) -> None:
         await self._maybe_defer(ctx, ephemeral=True)
 
-        matches = await self.find_anime_matches(anime)
+        matches = await self.find_anime_matches(anime, queue_ctx=ctx)
         if not matches:
             await self._reply(ctx, content=f"❌ Aucun anime trouvé pour **{anime}**.", ephemeral=True)
             return
@@ -412,7 +412,12 @@ class Tracker(commands.Cog):
 
     # ----------------- Recherche AniList -----------------
 
-    async def find_anime_matches(self, search: str) -> List[Dict[str, Any]]:
+    async def find_anime_matches(
+        self,
+        search: str,
+        *,
+        queue_ctx: Optional[commands.Context] = None,
+    ) -> List[Dict[str, Any]]:
         query = '''
         query ($search: String) {
           Page(perPage: 5) {
@@ -430,7 +435,7 @@ class Tracker(commands.Cog):
         }
         '''
         try:
-            result = core.query_anilist(query, {"search": search})
+            result = await core.query_anilist_async(query, {"search": search}, queue_ctx=queue_ctx)
             return result["data"]["Page"]["media"] if result and "data" in result else []
         except Exception as e:
             LOG.error(f"Erreur recherche anime: {e}")

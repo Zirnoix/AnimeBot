@@ -33,6 +33,7 @@ class AniListAdmin(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="anilist_sync", description="(Admin) Rafraîchit le cache AniList")
+    @commands.cooldown(1, 60, commands.BucketType.user)
     @commands.has_permissions(administrator=True)
     async def anilist_sync(
         self,

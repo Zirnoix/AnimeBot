@@ -174,6 +174,25 @@ _ANILIST_CACHE = {
 }
 _TTL_SEC = int(os.getenv("ANILIST_TTL_HOURS", "6")) * 3600
 
+
+def _env_int_bounded(name: str, default: int, lo: int, hi: int) -> int:
+    raw = (os.getenv(name) or str(default)).strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = default
+    return max(lo, min(hi, n))
+
+
+# Limite les requêtes HTTP simultanées vers graphql.anilist.co (évite pics / 502 / RAM).
+_ANILIST_MAX_CONCURRENT = _env_int_bounded("ANILIST_MAX_CONCURRENT", 4, 1, 64)
+_ANILIST_REQUEST_SEMAPHORE = threading.Semaphore(_ANILIST_MAX_CONCURRENT)
+LOG.info(
+    "[AniList] Concurrence HTTP limitée à %s (variable ANILIST_MAX_CONCURRENT, défaut 4).",
+    _ANILIST_MAX_CONCURRENT,
+)
+
+
 def _fresh(bucket: str, key: str) -> bool:
     ent = _ANILIST_CACHE[bucket].get(key)
     return bool(ent) and (time.time() - ent["ts"] < _TTL_SEC)
@@ -1290,7 +1309,18 @@ def query_anilist_user(input_str: str) -> dict | None:
     except Exception:
         return None
 
-# dans modules/core.py, remplace la fin de query_anilist par ça:
+def _anilist_post_json(url: str, headers: dict, payload: dict) -> tuple[Any, dict]:
+    """Un POST GraphQL ; tenu sous sémaphore pour limiter la concurrence vers AniList."""
+    with _ANILIST_REQUEST_SEMAPHORE:
+        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+        try:
+            j = resp.json()
+        except Exception:
+            LOG.warning("[AniList] Non-JSON response (HTTP %s): %s", resp.status_code, resp.text[:300])
+            j = {}
+    return resp, j
+
+
 def query_anilist(query: str, variables: dict = None) -> dict:
     url = "https://graphql.anilist.co"
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -1304,14 +1334,7 @@ def query_anilist(query: str, variables: dict = None) -> dict:
 
     for attempt in range(1, max_tries + 1):
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=15)
-
-            # essaie de parser
-            try:
-                j = resp.json()
-            except Exception:
-                LOG.warning("[AniList] Non-JSON response (HTTP %s): %s", resp.status_code, resp.text[:300])
-                j = {}
+            resp, j = _anilist_post_json(url, headers, payload)
 
             # 429: respecte Retry-After si présent, puis retry (DEBUG tant qu’on retente ; WARNING si échec final)
             if resp.status_code == 429:
@@ -1374,6 +1397,48 @@ def query_anilist(query: str, variables: dict = None) -> dict:
 
     # si on sort de la boucle sans avoir retourné
     return {}
+
+
+def _anilist_slots_available() -> int:
+    """Créneaux libres restants (best-effort, threading.Semaphore)."""
+    try:
+        return max(0, int(getattr(_ANILIST_REQUEST_SEMAPHORE, "_value", 0)))
+    except Exception:
+        return 0
+
+
+async def query_anilist_async(
+    query: str,
+    variables: dict | None = None,
+    *,
+    queue_ctx: Any | None = None,
+) -> dict:
+    """
+    Appel GraphQL depuis une coroutine : ne bloque pas le fil d’événements (`asyncio.to_thread`).
+
+    Si ``ANILIST_QUEUE_NOTIFY`` est activé et qu’aucun créneau n’est libre, envoie un message
+    court ; la requête part ensuite dès qu’un slot se libère (même logique que ``query_anilist``).
+    """
+    notify = os.getenv("ANILIST_QUEUE_NOTIFY", "").strip().lower() in ("1", "true", "yes", "on")
+    if notify and queue_ctx is not None and _anilist_slots_available() <= 0:
+        try:
+            await queue_ctx.send(
+                "⏳ **File AniList** — beaucoup de requêtes en cours. Ta commande démarre dès qu’une place se libère…"
+            )
+        except Exception:
+            pass
+    return await asyncio.to_thread(query_anilist, query, variables)
+
+
+async def maybe_defer_hybrid(ctx: Any, *, ephemeral: bool = False) -> None:
+    """Répond aux commandes hybrides slash pour éviter le timeout ~3s."""
+    itx = getattr(ctx, "interaction", None)
+    if itx and not itx.response.is_done():
+        try:
+            await itx.response.defer(ephemeral=ephemeral, thinking=True)
+        except Exception:
+            pass
+
 
 # ================= RÉCAP QUOTIDIEN : anecdote « ce jour-là » (AniList) =================
 _DAILY_TRIVIA_CACHE: dict[str, str] = {}

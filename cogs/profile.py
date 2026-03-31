@@ -806,7 +806,9 @@ class Profile(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="mycard", description="Affiche ta carte de membre (onglets)")
+    @commands.cooldown(1, 20, commands.BucketType.user)
     async def mycard(self, ctx: commands.Context) -> None:
+        await core.maybe_defer_hybrid(ctx)
         user_id = ctx.author.id
         user_id_str = str(user_id)
 
@@ -850,6 +852,7 @@ class Profile(commands.Cog):
         name="animetop",
         description="Classement des mini-jeux (participations enregistrées dans les stats du bot).",
     )
+    @commands.cooldown(1, 5, commands.BucketType.user)
     @app_commands.describe(
         classement=(
             "Vue au départ (total, aperçu ou un jeu) — modifiable ensuite avec le menu déroulant sous le message."

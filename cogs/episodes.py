@@ -231,6 +231,7 @@ class Episodes(commands.Cog):
         app_commands.Choice(name="🛡️ Serveur — liste /airings", value="server"),
         app_commands.Choice(name="🌐 Global — toutes les sorties", value="global"),
     ])
+    @commands.cooldown(1, 15, commands.BucketType.user)
     async def planning(self, ctx: commands.Context, scope: app_commands.Choice[str] = None) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
@@ -305,6 +306,7 @@ class Episodes(commands.Cog):
         app_commands.Choice(name="🛡️ Serveur — liste /airings", value="server"),
         app_commands.Choice(name="🌐 Global — toutes les sorties", value="global"),
     ])
+    @commands.cooldown(1, 15, commands.BucketType.user)
     async def next_cmd(self, ctx: commands.Context, scope: app_commands.Choice[str] = None) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
@@ -373,6 +375,7 @@ class Episodes(commands.Cog):
         limite="Nombre d’entrées (1-5 recommandés)",
         rafraichir="Ignorer le cache et reinterroger AniList (utile après une panne API).",
     )
+    @commands.cooldown(1, 12, commands.BucketType.user)
     async def monnext(self, ctx: commands.Context, limite: Optional[int] = 1, rafraichir: bool = False) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
@@ -439,6 +442,7 @@ class Episodes(commands.Cog):
     @app_commands.describe(
         rafraichir="Ignorer le cache et reinterroger AniList (utile après une panne API).",
     )
+    @commands.cooldown(1, 12, commands.BucketType.user)
     async def monplanning(self, ctx: commands.Context, rafraichir: bool = False) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)

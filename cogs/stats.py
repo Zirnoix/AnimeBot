@@ -175,7 +175,7 @@ class Stats(commands.Cog):
         else:
             await ctx.send(content=content, embed=embed)
 
-    def _fetch_user_brief(self, name: str) -> dict | None:
+    async def _fetch_user_brief(self, name: str, *, queue_ctx: Optional[commands.Context] = None) -> dict | None:
         q = """
         query ($name: String) {
           User(name: $name) {
@@ -185,7 +185,7 @@ class Stats(commands.Cog):
           }
         }"""
         try:
-            data = core.query_anilist(q, {"name": name})
+            data = await core.query_anilist_async(q, {"name": name}, queue_ctx=queue_ctx)
             u = data["data"]["User"]
             if not u:
                 return None
@@ -202,6 +202,7 @@ class Stats(commands.Cog):
         name="mystats",
         description="Affiche tes stats AniList (ou celles d’un pseudo si fourni)."
     )
+    @commands.cooldown(1, 8, commands.BucketType.user)
     @app_commands.describe(
         pseudo="Pseudo AniList (optionnel)",
         refresh="Forcer une mise à jour immédiate"
@@ -211,7 +212,7 @@ class Stats(commands.Cog):
             await ctx.interaction.response.defer(thinking=True)
 
         if pseudo:
-            brief = self._fetch_user_brief(pseudo.strip())
+            brief = await self._fetch_user_brief(pseudo.strip(), queue_ctx=ctx)
             if not brief:
                 return await self._send(ctx, f"❌ Utilisateur AniList **{pseudo}** introuvable.", ephemeral=True)
             target = brief["name"]
@@ -220,7 +221,7 @@ class Stats(commands.Cog):
             target = core.get_linked_username(ctx.author.id)
             if not target:
                 return await self._send(ctx, "🔗 Tu n’as pas lié ton compte AniList. Utilise **/linkanilist <pseudo>**.", ephemeral=True)
-            brief_user = self._fetch_user_brief(target) or {"name": target, "siteUrl": None, "avatar": None}
+            brief_user = await self._fetch_user_brief(target, queue_ctx=ctx) or {"name": target, "siteUrl": None, "avatar": None}
 
         try:
             if refresh:
@@ -248,6 +249,7 @@ class Stats(commands.Cog):
         name="stats",
         description="Stats AniList d’un pseudo (profil + liste)."
     )
+    @commands.cooldown(1, 6, commands.BucketType.user)
     @app_commands.describe(
         pseudo="Pseudo AniList (respecte la casse si possible)",
         refresh="Forcer une mise à jour live"
@@ -256,7 +258,7 @@ class Stats(commands.Cog):
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
 
-        brief = self._fetch_user_brief(pseudo.strip())
+        brief = await self._fetch_user_brief(pseudo.strip(), queue_ctx=ctx)
         if not brief:
             return await self._send(ctx, f"❌ Utilisateur AniList **{pseudo}** introuvable.", ephemeral=True)
         target = brief["name"]

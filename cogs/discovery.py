@@ -115,12 +115,14 @@ class Discovery(commands.Cog):
 
     # ----------------- helpers -----------------
 
-    async def _fetch_random_media(self) -> Optional[Dict]:
+    async def _fetch_random_media(self, queue_ctx: Optional[commands.Context] = None) -> Optional[Dict]:
         BAD_FORMATS = {"MUSIC"}  # ajoute ici si tu veux en exclure d’autres
         for _ in range(8):  # plusieurs tentatives
             page = random.randint(1, 500)
             sort_key, _ = random.choice(SORTS)
-            data = await asyncio.to_thread(core.query_anilist, QUERY, {"page": page, "sort": [sort_key]})
+            data = await core.query_anilist_async(
+                QUERY, {"page": page, "sort": [sort_key]}, queue_ctx=queue_ctx
+            )
             media_list = data.get("data", {}).get("Page", {}).get("media", []) or []
             if not media_list:
                 continue
@@ -182,11 +184,13 @@ class Discovery(commands.Cog):
     # ----------------- command -----------------
 
     @commands.hybrid_command(name="decouverte", aliases=["discover", "randomanime"])
+    @commands.cooldown(1, 30, commands.BucketType.user)
     async def decouverte(self, ctx: commands.Context):
         """Propose un anime à découvrir (mix Popularité/Tendance/Score) + boutons."""
+        await core.maybe_defer_hybrid(ctx)
         async with ctx.typing():
             try:
-                media = await self._fetch_random_media()
+                media = await self._fetch_random_media(ctx)
                 if not media:
                     return await ctx.send("❌ Impossible de récupérer une recommandation.")
                 embed, title = await self._build_embed(media)

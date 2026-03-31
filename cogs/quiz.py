@@ -20,6 +20,7 @@ from __future__ import annotations
 import random
 import asyncio
 import logging
+import time
 import difflib
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Set, Dict, List, Any
@@ -50,16 +51,29 @@ def _embed_footer_anilist_hint(ctx: commands.Context, genres: Optional[List[str]
 
 # --- petit utilitaire pour éviter "This interaction failed" côté slash ---
 async def _maybe_defer(ctx: commands.Context, ephemeral: bool = False) -> None:
-    try:
-        if hasattr(ctx, "interaction") and ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(ephemeral=ephemeral, thinking=True)
-    except Exception:
-        pass
+    await core.maybe_defer_hybrid(ctx, ephemeral=ephemeral)
 
 # --- paramètres DUEL ---
 ANSWER_TIMEOUT = 25  # secondes par manche
 IGNORED_ANSWERS: Set[str] = {"jsp", "je sais pas", "idk", "skip", "pass", "aucune idée", "dk"}
 _active_duels_per_channel: Dict[int, bool] = {}  # anti-chevauchement par salon
+
+# Cooldown après la fin d’un duel (secondes) — les deux joueurs sont marqués.
+DUEL_COOLDOWN_AFTER_SEC = 10.0
+_last_duel_end_by_user: dict[int, float] = {}
+
+
+def _duel_cooldown_remaining(uid: int) -> float:
+    t = _last_duel_end_by_user.get(uid)
+    if t is None:
+        return 0.0
+    return max(0.0, DUEL_COOLDOWN_AFTER_SEC - (time.monotonic() - t))
+
+
+def _mark_duel_ended(uid_a: int, uid_b: int) -> None:
+    now = time.monotonic()
+    _last_duel_end_by_user[uid_a] = now
+    _last_duel_end_by_user[uid_b] = now
 
 
 def _is_jsp(guess: str) -> bool:
@@ -278,7 +292,12 @@ class Quiz(commands.Cog):
         self.title_matcher = TitleMatcher()
 
     # ---------- AniList live picker ----------
-    async def _fetch_random_anilist_media(self, sort: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_random_anilist_media(
+        self,
+        sort: str,
+        *,
+        queue_ctx: Optional[commands.Context] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Tire un anime aléatoire depuis AniList avec filtres,
         en choisissant une page au hasard pour varier les résultats.
@@ -307,7 +326,7 @@ class Quiz(commands.Cog):
             "minScore": ANI_MIN_SCORE,
             "adult": ANI_IS_ADULT,
         }
-        data = core.query_anilist(query_count, variables) or {}
+        data = await core.query_anilist_async(query_count, variables, queue_ctx=queue_ctx) or {}
         try:
             page_info = data["data"]["Page"]["pageInfo"]
             last_page = int(page_info.get("lastPage") or 1)
@@ -345,7 +364,7 @@ class Quiz(commands.Cog):
         }
         """
         variables.update({"page": rnd_page, "perPage": 25})
-        data2 = core.query_anilist(query_pick, variables) or {}
+        data2 = await core.query_anilist_async(query_pick, variables, queue_ctx=queue_ctx) or {}
         try:
             media_list = data2["data"]["Page"]["media"] or []
         except Exception:
@@ -370,6 +389,7 @@ class Quiz(commands.Cog):
     # ---------- COMMANDES HYBRIDES (slash + préfixe) ----------
 
     @commands.hybrid_command(name="animequiz", description="Devine l’anime à partir de son image.")
+    @commands.cooldown(1, 15, commands.BucketType.user)
     @app_commands.describe(difficulty="Choisis la difficulté")
     @app_commands.choices(
         difficulty=[
@@ -391,7 +411,7 @@ class Quiz(commands.Cog):
 
             sort_option = SORT_BY_DIFF.get((difficulty or "medium").lower(), "SCORE_DESC")
 
-            anime = await self._fetch_random_anilist_media(sort_option)
+            anime = await self._fetch_random_anilist_media(sort_option, queue_ctx=ctx)
             if not anime:
                 await ctx.send(core.anilist_error_user_message())
                 return
@@ -467,8 +487,14 @@ class Quiz(commands.Cog):
         finally:
             minigame_lock.end(uid)
 
-    @commands.hybrid_command(name="animequizmulti", description="Quiz multi (1 à 20) — easy/medium/hard aléatoires.")
-    async def animequizmulti(self, ctx: commands.Context, nb_questions: int = 5) -> None:
+    @commands.hybrid_command(name="animequizmulti", description="Quiz multi (5 à 20 questions) — easy/medium/hard aléatoires.")
+    @commands.cooldown(1, 30, commands.BucketType.user)
+    @app_commands.describe(nb_questions="Nombre de questions (5 à 20)")
+    async def animequizmulti(
+        self,
+        ctx: commands.Context,
+        nb_questions: app_commands.Range[int, 5, 20] = 5,
+    ) -> None:
         uid = ctx.author.id
         await _maybe_defer(ctx)
         if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
@@ -477,8 +503,8 @@ class Quiz(commands.Cog):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            if not 1 <= nb_questions <= 20:
-                await ctx.send("❌ Choisis un nombre entre 1 et 20.")
+            if not 5 <= nb_questions <= 20:
+                await ctx.send("❌ Choisis un nombre entre **5** et **20**.")
                 return
 
             await ctx.send(f"🎮 Lancement de **{nb_questions} questions**…")
@@ -494,7 +520,7 @@ class Quiz(commands.Cog):
                     difficulty = random.choice(diffs)
                     sort_option = SORT_BY_DIFF.get(difficulty, "SCORE_DESC")
 
-                    anime = await self._fetch_random_anilist_media(sort_option)
+                    anime = await self._fetch_random_anilist_media(sort_option, queue_ctx=ctx)
                     if not anime:
                         await asyncio.sleep(0.6)
                         continue
@@ -635,6 +661,7 @@ class Quiz(commands.Cog):
         """Invitation + duel : 1–10 manches, difficulté easy/medium/hard,
         premier bon = point, 'jsp' = pass ; si les 2 disent 'jsp' => skip immédiat avec reveal.
         """
+        duel_started = False
         try:
             await _maybe_defer(ctx)
             if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
@@ -647,6 +674,15 @@ class Quiz(commands.Cog):
             if opponent.id == ctx.author.id:
                 await ctx.send("🙃 Tu ne peux pas te défier toi-même.")
                 return
+
+            for uid in (ctx.author.id, opponent.id):
+                left = _duel_cooldown_remaining(uid)
+                if left > 0:
+                    await ctx.send(
+                        f"⏳ Attends encore **{int(left) + 1}s** après la fin du dernier duel "
+                        f"(toi ou ton adversaire)."
+                    )
+                    return
     
             manches = max(1, min(int(manches), 10))
             diff = (difficulte or "medium").lower()
@@ -676,6 +712,8 @@ class Quiz(commands.Cog):
                 if invite_view.accepted is None:
                     await ctx.send("⌛ Aucune réponse : invitation expirée.")
                 return
+
+            duel_started = True
     
             # OK duel
             players = (ctx.author, opponent)
@@ -689,7 +727,7 @@ class Quiz(commands.Cog):
             )
     
             for i in range(1, manches + 1):
-                anime = await self._fetch_random_anilist_media(sort_option)
+                anime = await self._fetch_random_anilist_media(sort_option, queue_ctx=ctx)
                 if not anime:
                     await ctx.send(core.anilist_error_user_message())
                     continue
@@ -823,9 +861,12 @@ class Quiz(commands.Cog):
             await ctx.send("❌ Une erreur s'est produite pendant le duel.")
         finally:
             _active_duels_per_channel.pop(ctx.channel.id, None)
+            if duel_started:
+                _mark_duel_ended(ctx.author.id, opponent.id)
 
 
     @commands.hybrid_command(name="quiztop", description="Top quiz du mois en cours + vainqueur du mois dernier.")
+    @commands.cooldown(1, 5, commands.BucketType.user)
     async def quiztop(self, ctx: commands.Context) -> None:
         try:
             await _maybe_defer(ctx, ephemeral=False)
@@ -933,6 +974,7 @@ class Quiz(commands.Cog):
         name="quizlevels",
         description="Liste des paliers : menu pour choisir titres quiz (score du mois) ou rangs XP.",
     )
+    @commands.cooldown(1, 5, commands.BucketType.user)
     async def quizlevels(self, ctx: commands.Context) -> None:
         try:
             await _maybe_defer(ctx, ephemeral=False)
@@ -974,6 +1016,7 @@ class Quiz(commands.Cog):
             await ctx.send("❌ Une erreur s'est produite.")
 
     @commands.hybrid_command(name="myrank", description="Affiche ton rang, ton XP et ton titre.")
+    @commands.cooldown(1, 5, commands.BucketType.user)
     async def myrank(self, ctx: commands.Context) -> None:
         try:
             await _maybe_defer(ctx, ephemeral=False)

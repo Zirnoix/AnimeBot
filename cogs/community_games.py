@@ -939,7 +939,7 @@ class CommunityGames(commands.Cog):
           }
         }
         """
-        data = core.query_anilist(query, {"page": page})
+        data = await core.query_anilist_async(query, {"page": page})
         if not data or "data" not in data:
             return None
         chars = data["data"]["Page"]["characters"]
@@ -1011,7 +1011,7 @@ class CommunityGames(commands.Cog):
               }
             }
             """
-            data = core.query_anilist(query, {"page": page})
+            data = await core.query_anilist_async(query, {"page": page})
             try:
                 anime = data["data"]["Page"]["media"][0]
                 title = (anime.get("title") or {}).get("romaji") or "?"
@@ -1054,7 +1054,7 @@ class CommunityGames(commands.Cog):
                   }
                 }
                 """
-                data = core.query_anilist(query, {"page": page})
+                data = await core.query_anilist_async(query, {"page": page})
                 try:
                     cand = data["data"]["Page"]["media"][0]
                     ep = cand.get("episodes")
@@ -1105,7 +1105,7 @@ class CommunityGames(commands.Cog):
                   }
                 }
                 """
-                data = core.query_anilist(query, {"page": page})
+                data = await core.query_anilist_async(query, {"page": page})
                 try:
                     cand = data["data"]["Page"]["media"][0]
                     if cand.get("genres"):
@@ -1170,7 +1170,7 @@ class CommunityGames(commands.Cog):
               }
             }
             """
-            data = core.query_anilist(query, {"page": page})
+            data = await core.query_anilist_async(query, {"page": page})
             try:
                 medias = data["data"]["Page"]["media"]
             except Exception:
@@ -1220,7 +1220,7 @@ class CommunityGames(commands.Cog):
               }
             }
             """
-            data = core.query_anilist(query, {"page": page})
+            data = await core.query_anilist_async(query, {"page": page})
             try:
                 medias = data["data"]["Page"]["media"]
             except Exception:
@@ -1258,7 +1258,7 @@ class CommunityGames(commands.Cog):
               }
             }
             """
-            data = core.query_anilist(query, {"page": page})
+            data = await core.query_anilist_async(query, {"page": page})
             if not data or "data" not in data:
                 return None, None
             chars = data["data"]["Page"]["characters"]
@@ -2463,6 +2463,7 @@ class CommunityGames(commands.Cog):
     # ---------- Chain quiz ----------
 
     @commands.hybrid_command(name="chainquiz", description="Enchaîne des quiz : difficulté qui monte à chaque bonne réponse.")
+    @commands.cooldown(1, 35, commands.BucketType.user)
     async def chainquiz(self, ctx: commands.Context) -> None:
         if not await _require_slash(ctx, "chainquiz"):
             return
@@ -2490,7 +2491,7 @@ class CommunityGames(commands.Cog):
             while True:
                 diff = SORT_CHAIN[min(streak, len(SORT_CHAIN) - 1)]
                 sort_key = SORT_TO_ANILIST[diff]
-                anime = await qz._fetch_random_anilist_media(sort_key)  # type: ignore[attr-defined]
+                anime = await qz._fetch_random_anilist_media(sort_key, queue_ctx=ctx)  # type: ignore[attr-defined]
                 if not anime:
                     await ctx.send(core.anilist_error_user_message())
                     break
@@ -2550,6 +2551,7 @@ class CommunityGames(commands.Cog):
             app_commands.Choice(name="Difficile (+42 XP)", value="hard"),
         ]
     )
+    @commands.cooldown(1, 20, commands.BucketType.user)
     async def guesswho(self, ctx: commands.Context, difficulte: str = "medium") -> None:
         if not await _require_slash(ctx, "guesswho"):
             return
@@ -2585,7 +2587,7 @@ class CommunityGames(commands.Cog):
                   }
                 }
                 """
-                data = core.query_anilist(query, {"page": page})
+                data = await core.query_anilist_async(query, {"page": page}, queue_ctx=ctx)
                 if not data or "data" not in data:
                     await ctx.send(core.anilist_error_user_message())
                     return

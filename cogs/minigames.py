@@ -23,6 +23,66 @@ from modules import minigame_lock
 
 LOG = logging.getLogger(__name__)
 
+
+class _FakeAuthor:
+    __slots__ = ("id",)
+
+    def __init__(self, uid: int) -> None:
+        self.id = uid
+
+
+class _FakeMessage:
+    __slots__ = ("author",)
+
+    def __init__(self, uid: int) -> None:
+        self.author = _FakeAuthor(uid)
+
+
+def _hybrid_cmd_cooldown_retry(command: commands.Command | None, user_id: int) -> float:
+    """Retry-after (s) pour un hybrid command avec BucketType.user, ou 0 si dispo."""
+    if command is None:
+        return 0.0
+    inner = getattr(command, "_command", command)
+    if not getattr(inner, "_buckets", None):
+        return 0.0
+    now = time.time()
+    fake = _FakeMessage(user_id)
+    bucket = inner._buckets.get_bucket(fake, current=now)
+    if bucket is None:
+        return 0.0
+    return max(0.0, float(bucket.get_retry_after(current=now)))
+
+
+def _hybrid_cmd_cooldown_touch(command: commands.Command | None, user_id: int) -> None:
+    """Consomme un créneau cooldown (comme au lancement slash d’une commande)."""
+    if command is None:
+        return
+    inner = getattr(command, "_command", command)
+    if not getattr(inner, "_buckets", None):
+        return
+    now = time.time()
+    fake = _FakeMessage(user_id)
+    bucket = inner._buckets.get_bucket(fake, current=now)
+    if bucket is None:
+        return
+    bucket.update_rate_limit(now)
+
+
+# Map menu minijeux → nom de commande bot (get_command)
+_MENU_MINI_CMD: dict[str, str] = {
+    "higherlower": "higherlower",
+    "guess_year": "guessyear",
+    "guess_episodes": "guessepisodes",
+    "guess_genre": "guessgenre",
+    "guess_character": "guesscharacter",
+    "guessop": "guessop",
+    "animequiz": "animequiz",
+    "animequizmulti": "animequizmulti",
+    "chainquiz": "chainquiz",
+    "guesswho": "guesswho",
+}
+
+
 # --- Anti-spam /guess genre (réponses « faciles » trop souvent gagnantes) ---
 _SPAM_GENRE_NAMES = frozenset({
     "action", "adventure", "comedy", "drama", "fantasy", "romance",
@@ -304,6 +364,21 @@ class MiniGames(commands.Cog):
         if not await anilist_gate.ensure_anilist_for_interaction(self.bot, interaction):
             return
         await interaction.response.defer(thinking=True)
+        uid = interaction.user.id
+        cmd_name = _MENU_MINI_CMD.get(key)
+        if cmd_name:
+            sub = self.bot.get_command(cmd_name)
+            ra = _hybrid_cmd_cooldown_retry(sub, uid)
+            if ra > 0:
+                try:
+                    await interaction.followup.send(
+                        f"⏳ Cooldown du mini-jeu : réessaie dans **{int(ra) + 1}s**.",
+                        ephemeral=True,
+                    )
+                except Exception:
+                    pass
+                return
+            _hybrid_cmd_cooldown_touch(sub, uid)
         # Retire le message « choisis un mini-jeu » pour ne pas encombrer le salon
         try:
             msg = interaction.message
@@ -373,6 +448,7 @@ class MiniGames(commands.Cog):
     # Guess (year, episodes, genre, character) — /guess* + /minijeux
     # --------------------------------------
     @commands.hybrid_command(name="higherlower", description="Quel anime est le plus populaire ?")
+    @commands.cooldown(1, 18, commands.BucketType.user)
     async def higher_lower(self, ctx: commands.Context):
         uid = ctx.author.id
         if ctx.interaction and not ctx.interaction.response.is_done():
@@ -397,7 +473,7 @@ class MiniGames(commands.Cog):
               }
             }
             '''
-            data = core.query_anilist(query, {"page": page})
+            data = await core.query_anilist_async(query, {"page": page}, queue_ctx=ctx)
             if not data or not data.get("data"):
                 await ctx.send(core.anilist_error_user_message())
                 return
@@ -476,7 +552,7 @@ class MiniGames(commands.Cog):
                       }
                     }
                     '''
-                    data = core.query_anilist(query, {"page": page})
+                    data = await core.query_anilist_async(query, {"page": page}, queue_ctx=ctx)
                     try:
                         candidate = data["data"]["Page"]["media"][0]
                         if candidate.get("startDate", {}).get("year"):
@@ -579,7 +655,7 @@ class MiniGames(commands.Cog):
                       }
                     }
                     '''
-                    data = core.query_anilist(query, {"page": page})
+                    data = await core.query_anilist_async(query, {"page": page}, queue_ctx=ctx)
                     try:
                         candidate = data["data"]["Page"]["media"][0]
                         if candidate.get("episodes") and isinstance(candidate.get("episodes"), int):
@@ -687,7 +763,7 @@ class MiniGames(commands.Cog):
                       }
                     }
                     '''
-                    data = core.query_anilist(query, {"page": page})
+                    data = await core.query_anilist_async(query, {"page": page}, queue_ctx=ctx)
                     try:
                         candidate = data["data"]["Page"]["media"][0]
                         if candidate.get("genres"):
@@ -887,7 +963,7 @@ class MiniGames(commands.Cog):
                   }
                 }
                 '''
-                data = core.query_anilist(query, {"page": page})
+                data = await core.query_anilist_async(query, {"page": page}, queue_ctx=ctx)
                 if not data or "data" not in data:
                     await ctx.send(core.anilist_error_user_message())
                     return
@@ -1003,6 +1079,7 @@ class MiniGames(commands.Cog):
         name="guessyear",
         description="Devine l’année de diffusion (AniList lié → tirage depuis ta liste).",
     )
+    @commands.cooldown(1, 18, commands.BucketType.user)
     async def guessyear(self, ctx: commands.Context) -> None:
         await self._guess_year(ctx)
 
@@ -1010,6 +1087,7 @@ class MiniGames(commands.Cog):
         name="guessepisodes",
         description="Devine le nombre d’épisodes (AniList lié → depuis ta liste si possible).",
     )
+    @commands.cooldown(1, 18, commands.BucketType.user)
     async def guessepisodes(self, ctx: commands.Context) -> None:
         await self._guess_episodes(ctx)
 
@@ -1017,6 +1095,7 @@ class MiniGames(commands.Cog):
         name="guessgenre",
         description="Trouve un des genres de l’anime (compte AniList lié → tirage depuis ta liste).",
     )
+    @commands.cooldown(1, 18, commands.BucketType.user)
     async def guessgenre(self, ctx: commands.Context) -> None:
         await self._guess_genre(ctx)
 
@@ -1024,6 +1103,7 @@ class MiniGames(commands.Cog):
         name="guesscharacter",
         description="Choisis le bon personnage parmi 4 propositions (lié AniList → depuis ta liste).",
     )
+    @commands.cooldown(1, 18, commands.BucketType.user)
     async def guesscharacter(self, ctx: commands.Context) -> None:
         await self._guess_character(ctx)
 
@@ -1031,6 +1111,7 @@ class MiniGames(commands.Cog):
         name="minijeux",
         description="Menu des mini-jeux : choisis dans la liste pour lancer une partie.",
     )
+    @commands.cooldown(1, 5, commands.BucketType.user)
     async def minijeux(self, ctx: commands.Context) -> None:
         em = discord.Embed(
             title="🎮 Mini-jeux",

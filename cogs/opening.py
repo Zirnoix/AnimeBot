@@ -6,6 +6,7 @@ import random
 import asyncio
 import re
 import tempfile
+from dataclasses import dataclass
 from typing import List
 import json
 import subprocess
@@ -22,6 +23,22 @@ from modules import animethemes        # provider AnimeThemes + filtres AniList
 from modules import guessop_catalog as gopc
 
 LOG = logging.getLogger(__name__)
+
+# Cooldown après la fin d’une partie Guess OP (lanceur uniquement)
+GUESSOP_COOLDOWN_AFTER_SEC = 15.0
+_last_guessop_end_by_user: dict[int, float] = {}
+
+
+def _guessop_cooldown_remaining(uid: int) -> float:
+    t = _last_guessop_end_by_user.get(uid)
+    if t is None:
+        return 0.0
+    return max(0.0, GUESSOP_COOLDOWN_AFTER_SEC - (time.monotonic() - t))
+
+
+def _mark_guessop_end(uid: int) -> None:
+    _last_guessop_end_by_user[uid] = time.monotonic()
+
 
 # ==== Configuration ====
 USE_ANIMETHEMES = True          # Active l’utilisation d’AnimeThemes.moe
@@ -56,6 +73,9 @@ FFPROBE_BIN = os.getenv("FFPROBE_BIN", "ffprobe")
 # Catalogue SQLite : priorité quand assez d’entrées (0–1, plus = plus de catalogue)
 CATALOG_PICK_BIAS = float(os.getenv("GUESSOP_CATALOG_BIAS", "0.88"))
 CATALOG_MIN_FOR_BIAS = int(os.getenv("GUESSOP_CATALOG_MIN", "5"))
+
+# Guess OP chaîne : plafond de sécurité (manches avec au moins un gagnant)
+MAX_GUESSOP_CHAIN_ROUNDS = int(os.getenv("GUESSOP_CHAIN_MAX_ROUNDS", "25"))
 
 # ================== UTILS ==================
 def _get_cached_titles(key: str) -> list[str] | None:
@@ -142,19 +162,19 @@ def _build_question_embed(
     remaining_sec: int,
     footer: str | None = None,
     responders: List[str] | None = None,
+    title: str = "🎵 Devine l’opening !",
 ) -> discord.Embed:
+    """`responders` est ignoré (plus d’affichage des noms dans le salon pour limiter le spam)."""
     em = discord.Embed(
-        title="🎵 Devine l’opening !",
-        description=f"{_bar(remaining_sec, ANSWER_TIMEOUT)}  **{remaining_sec}s** restantes.\nClique sur **1–4** pour répondre.",
+        title=title,
+        description=(
+            f"{_bar(remaining_sec, ANSWER_TIMEOUT)}  **{remaining_sec}s** restantes.\n"
+            "Clique sur **1–4** pour répondre *(même salon vocal que le bot)*."
+        ),
         color=discord.Color.purple()
     )
     for i, title in enumerate(choices, 1):
         em.add_field(name=f"{i}️⃣", value=title, inline=False)
-    if responders:
-        names = ", ".join(responders[:30])
-        if len(responders) > 30:
-            names += f" … (+{len(responders) - 30})"
-        em.add_field(name="Déjà répondu", value=names, inline=False)
     if footer:
         em.set_footer(text=footer)
     return em
@@ -170,6 +190,7 @@ class GuessOPView(discord.ui.View):
         correct_index,
         timeout_sec=ANSWER_TIMEOUT,
         source_footer: str = "",
+        question_title: str | None = None,
     ):
         super().__init__(timeout=timeout_sec)
         self.bot = bot
@@ -178,8 +199,8 @@ class GuessOPView(discord.ui.View):
         self.choices = choices
         self.correct_index = correct_index
         self.source_footer = source_footer
+        self._question_title = question_title or "🎵 Devine l’opening !"
         self.already_answered: set[int] = set()
-        self.responders: list[str] = []
         self._remaining = timeout_sec
         self._embed_lock = asyncio.Lock()
         self.winners_order: list[discord.Member] = []
@@ -189,21 +210,6 @@ class GuessOPView(discord.ui.View):
 
         for i in range(4):
             self.add_item(GuessOPButton(i))
-
-    async def _update_responders_embed(self) -> None:
-        async with self._embed_lock:
-            if not self.message:
-                return
-            try:
-                em = _build_question_embed(
-                    self.choices,
-                    self._remaining,
-                    self.source_footer,
-                    self.responders,
-                )
-                await self.message.edit(embed=em, view=self)
-            except Exception:
-                pass
 
     async def on_timeout(self):
         for item in self.children:
@@ -236,23 +242,40 @@ class GuessOPButton(discord.ui.Button):
             if interaction.user.id in view.already_answered:
                 return await interaction.response.send_message("✋ Une seule réponse par joueur.", ephemeral=True)
             view.already_answered.add(interaction.user.id)
-            view.responders.append(interaction.user.display_name)
 
             if self.index == view.correct_index:
                 if len(view.winners_order) < 3:
                     view.winners_order.append(interaction.user)
                     await interaction.response.send_message("✅ Bonne réponse !", ephemeral=True)
-                    try:
-                        await view.ctx.send(f"✅ {interaction.user.mention} a trouvé !")
-                    except Exception:
-                        pass
                 else:
                     view.others_correct.append(interaction.user)
                     await interaction.response.send_message("✅ Bonne réponse (hors podium) !", ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Mauvaise réponse.", ephemeral=True)
 
-        asyncio.create_task(view._update_responders_embed())
+
+@dataclass
+class GuessOPRoundOutcome:
+    correct_anime: str
+    theme_label: str | None
+    source_footer: str
+    view: GuessOPView
+    vc: discord.VoiceClient
+
+
+def _guessop_schedule_question_delete(msg: discord.Message | None, delay: float = 30.0) -> None:
+    if not msg:
+        return
+
+    async def _go() -> None:
+        try:
+            await asyncio.sleep(delay)
+            await msg.delete()
+        except Exception:
+            pass
+
+    asyncio.create_task(_go())
+
 
 # ================== COG ==================
 class Openings(commands.Cog):
@@ -327,13 +350,373 @@ class Openings(commands.Cog):
         await self.bot.wait_until_ready()
         await asyncio.sleep(180)
 
+    async def _guessop_award_and_embed(
+        self,
+        ctx: commands.Context,
+        send,
+        outcome: GuessOPRoundOutcome,
+        *,
+        round_manche: int | None = None,
+    ) -> None:
+        view = outcome.view
+        correct_anime = outcome.correct_anime
+        theme_label = outcome.theme_label
+        source_footer = outcome.source_footer
+        podium_xp = [15, 10, 7]
+        others_xp = 3
+        award_lines = []
+        for rank, user in enumerate(view.winners_order, start=1):
+            xp = podium_xp[rank - 1]
+            award_lines.append(f"**#{rank}** {user.mention} — +{xp} XP")
+            try:
+                await core.add_xp(self.bot, ctx.channel, user.id, xp)
+            except Exception:
+                pass
+            try:
+                core.add_mini_score(user.id, "guessop", 1)
+            except Exception:
+                pass
+        for user in view.others_correct:
+            award_lines.append(f"• {user.mention} — +{others_xp} XP")
+            try:
+                await core.add_xp(self.bot, ctx.channel, user.id, others_xp)
+            except Exception:
+                pass
+            try:
+                core.add_mini_score(user.id, "guessop", 1)
+            except Exception:
+                pass
+        fast_line = f"⚡ Plus rapide : {view.winners_order[0].mention}" if view.winners_order else None
+        title_res = (
+            f"🏁 Résultats — Guess OP · Manche {round_manche}"
+            if round_manche
+            else "🏁 Résultats — Guess OP"
+        )
+        res = discord.Embed(
+            title=title_res,
+            description=f"✅ **Réponse :** {correct_anime}",
+            color=discord.Color.gold(),
+        )
+        if theme_label:
+            res.add_field(name="Opening", value=theme_label, inline=False)
+        if fast_line:
+            res.add_field(name="Vitesse", value=fast_line, inline=False)
+        if award_lines:
+            res.add_field(name="Récompenses", value="\n".join(award_lines), inline=False)
+        if source_footer:
+            res.set_footer(text=source_footer)
+        await send(embed=res)
+        _guessop_schedule_question_delete(view.message)
+
+    async def _run_one_guessop_round(
+        self,
+        ctx: commands.Context,
+        voice_channel: discord.VoiceChannel,
+        send,
+        *,
+        linked_anilist: str | None,
+        user_romaji_list: list[str],
+        user_titles_lower: set[str],
+        disconnect_after: bool,
+        vc_existing: discord.VoiceClient | None,
+        chain_round: int | None = None,
+    ) -> GuessOPRoundOutcome | None:
+        correct_anime = None
+        theme_label = None
+        media_source = None
+        source_footer = ""
+
+        n_cat = gopc.count()
+        if linked_anilist and user_titles_lower and n_cat >= CATALOG_MIN_FOR_BIAS:
+            picked_list = gopc.pick_random_title_in_set(user_titles_lower)
+            if picked_list:
+                oid, correct_anime, theme_label, media_source = picked_list
+                source_footer = f"Catalogue Guess OP · depuis ta liste AniList · {n_cat} openings"
+                gopc.record_used(oid)
+
+        if not media_source and n_cat >= CATALOG_MIN_FOR_BIAS and random.random() < CATALOG_PICK_BIAS:
+            picked = gopc.pick_random()
+            if picked:
+                oid, correct_anime, theme_label, media_source = picked
+                source_footer = f"Catalogue Guess OP · {n_cat} openings"
+                gopc.record_used(oid)
+
+        if not media_source:
+            got = None
+            if USE_ANIMETHEMES:
+                try:
+                    got = await animethemes.random_opening_filtered(
+                        min_year=MIN_YEAR,
+                        min_score_10=MIN_SCORE_10,
+                        banned_genres=BANNED_GENRES,
+                        banned_formats=BANNED_FORMATS,
+                        max_attempts=12,
+                    )
+                except Exception:
+                    got = None
+
+                if got:
+                    title, theme_label, video_url = got
+                    correct_anime = title
+                    media_source = video_url
+                    source_footer = "Source : AnimeThemes.moe → ajout catalogue"
+                    if video_url.startswith(("http://", "https://")):
+                        _, _ = gopc.add_opening(
+                            correct_anime, theme_label or "OP", video_url, "animethemes_live"
+                        )
+
+        if not media_source:
+            if not os.path.exists(LOCAL_AUDIO_FOLDER):
+                await send("❌ Aucun opening trouvé (AnimeThemes vide + pas de dossier local).")
+                return None
+            files = [f for f in os.listdir(LOCAL_AUDIO_FOLDER) if f.lower().endswith(".mp3")]
+            if not files:
+                await send("❌ Aucun opening trouvé dans le dossier local.")
+                return None
+            pick = random.choice(files)
+            media_source = os.path.join(LOCAL_AUDIO_FOLDER, pick)
+            correct_anime = _clean_title_from_filename(pick)
+            source_footer = "Source : fichiers locaux"
+
+        async def _prepare_local_file():
+            local_path = media_source
+            cleanup = False
+            if isinstance(media_source, str) and media_source.startswith(("http://", "https://")):
+                local_path = await _fetch_to_temp(media_source)
+                cleanup = True
+            return local_path, cleanup
+
+        prepare_task = asyncio.create_task(_prepare_local_file())
+
+        cache_key = "popular_romaji_60"
+        pool = _get_cached_titles(cache_key)
+        if pool is None:
+            if core._anilist_slots_available() <= 0:
+                try:
+                    await send("⏳ **File AniList** — récupération des propositions…")
+                except Exception:
+                    pass
+            query = '''
+            query {
+              Page(perPage: 60) {
+                media(type: ANIME, sort: POPULARITY_DESC) {
+                  title { romaji }
+                }
+              }
+            }
+            '''
+            try:
+                data = await core.query_anilist_async(query, queue_ctx=ctx)
+                pool = [m["title"]["romaji"] for m in data["data"]["Page"]["media"]]
+                _set_cached_titles(cache_key, pool)
+            except Exception:
+                pool = []
+
+        choices = [correct_anime]
+        if user_romaji_list:
+            list_alts = [t for t in user_romaji_list if t.lower() != (correct_anime or "").lower()]
+            random.shuffle(list_alts)
+            for alt in list_alts:
+                if len(choices) >= 4:
+                    break
+                alt_clean = _clean_title_from_filename(alt)
+                if alt_clean and alt_clean.lower() != (correct_anime or "").lower() and alt_clean not in choices:
+                    choices.append(alt_clean)
+        tries = 0
+        while len(choices) < 4 and pool and tries < 200:
+            alt = _clean_title_from_filename(random.choice(pool))
+            tries += 1
+            if alt and alt.lower() != (correct_anime or "").lower() and alt not in choices:
+                choices.append(alt)
+        while len(choices) < 4:
+            choices.append(f"Option {len(choices) + 1}")
+        random.shuffle(choices)
+        correct_index = choices.index(correct_anime)
+
+        q_title = (
+            f"🎵 Devine l'opening ! · Manche {chain_round}"
+            if chain_round is not None
+            else "🎵 Devine l'opening !"
+        )
+        em = _build_question_embed(choices, ANSWER_TIMEOUT, source_footer, [], title=q_title)
+        view = GuessOPView(
+            self.bot,
+            ctx,
+            voice_channel,
+            choices,
+            correct_index,
+            timeout_sec=ANSWER_TIMEOUT,
+            source_footer=source_footer,
+            question_title=q_title,
+        )
+        sent = await send(embed=em, view=view)
+        if isinstance(sent, discord.Message):
+            view.message = sent
+
+        vc: discord.VoiceClient | None = vc_existing
+        if vc is None or not vc.is_connected():
+            try:
+                vc = await voice.ensure_connected(voice_channel)
+            except Exception as e:
+                _mark_guessop_end(ctx.author.id)
+                await send(f"❌ Impossible de rejoindre le vocal : {e}")
+                return None
+
+        async def _tick_embed():
+            await asyncio.sleep(1.5)
+            remaining = ANSWER_TIMEOUT
+            while remaining > 0 and not view.is_finished() and view.message:
+                await asyncio.sleep(COUNTDOWN_STEP)
+                remaining = max(0, remaining - COUNTDOWN_STEP)
+                view._remaining = remaining
+                try:
+                    async with view._embed_lock:
+                        await view.message.edit(
+                            embed=_build_question_embed(
+                                choices, remaining, source_footer, None, title=view._question_title
+                            ),
+                            view=view,
+                        )
+                except Exception:
+                    break
+
+        countdown_task = asyncio.create_task(_tick_embed())
+
+        async def _end_round_after_timeout():
+            await asyncio.sleep(ANSWER_TIMEOUT)
+            try:
+                for item in view.children:
+                    if isinstance(item, discord.ui.Button):
+                        item.disabled = True
+                if view.message:
+                    await view.message.edit(view=view)
+            except Exception:
+                pass
+            view.stop()
+
+        end_timer_task = asyncio.create_task(_end_round_after_timeout())
+
+        local_path = None
+        cleanup = False
+
+        try:
+            local_path, cleanup = await prepare_task
+            if not vc.is_connected():
+                vc = await voice.ensure_connected(voice_channel)
+
+            if vc.is_playing():
+                try:
+                    vc.stop()
+                except Exception:
+                    pass
+
+            media_duration = _probe_duration_sec(local_path)
+            seek_start = _safe_seek(media_duration, DURATION_SEC, RANDOM_SEEK_MAX) if ENABLE_RANDOM_SEEK else 0.0
+
+            source = voice.make_source(
+                local_path,
+                duration_sec=float(DURATION_SEC),
+                seek_start=float(seek_start),
+                fade_sec=float(FADE_SEC),
+                normalize=bool(NORMALIZE_AUDIO),
+            )
+
+            done_event = asyncio.Event()
+
+            def _after_play(err: Exception | None):
+                try:
+                    done_event.set()
+                except Exception:
+                    pass
+
+            vc.play(source, after=_after_play)
+
+            started = False
+            for _ in range(int(START_GUARD_TIMEOUT / 0.1)):
+                await asyncio.sleep(0.1)
+                if vc.is_playing():
+                    started = True
+                    break
+
+            if not started and ENABLE_RANDOM_SEEK and seek_start > 0.0:
+                try:
+                    vc.stop()
+                except Exception:
+                    pass
+                source2 = voice.make_source(
+                    local_path,
+                    duration_sec=float(DURATION_SEC),
+                    seek_start=0.0,
+                    fade_sec=float(FADE_SEC),
+                    normalize=bool(NORMALIZE_AUDIO),
+                )
+                done_event = asyncio.Event()
+
+                def _after_play2(err: Exception | None):
+                    try:
+                        done_event.set()
+                    except Exception:
+                        pass
+
+                vc.play(source2, after=_after_play2)
+
+                for _ in range(int(START_GUARD_TIMEOUT / 0.1)):
+                    await asyncio.sleep(0.1)
+                    if vc.is_playing():
+                        started = True
+                        break
+
+            try:
+                await asyncio.wait_for(done_event.wait(), timeout=float(DURATION_SEC) + PLAY_TIMEOUT_MARGIN)
+            except asyncio.TimeoutError:
+                try:
+                    vc.stop()
+                except Exception:
+                    pass
+
+        except Exception as e:
+            try:
+                await send(f"⚠️ Audio non lancé : {e}")
+            except Exception:
+                pass
+        finally:
+            if cleanup and local_path:
+                try:
+                    os.remove(local_path)
+                except Exception:
+                    pass
+
+        try:
+            await view.wait()
+        except Exception:
+            pass
+
+        if not end_timer_task.done():
+            end_timer_task.cancel()
+        if not countdown_task.done():
+            countdown_task.cancel()
+
+        if disconnect_after:
+            try:
+                if vc and vc.is_connected():
+                    await vc.disconnect(force=False)
+            except Exception:
+                pass
+
+        assert correct_anime is not None
+        return GuessOPRoundOutcome(
+            correct_anime=correct_anime,
+            theme_label=theme_label,
+            source_footer=source_footer,
+            view=view,
+            vc=vc,
+        )
+
     @commands.hybrid_command(
         name="guessop",
         description="Devine l'opening (20s audio + 4 choix ; AniList lié → priorité + leurres depuis ta liste).",
     )
-    @commands.cooldown(1, 15, commands.BucketType.user)  # anti-spam: 1 commande / 15s par user
     async def guess_op(self, ctx: commands.Context) -> None:
-        # Anti-timeout pour slash
         if getattr(ctx, "interaction", None):
             try:
                 await ctx.interaction.response.defer()
@@ -345,10 +728,15 @@ class Openings(commands.Cog):
 
         send = (ctx.interaction.followup.send if getattr(ctx, "interaction", None) else ctx.send)
 
-        # Vérif vocal
         if not ctx.author.voice or not ctx.author.voice.channel:
             return await send("🔇 Tu dois être dans un **salon vocal** pour jouer.")
         voice_channel: discord.VoiceChannel = ctx.author.voice.channel
+
+        left_go = _guessop_cooldown_remaining(ctx.author.id)
+        if left_go > 0:
+            return await send(
+                f"⏳ Attends **{int(left_go) + 1}s** après la fin du dernier Guess OP avant de relancer."
+            )
 
         linked_anilist = core.get_linked_username(ctx.author.id)
         user_romaji_list: list[str] = []
@@ -362,338 +750,120 @@ class Openings(commands.Cog):
                     user_titles_lower.add(r.lower())
 
         async with self._guild_lock(ctx.guild.id):
-            correct_anime = None
-            theme_label = None
-            media_source = None
-            source_footer = ""
-
-            # --------- 1) Catalogue : si AniList lié, tenter un opening dont le titre est dans ta liste ---------
-            n_cat = gopc.count()
-            if linked_anilist and user_titles_lower and n_cat >= CATALOG_MIN_FOR_BIAS:
-                picked_list = gopc.pick_random_title_in_set(user_titles_lower)
-                if picked_list:
-                    oid, correct_anime, theme_label, media_source = picked_list
-                    source_footer = f"Catalogue Guess OP · depuis ta liste AniList · {n_cat} openings"
-                    gopc.record_used(oid)
-
-            # --------- 1b) Catalogue global (biais habituel) ---------
-            if not media_source and n_cat >= CATALOG_MIN_FOR_BIAS and random.random() < CATALOG_PICK_BIAS:
-                picked = gopc.pick_random()
-                if picked:
-                    oid, correct_anime, theme_label, media_source = picked
-                    source_footer = f"Catalogue Guess OP · {n_cat} openings"
-                    gopc.record_used(oid)
-
-            # --------- 2) Sinon AnimeThemes (+ ajout au catalogue) ---------
-            if not media_source:
-                got = None
-                if USE_ANIMETHEMES:
-                    try:
-                        got = await animethemes.random_opening_filtered(
-                            min_year=MIN_YEAR,
-                            min_score_10=MIN_SCORE_10,
-                            banned_genres=BANNED_GENRES,
-                            banned_formats=BANNED_FORMATS,
-                            max_attempts=12,
-                        )
-                    except Exception:
-                        got = None
-
-                    if got:
-                        title, theme_label, video_url = got
-                        correct_anime = title
-                        media_source = video_url
-                        source_footer = "Source : AnimeThemes.moe → ajout catalogue"
-                        if video_url.startswith(("http://", "https://")):
-                            _, _ = gopc.add_opening(
-                                correct_anime, theme_label or "OP", video_url, "animethemes_live"
-                            )
-
-            # --------- 3) Fallback local ---------
-            if not media_source:
-                if not os.path.exists(LOCAL_AUDIO_FOLDER):
-                    return await send("❌ Aucun opening trouvé (AnimeThemes vide + pas de dossier local).")
-                files = [f for f in os.listdir(LOCAL_AUDIO_FOLDER) if f.lower().endswith(".mp3")]
-                if not files:
-                    return await send("❌ Aucun opening trouvé dans le dossier local.")
-                pick = random.choice(files)
-                media_source = os.path.join(LOCAL_AUDIO_FOLDER, pick)
-                correct_anime = _clean_title_from_filename(pick)
-                source_footer = "Source : fichiers locaux"
-
-            async def _prepare_local_file():
-                local_path = media_source
-                cleanup = False
-                if isinstance(media_source, str) and media_source.startswith(("http://", "https://")):
-                    local_path = await _fetch_to_temp(media_source)
-                    cleanup = True
-                return local_path, cleanup
-
-            # Téléchargement HTTP en parallèle (réduit le silence après connexion vocale)
-            prepare_task = asyncio.create_task(_prepare_local_file())
-
-            # --------- 4) Génération des choix (leurres via AniList) ---------
-            cache_key = "popular_romaji_60"
-            pool = _get_cached_titles(cache_key)
-            if pool is None:
-                query = '''
-                query {
-                  Page(perPage: 60) {
-                    media(type: ANIME, sort: POPULARITY_DESC) {
-                      title { romaji }
-                    }
-                  }
-                }
-                '''
-                try:
-                    data = core.query_anilist(query)
-                    pool = [m["title"]["romaji"] for m in data["data"]["Page"]["media"]]
-                    _set_cached_titles(cache_key, pool)
-                except Exception:
-                    pool = []
-
-            choices = [correct_anime]
-            if user_romaji_list:
-                list_alts = [t for t in user_romaji_list if t.lower() != (correct_anime or "").lower()]
-                random.shuffle(list_alts)
-                for alt in list_alts:
-                    if len(choices) >= 4:
-                        break
-                    alt_clean = _clean_title_from_filename(alt)
-                    if alt_clean and alt_clean.lower() != (correct_anime or "").lower() and alt_clean not in choices:
-                        choices.append(alt_clean)
-            tries = 0
-            while len(choices) < 4 and pool and tries < 200:
-                alt = _clean_title_from_filename(random.choice(pool))
-                tries += 1
-                if alt and alt.lower() != (correct_anime or "").lower() and alt not in choices:
-                    choices.append(alt)
-            while len(choices) < 4:
-                choices.append(f"Option {len(choices) + 1}")
-            random.shuffle(choices)
-            correct_index = choices.index(correct_anime)
-
-            # --------- 5) Envoi question + boutons ---------
-            em = _build_question_embed(choices, ANSWER_TIMEOUT, source_footer, [])
-            view = GuessOPView(
-                self.bot,
+            outcome = await self._run_one_guessop_round(
                 ctx,
                 voice_channel,
-                choices,
-                correct_index,
-                timeout_sec=ANSWER_TIMEOUT,
-                source_footer=source_footer,
+                send,
+                linked_anilist=linked_anilist,
+                user_romaji_list=user_romaji_list,
+                user_titles_lower=user_titles_lower,
+                disconnect_after=True,
+                vc_existing=None,
+                chain_round=None,
             )
-            sent = await send(embed=em, view=view)
-            if isinstance(sent, discord.Message):
-                view.message = sent
+            if outcome is None:
+                return
 
-            # --------- 6) Connexion immédiate + Préparation audio en parallèle ---------
-            try:
-                vc = await voice.ensure_connected(voice_channel)
-            except Exception as e:
-                return await send(f"❌ Impossible de rejoindre le vocal : {e}")
-
-            # --------- 7) Compte à rebours visuel (edit toutes les 5s) ---------
-            async def _tick_embed():
-                await asyncio.sleep(1.5)
-                remaining = ANSWER_TIMEOUT
-                while remaining > 0 and not view.is_finished() and view.message:
-                    await asyncio.sleep(COUNTDOWN_STEP)
-                    remaining = max(0, remaining - COUNTDOWN_STEP)
-                    view._remaining = remaining
-                    try:
-                        async with view._embed_lock:
-                            await view.message.edit(
-                                embed=_build_question_embed(
-                                    choices, remaining, source_footer, view.responders
-                                ),
-                                view=view,
-                            )
-                    except Exception:
-                        break
-
-            countdown_task = asyncio.create_task(_tick_embed())
-
-            # --------- 8) Timer de fin de manche (borne dure UI) ---------
-            async def _end_round_after_timeout():
-                await asyncio.sleep(ANSWER_TIMEOUT)
-                try:
-                    for item in view.children:
-                        if isinstance(item, discord.ui.Button):
-                            item.disabled = True
-                    if view.message:
-                        await view.message.edit(view=view)
-                except Exception:
-                    pass
-                view.stop()
-
-            end_timer_task = asyncio.create_task(_end_round_after_timeout())
-
-            # --------- 9) Lecture AUDIO pile DURATION_SEC (seek sécurisé + guard démarrage) ---------
-            local_path = None
-            cleanup = False
-
-            try:
-                local_path, cleanup = await prepare_task
-                if not vc.is_connected():
-                    vc = await voice.ensure_connected(voice_channel)
-
-                # Sondage de durée + seek borné (toujours)
-                media_duration = _probe_duration_sec(local_path)
-                seek_start = _safe_seek(media_duration, DURATION_SEC, RANDOM_SEEK_MAX) if ENABLE_RANDOM_SEEK else 0.0
-
-                # Source FFmpeg robuste (map audio + PCM + fades + coupe précise)
-                source = voice.make_source(
-                    local_path,
-                    duration_sec=float(DURATION_SEC),
-                    seek_start=float(seek_start),
-                    fade_sec=float(FADE_SEC),
-                    normalize=bool(NORMALIZE_AUDIO),
+            if not outcome.view.winners_order and not outcome.view.others_correct:
+                _mark_guessop_end(ctx.author.id)
+                return await send(
+                    f"⏰ Temps écoulé ! La bonne réponse était : **{outcome.correct_anime}**"
                 )
 
-                done_event = asyncio.Event()
+            await self._guessop_award_and_embed(ctx, send, outcome, round_manche=None)
+            _mark_guessop_end(ctx.author.id)
 
-                def _after_play(err: Exception | None):
-                    try:
-                        done_event.set()
-                    except Exception:
-                        pass
-
-                vc.play(source, after=_after_play)
-
-                # --- Guard de démarrage : on s'assure que le son part vraiment ---
-                started = False
-                for _ in range(int(START_GUARD_TIMEOUT / 0.1)):
-                    await asyncio.sleep(0.1)
-                    if vc.is_playing():
-                        started = True
-                        break
-
-                # Si pas démarré ET on avait un seek => retry immédiat SANS seek
-                if not started and ENABLE_RANDOM_SEEK and seek_start > 0.0:
-                    try:
-                        vc.stop()
-                    except Exception:
-                        pass
-                    source2 = voice.make_source(
-                        local_path,
-                        duration_sec=float(DURATION_SEC),
-                        seek_start=0.0,
-                        fade_sec=float(FADE_SEC),
-                        normalize=bool(NORMALIZE_AUDIO),
-                    )
-                    done_event = asyncio.Event()
-                    def _after_play2(err: Exception | None):
-                        try:
-                            done_event.set()
-                        except Exception:
-                            pass
-                    vc.play(source2, after=_after_play2)
-
-                    # Guard bis
-                    for _ in range(int(START_GUARD_TIMEOUT / 0.1)):
-                        await asyncio.sleep(0.1)
-                        if vc.is_playing():
-                            started = True
-                            break
-
-                # Attendre la fin avec marge (évite les 5s tronquées)
-                try:
-                    await asyncio.wait_for(done_event.wait(), timeout=float(DURATION_SEC) + PLAY_TIMEOUT_MARGIN)
-                except asyncio.TimeoutError:
-                    try:
-                        vc.stop()
-                    except Exception:
-                        pass
-
-            except Exception as e:
-                try:
-                    await send(f"⚠️ Audio non lancé : {e}")
-                except Exception:
-                    pass
-            finally:
-                if cleanup and local_path:
-                    try:
-                        os.remove(local_path)
-                    except Exception:
-                        pass
-
-            # --------- 10) Fin de manche (= dès que la View se termine) ---------
+    @commands.hybrid_command(
+        name="guessopchain",
+        description=(
+            "Enchaîne des Guess OP : le bot reste en vocal ; nouvelle manche après le timer. "
+            "Arrêt si personne ne trouve (ou plafond de manches)."
+        ),
+    )
+    async def guess_op_chain(self, ctx: commands.Context) -> None:
+        if getattr(ctx, "interaction", None):
             try:
-                await view.wait()
+                await ctx.interaction.response.defer()
             except Exception:
                 pass
 
-            # Annule les tâches encore actives
-            if not end_timer_task.done():
-                end_timer_task.cancel()
-            if not countdown_task.done():
-                countdown_task.cancel()
+        if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
+            return
 
-            # Déconnexion après affichage du résultat (propre)
+        send = (ctx.interaction.followup.send if getattr(ctx, "interaction", None) else ctx.send)
+
+        if not ctx.author.voice or not ctx.author.voice.channel:
+            return await send("🔇 Tu dois être dans un **salon vocal** pour jouer.")
+        voice_channel: discord.VoiceChannel = ctx.author.voice.channel
+
+        left_go = _guessop_cooldown_remaining(ctx.author.id)
+        if left_go > 0:
+            return await send(
+                f"⏳ Attends **{int(left_go) + 1}s** après la fin du dernier Guess OP avant de relancer."
+            )
+
+        linked_anilist = core.get_linked_username(ctx.author.id)
+        user_romaji_list: list[str] = []
+        user_titles_lower: set[str] = set()
+        if linked_anilist:
+            ml = core.fetch_user_list_media_for_minigames(linked_anilist)
+            for m in ml:
+                r = ((m.get("title") or {}).get("romaji") or "").strip()
+                if r:
+                    user_romaji_list.append(r)
+                    user_titles_lower.add(r.lower())
+
+        async with self._guild_lock(ctx.guild.id):
+            vc: discord.VoiceClient | None = None
+            round_num = 0
+
+            while round_num < MAX_GUESSOP_CHAIN_ROUNDS:
+                round_num += 1
+                outcome = await self._run_one_guessop_round(
+                    ctx,
+                    voice_channel,
+                    send,
+                    linked_anilist=linked_anilist,
+                    user_romaji_list=user_romaji_list,
+                    user_titles_lower=user_titles_lower,
+                    disconnect_after=False,
+                    vc_existing=vc,
+                    chain_round=round_num,
+                )
+                if outcome is None:
+                    if vc and vc.is_connected():
+                        try:
+                            await vc.disconnect(force=False)
+                        except Exception:
+                            pass
+                    _mark_guessop_end(ctx.author.id)
+                    return
+
+                vc = outcome.vc
+
+                if not outcome.view.winners_order and not outcome.view.others_correct:
+                    try:
+                        if vc and vc.is_connected():
+                            await vc.disconnect(force=False)
+                    except Exception:
+                        pass
+                    _mark_guessop_end(ctx.author.id)
+                    return await send(
+                        "⏰ **Chaîne terminée** — personne n'a trouvé cette manche ! "
+                        f"La bonne réponse était : **{outcome.correct_anime}**"
+                    )
+
+                await self._guessop_award_and_embed(ctx, send, outcome, round_manche=round_num)
+
             try:
                 if vc and vc.is_connected():
                     await vc.disconnect(force=False)
             except Exception:
                 pass
-
-            # --------- 11) Résultat ---------
-            if not view.winners_order and not view.others_correct:
-                return await send(f"⏰ Temps écoulé ! La bonne réponse était : **{correct_anime}**")
-
-            podium_xp = [15, 10, 7]
-            others_xp = 3
-            award_lines = []
-            for rank, user in enumerate(view.winners_order, start=1):
-                xp = podium_xp[rank-1]
-                award_lines.append(f"**#{rank}** {user.mention} — +{xp} XP")
-                try:
-                    await core.add_xp(self.bot, ctx.channel, user.id, xp)
-                except Exception:
-                    pass
-                try:
-                    core.add_mini_score(user.id, "guessop", 1)
-                except Exception:
-                    pass
-
-            for user in view.others_correct:
-                award_lines.append(f"• {user.mention} — +{others_xp} XP")
-                try:
-                    await core.add_xp(self.bot, ctx.channel, user.id, others_xp)
-                except Exception:
-                    pass
-                try:
-                    core.add_mini_score(user.id, "guessop", 1)
-                except Exception:
-                    pass
-
-            # ⚡ Plus rapide = premier du podium
-            fast_line = f"⚡ Plus rapide : {view.winners_order[0].mention}" if view.winners_order else None
-
-            res = discord.Embed(
-                title="🏁 Résultats — Guess OP",
-                description=f"✅ **Réponse :** {correct_anime}",
-                color=discord.Color.gold()
+            _mark_guessop_end(ctx.author.id)
+            await send(
+                f"🔚 Limite de **{MAX_GUESSOP_CHAIN_ROUNDS}** manches atteinte — le bot quitte le vocal."
             )
-            if theme_label:
-                res.add_field(name="Opening", value=theme_label, inline=False)
-            if fast_line:
-                res.add_field(name="Vitesse", value=fast_line, inline=False)
-            if award_lines:
-                res.add_field(name="Récompenses", value="\n".join(award_lines), inline=False)
-            if source_footer:
-                res.set_footer(text=source_footer)
-
-            await send(embed=res)
-
-            # Nettoyage auto après 30s (optionnel) — supprime le message de question
-            try:
-                await asyncio.sleep(30)
-                if view.message:
-                    await view.message.delete()
-            except Exception:
-                pass
 
     # --- DIAG AUDIO intégré au même Cog ---
     @commands.hybrid_command(name="voicediag", description="Diagnostic audio (ffmpeg/ffprobe/opus)")
