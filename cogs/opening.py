@@ -77,6 +77,17 @@ CATALOG_MIN_FOR_BIAS = int(os.getenv("GUESSOP_CATALOG_MIN", "5"))
 # Guess OP chaîne : plafond de sécurité (manches avec au moins un gagnant)
 MAX_GUESSOP_CHAIN_ROUNDS = int(os.getenv("GUESSOP_CHAIN_MAX_ROUNDS", "25"))
 
+# Pause (secondes) après le scoreboard d’une manche avant la suivante (ou avant le récap final).
+def _env_float(name: str, default: float, lo: float, hi: float) -> float:
+    try:
+        v = float((os.getenv(name) or str(default)).strip())
+    except ValueError:
+        v = default
+    return max(lo, min(hi, v))
+
+
+GUESSOP_CHAIN_PAUSE_BETWEEN_SEC = _env_float("GUESSOP_CHAIN_PAUSE_BETWEEN_SEC", 12.0, 5.0, 45.0)
+
 # XP bonus par palier de série (manche 2 d’affilée = 1 palier, etc.)
 GUESSOP_CHAIN_STREAK_XP_PER = int(os.getenv("GUESSOP_CHAIN_STREAK_XP", "5"))
 
@@ -688,6 +699,21 @@ class Openings(commands.Cog):
                 alt_clean = _clean_title_from_filename(alt)
                 if alt_clean and alt_clean.lower() != (correct_anime or "").lower() and alt_clean not in choices:
                     choices.append(alt_clean)
+        # Leurres catalogue : même type de titres que l’opening jouée (évite 3× top AniList vs 1× « inconnu »).
+        need_lr = 4 - len(choices)
+        if need_lr > 0 and gopc.count() >= CATALOG_MIN_FOR_BIAS:
+            excl = set(choices) | {correct_anime or ""}
+            for raw in gopc.random_distractor_titles(exclude_titles=excl, max_titles=need_lr):
+                if len(choices) >= 4:
+                    break
+                alt_clean = _clean_title_from_filename(raw)
+                if (
+                    alt_clean
+                    and alt_clean.lower() != (correct_anime or "").lower()
+                    and alt_clean not in choices
+                ):
+                    choices.append(alt_clean)
+
         tries = 0
         while len(choices) < 4 and pool and tries < 200:
             alt = _clean_title_from_filename(random.choice(pool))
@@ -1047,6 +1073,8 @@ class Openings(commands.Cog):
                     totals_xp,
                     wins,
                 )
+                if round_num < MAX_GUESSOP_CHAIN_ROUNDS:
+                    await asyncio.sleep(GUESSOP_CHAIN_PAUSE_BETWEEN_SEC)
 
             try:
                 if vc and vc.is_connected():
@@ -1055,6 +1083,7 @@ class Openings(commands.Cog):
                 pass
             _mark_guessop_end(ctx.author.id)
 
+            await asyncio.sleep(GUESSOP_CHAIN_PAUSE_BETWEEN_SEC)
             await _safe_delete_message(last_result_msg)
             recap = self._guessop_chain_recap_embed(
                 ctx,

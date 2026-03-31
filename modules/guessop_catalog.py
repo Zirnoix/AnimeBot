@@ -138,6 +138,34 @@ def pick_random_title_in_set(titles_romaji_lower: set[str]) -> Optional[Tuple[in
         )
 
 
+def random_distractor_titles(*, exclude_titles: set[str], max_titles: int) -> list[str]:
+    """
+    Titres aléatoires du catalogue SQLite (leurres). Même « univers » que les vrais openings,
+    au lieu des seuls 60 plus populaires AniList — évite l’effet « 3 blockbusters + 1 intrus ».
+    """
+    if max_titles <= 0:
+        return []
+    excl = {str(t).strip().lower() for t in exclude_titles if t and str(t).strip()}
+    out: list[str] = []
+    seen_lower: set[str] = set()
+    with _connect() as c:
+        rows = c.execute(
+            "SELECT title FROM openings ORDER BY RANDOM() LIMIT 200",
+        ).fetchall()
+    for row in rows:
+        t = str(row["title"] or "").strip()
+        if not t:
+            continue
+        tl = t.lower()
+        if tl in excl or tl in seen_lower:
+            continue
+        seen_lower.add(tl)
+        out.append(t)
+        if len(out) >= max_titles:
+            break
+    return out
+
+
 def record_used(opening_id: int) -> None:
     if opening_id <= 0:
         return
