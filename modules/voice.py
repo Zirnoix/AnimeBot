@@ -44,20 +44,29 @@ def make_source(
     )
 
 async def ensure_connected(channel: discord.VoiceChannel) -> discord.VoiceClient:
-    """Rejoins/déplace si besoin et renvoie le VoiceClient (self-deaf)."""
-    vc: discord.VoiceClient | None = channel.guild.voice_client
-    if vc and vc.channel != channel:
+    """Rejoins/déplace si besoin et renvoie le VoiceClient (self-deaf). Retries sur erreurs transitoires."""
+    backoff = 0.55
+    for attempt in range(3):
         try:
-            await vc.move_to(channel)
+            vc: discord.VoiceClient | None = channel.guild.voice_client
+            if vc and vc.channel != channel:
+                try:
+                    await vc.move_to(channel)
+                except Exception:
+                    try:
+                        await vc.disconnect(force=True)
+                    except Exception:
+                        pass
+                    vc = None
+            if vc is None:
+                vc = await channel.connect(self_deaf=True)
+            return vc
         except Exception:
-            try:
-                await vc.disconnect(force=True)
-            except Exception:
-                pass
-            vc = None
-    if vc is None:
-        vc = await channel.connect(self_deaf=True)
-    return vc
+            if attempt < 2:
+                await asyncio.sleep(backoff)
+                backoff *= 2.1
+                continue
+            raise
 
 async def play_clip_in_channel(
     channel: discord.VoiceChannel,

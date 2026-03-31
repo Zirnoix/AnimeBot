@@ -77,6 +77,9 @@ CATALOG_MIN_FOR_BIAS = int(os.getenv("GUESSOP_CATALOG_MIN", "5"))
 # Guess OP chaîne : plafond de sécurité (manches avec au moins un gagnant)
 MAX_GUESSOP_CHAIN_ROUNDS = int(os.getenv("GUESSOP_CHAIN_MAX_ROUNDS", "25"))
 
+# AnimeThemes + filtre AniList : tentatives max (chaque tentative = API + GraphQL si besoin)
+GUESSOP_FILTER_MAX_ATTEMPTS = int(os.getenv("GUESSOP_FILTER_MAX_ATTEMPTS", "10"))
+
 # ================== UTILS ==================
 def _get_cached_titles(key: str) -> list[str] | None:
     item = _ANILIST_CACHE.get(key)
@@ -445,13 +448,13 @@ class Openings(commands.Cog):
             got = None
             if USE_ANIMETHEMES:
                 try:
-                    got = await animethemes.random_opening_filtered(
-                        min_year=MIN_YEAR,
-                        min_score_10=MIN_SCORE_10,
-                        banned_genres=BANNED_GENRES,
-                        banned_formats=BANNED_FORMATS,
-                        max_attempts=12,
-                    )
+                        got = await animethemes.random_opening_filtered(
+                            min_year=MIN_YEAR,
+                            min_score_10=MIN_SCORE_10,
+                            banned_genres=BANNED_GENRES,
+                            banned_formats=BANNED_FORMATS,
+                            max_attempts=GUESSOP_FILTER_MAX_ATTEMPTS,
+                        )
                 except Exception:
                     got = None
 

@@ -16,17 +16,30 @@ CACHE_FILE = os.path.join("assets", "animethemes_cache.json")
 
 # ---------- HTTP helpers ----------
 async def _fetch_json(url: str) -> Optional[Dict[str, Any]]:
+    """
+    GET JSON AnimeThemes.moe avec petits retries (API / réseau parfois capricieux).
+    Une session par tentative (simple) — évite de rester bloqué sur un seul échec.
+    """
     if not aiohttp:
         return None
-    try:
-        async with aiohttp.ClientSession(
-            headers={"Accept": "application/json", "User-Agent": "AnimeBot/guessop"}
-        ) as sess:
-            async with sess.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-    except Exception:
-        return None
+    backoff = 0.45
+    headers = {"Accept": "application/json", "User-Agent": "AnimeBot/guessop"}
+    timeout = aiohttp.ClientTimeout(total=20)
+    for attempt in range(3):
+        try:
+            async with aiohttp.ClientSession(headers=headers) as sess:
+                async with sess.get(url, timeout=timeout) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    if resp.status in (429, 500, 502, 503, 504) and attempt < 2:
+                        await asyncio.sleep(backoff)
+                        backoff *= 2.0
+                        continue
+        except Exception:
+            if attempt < 2:
+                await asyncio.sleep(backoff)
+                backoff *= 2.0
+                continue
     return None
 
 def _norm_url(link: Optional[str]) -> Optional[str]:
@@ -241,7 +254,10 @@ async def random_opening_filtered(
             continue
         title, theme_label, video_url = got
         try:
-            data = await asyncio.to_thread(core.query_anilist, _ANILIST_QUERY, {"search": title})
+            # Async : même sémaphore AniList que le reste du bot, sans saturer le pool de threads.
+            data = await core.query_anilist_async(_ANILIST_QUERY, {"search": title})
+            if not data:
+                continue
             media_list = data.get("data", {}).get("Page", {}).get("media", []) or []
             if not media_list:
                 continue
