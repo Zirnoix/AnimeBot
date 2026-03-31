@@ -27,7 +27,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "duel": "Duel de quiz entre 2 joueurs.",
     "guess": "Alias historique : utilise **`/guessyear`**, **`/guessepisodes`**, **`/guessgenre`**, **`/guesscharacter`** ou **`/minijeux`**.",
     "guessop": "Devine l’opening (vocal) — catalogue global SQLite + récolte auto AnimeThemes.",
-    "guessopchain": "Enchaîne des Guess OP : le bot reste en vocal ; nouvelle manche après le timer ; arrêt si personne ne trouve.",
+    "guessopchain": "Guess OP en chaîne : reste en vocal, nouvelle manche après le timer ; arrêt si échec (ou limite).",
     "guessyear": "Devine l’année de diffusion (image + réponse dans le salon).",
     "guessepisodes": "Devine le nombre d’épisodes (image + réponse dans le salon).",
     "guessgenre": "Trouve un des genres (image + réponse texte).",

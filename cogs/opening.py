@@ -778,9 +778,9 @@ class Openings(commands.Cog):
 
     @commands.hybrid_command(
         name="guessopchain",
+        # Max 100 caractères (exigence API Discord slash).
         description=(
-            "Enchaîne des Guess OP : le bot reste en vocal ; nouvelle manche après le timer. "
-            "Arrêt si personne ne trouve (ou plafond de manches)."
+            "Guess OP en chaîne : reste en vocal, nouvelle manche après le timer. Arrêt si échec."
         ),
     )
     async def guess_op_chain(self, ctx: commands.Context) -> None:
