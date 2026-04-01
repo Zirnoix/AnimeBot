@@ -94,6 +94,9 @@ GUESSOP_CHAIN_STREAK_XP_PER = int(os.getenv("GUESSOP_CHAIN_STREAK_XP", "5"))
 # AnimeThemes + filtre AniList : tentatives max (chaque tentative = API + GraphQL si besoin)
 GUESSOP_FILTER_MAX_ATTEMPTS = int(os.getenv("GUESSOP_FILTER_MAX_ATTEMPTS", "10"))
 
+# Après connexion vocale, attente courte avant play (première connexion / gateway Discord).
+GUESSOP_VOICE_READY_DELAY = _env_float("GUESSOP_VOICE_READY_DELAY", 0.45, 0.0, 2.0)
+
 # ================== UTILS ==================
 def _get_cached_titles(key: str) -> list[str] | None:
     item = _ANILIST_CACHE.get(key)
@@ -209,7 +212,9 @@ class GuessOPView(discord.ui.View):
         source_footer: str = "",
         question_title: str | None = None,
     ):
-        super().__init__(timeout=timeout_sec)
+        # Timer Discord désactivé : la manche est bornée par les tâches dans _run_one_guessop_round
+        # (sinon le délai démarre à l’envoi du message alors que l’audio peut encore télécharger).
+        super().__init__(timeout=None)
         self.bot = bot
         self.ctx = ctx
         self.voice_channel = voice_channel
@@ -753,7 +758,39 @@ class Openings(commands.Cog):
                 _mark_guessop_end(ctx.author.id)
                 await send(f"❌ Impossible de rejoindre le vocal : {e}")
                 await _safe_delete_message(view.message)
+                try:
+                    prepare_task.cancel()
+                except Exception:
+                    pass
                 return None
+
+        local_path = None
+        cleanup = False
+        try:
+            local_path, cleanup = await prepare_task
+        except Exception as e:
+            try:
+                await send(f"⚠️ Préparation de l’audio : {e}")
+            except Exception:
+                pass
+            await _safe_delete_message(view.message)
+            return None
+
+        if not vc.is_connected():
+            try:
+                vc = await voice.ensure_connected(voice_channel)
+            except Exception as e:
+                _mark_guessop_end(ctx.author.id)
+                await send(f"❌ Impossible de rejoindre le vocal : {e}")
+                await _safe_delete_message(view.message)
+                if cleanup and local_path:
+                    try:
+                        os.remove(local_path)
+                    except Exception:
+                        pass
+                return None
+
+        await asyncio.sleep(GUESSOP_VOICE_READY_DELAY)
 
         async def _tick_embed():
             await asyncio.sleep(1.5)
@@ -773,8 +810,6 @@ class Openings(commands.Cog):
                 except Exception:
                     break
 
-        countdown_task = asyncio.create_task(_tick_embed())
-
         async def _end_round_after_timeout():
             await asyncio.sleep(ANSWER_TIMEOUT)
             try:
@@ -787,16 +822,10 @@ class Openings(commands.Cog):
                 pass
             view.stop()
 
-        end_timer_task = asyncio.create_task(_end_round_after_timeout())
-
-        local_path = None
-        cleanup = False
+        countdown_task: asyncio.Task | None = None
+        end_timer_task: asyncio.Task | None = None
 
         try:
-            local_path, cleanup = await prepare_task
-            if not vc.is_connected():
-                vc = await voice.ensure_connected(voice_channel)
-
             if vc.is_playing():
                 try:
                     vc.stop()
@@ -859,6 +888,11 @@ class Openings(commands.Cog):
                         started = True
                         break
 
+            # Timer + compte à rebours seulement après préparation + tentative de lecture
+            # (évite que les 30 s s’écoulent pendant le téléchargement HTTP / reco vocal).
+            countdown_task = asyncio.create_task(_tick_embed())
+            end_timer_task = asyncio.create_task(_end_round_after_timeout())
+
             try:
                 await asyncio.wait_for(done_event.wait(), timeout=float(DURATION_SEC) + PLAY_TIMEOUT_MARGIN)
             except asyncio.TimeoutError:
@@ -870,6 +904,14 @@ class Openings(commands.Cog):
         except Exception as e:
             try:
                 await send(f"⚠️ Audio non lancé : {e}")
+            except Exception:
+                pass
+            if countdown_task is not None and not countdown_task.done():
+                countdown_task.cancel()
+            if end_timer_task is not None and not end_timer_task.done():
+                end_timer_task.cancel()
+            try:
+                view.stop()
             except Exception:
                 pass
         finally:
@@ -884,9 +926,9 @@ class Openings(commands.Cog):
         except Exception:
             pass
 
-        if not end_timer_task.done():
+        if end_timer_task is not None and not end_timer_task.done():
             end_timer_task.cancel()
-        if not countdown_task.done():
+        if countdown_task is not None and not countdown_task.done():
             countdown_task.cancel()
 
         if disconnect_after:

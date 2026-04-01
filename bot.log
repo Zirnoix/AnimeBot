@@ -102,3 +102,5 @@ RuntimeError: Client has not been properly initialised. Please use the login met
 2026-03-31 16:48:16,037 - modules.core - INFO - [AniList] Concurrence HTTP limitée à 4 (variable ANILIST_MAX_CONCURRENT, défaut 4).
 2026-03-31 17:38:31,302 - modules.core - INFO - [AniList] Concurrence HTTP limitée à 4 (variable ANILIST_MAX_CONCURRENT, défaut 4).
 2026-03-31 17:38:31,304 - discord.state - WARNING - Guilds intent seems to be disabled. This may cause state related issues.
+2026-04-01 14:58:45,147 - modules.core - INFO - [AniList] Concurrence HTTP limitée à 4 (variable ANILIST_MAX_CONCURRENT, défaut 4).
+2026-04-01 14:59:08,418 - modules.core - INFO - [AniList] Concurrence HTTP limitée à 4 (variable ANILIST_MAX_CONCURRENT, défaut 4).

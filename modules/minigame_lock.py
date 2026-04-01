@@ -5,15 +5,13 @@ Une seule mini-jeu / interaction « en attente de réponse » par utilisateur à
 from __future__ import annotations
 
 import threading
-import time
 from typing import Any, Dict, Optional
+
+from modules import user_reply
 
 # user_id -> nom court du jeu (debug / messages)
 _PENDING: Dict[int, str] = {}
 _PENDING_LOCK = threading.Lock()
-
-# Dernier message public « cooldown » (préfixe) pour ne pas spammer le salon
-_LAST_COOLDOWN_PUBLIC: Dict[int, float] = {}
 
 _BUSY_MSG = (
     "Tu as déjà une partie ou une question en attente — réponds-y (ou attends la fin) "
@@ -41,32 +39,15 @@ def active_game(user_id: int) -> Optional[str]:
 
 
 async def reply_busy(ctx: Any) -> None:
-    """Réponse « partie déjà en cours » (ephemeral si slash)."""
-    if getattr(ctx, "interaction", None):
-        if not ctx.interaction.response.is_done():
-            await ctx.interaction.response.send_message(_BUSY_MSG, ephemeral=True)
-        else:
-            await ctx.interaction.followup.send(_BUSY_MSG, ephemeral=True)
-    else:
-        await ctx.send(_BUSY_MSG)
+    """Réponse « partie déjà en cours » — éphémère / privée (pas de spam salon)."""
+    await user_reply.send_ephemeral_or_private(ctx, _BUSY_MSG)
 
 
 async def reply_guessgenre_cooldown(ctx: Any, user_id: int, remaining: int) -> None:
-    """
-    Cooldown guess genre : slash = toujours ephemeral ; préfixe = 1 message / 12 s max.
-    """
+    """Cooldown guess genre : éphémère / privé (user_id conservé pour l’API)."""
+    _ = user_id
     text = (
         f"⏳ Attends encore **{remaining}s** avant de relancer le **Guess genre** "
         f"(`/guessgenre` ou `/minijeux`)."
     )
-    if getattr(ctx, "interaction", None):
-        if not ctx.interaction.response.is_done():
-            await ctx.interaction.response.send_message(text, ephemeral=True)
-        else:
-            await ctx.interaction.followup.send(text, ephemeral=True)
-        return
-    now = time.monotonic()
-    last = _LAST_COOLDOWN_PUBLIC.get(user_id, 0.0)
-    if now - last >= 12.0:
-        _LAST_COOLDOWN_PUBLIC[user_id] = now
-        await ctx.send(text)
+    await user_reply.send_ephemeral_or_private(ctx, text)

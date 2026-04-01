@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from modules import core
+from modules import bug_report as bug_report_store
 from modules.image import generate_next_card
 
 LOG = logging.getLogger(__name__)
@@ -367,6 +368,22 @@ async def run_help_dm(bot: commands.Bot, interaction: discord.Interaction) -> No
         await interaction.followup.send(f"❌ Erreur : `{e}`", ephemeral=True)
 
 
+async def run_reportbug_blacklist(_bot: commands.Bot, interaction: discord.Interaction) -> None:
+    """Récap blacklist /reportbug + rappel des commandes slash."""
+    bl = bug_report_store.get_blacklist()
+    n = len(bl)
+    preview = ", ".join(f"`{x}`" for x in bl[:15]) or "—"
+    if n > 15:
+        preview += f" … (+{n - 15})"
+    await interaction.followup.send(
+        "**Blacklist signalements de bugs**\n\n"
+        f"Entrées : **{n}**\n{preview}\n\n"
+        "Commandes : **`/blacklist add`** (ID), **`/blacklist remove`** (ID), **`/blacklist list`**.\n"
+        "Réservé au propriétaire (`OWNER_ID`).",
+        ephemeral=True,
+    )
+
+
 async def run_setavatar_hint(_bot: commands.Bot, interaction: discord.Interaction) -> None:
     await interaction.followup.send(
         "**Avatar du bot** : envoie en **message privé** au bot une image avec la commande **`!setavatar`** "
@@ -389,6 +406,7 @@ ACTIONS: list[tuple[str, str, str]] = [
     ("guessop_harvest", "Guess OP — enrichir", "Harvest AnimeThemes (long, ~1–2 min)"),
     ("help_dm", "Aide owner (MP)", "Envoie l’aide restreinte owner/admin en MP"),
     ("setavatar_hint", "Changer l’avatar", "Rappel : !setavatar + image en MP"),
+    ("reportbug_blacklist", "Reports — blacklist", "Liste /blacklist add|remove|list (signalements bugs)"),
 ]
 
 RUNNERS = {
@@ -405,4 +423,5 @@ RUNNERS = {
     "guessop_harvest": run_guessop_harvest,
     "help_dm": run_help_dm,
     "setavatar_hint": run_setavatar_hint,
+    "reportbug_blacklist": run_reportbug_blacklist,
 }

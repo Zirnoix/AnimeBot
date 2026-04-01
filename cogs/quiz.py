@@ -31,6 +31,7 @@ from discord import app_commands
 
 from modules import anilist_gate
 from modules import core
+from modules import user_reply
 from modules import minigame_lock
 from modules.core import normalize
 
@@ -678,9 +679,10 @@ class Quiz(commands.Cog):
             for uid in (ctx.author.id, opponent.id):
                 left = _duel_cooldown_remaining(uid)
                 if left > 0:
-                    await ctx.send(
+                    await user_reply.send_ephemeral_or_private(
+                        ctx,
                         f"⏳ Attends encore **{int(left) + 1}s** après la fin du dernier duel "
-                        f"(toi ou ton adversaire)."
+                        f"(toi ou ton adversaire).",
                     )
                     return
     

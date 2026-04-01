@@ -111,6 +111,7 @@ class FileConfig:
     GUESS_GENRE_SANCTIONS = os.path.join(DATA_DIR, "guess_genre_sanctions.json")
     OWNER_TELEMETRY = os.path.join(DATA_DIR, "owner_telemetry.json")
     BOSS_RAID = os.path.join(DATA_DIR, "boss_raid.json")
+    BUG_REPORTS = os.path.join(DATA_DIR, "bug_reports.json")
 
 _AIRING_SORT_FIX = {
     "AIRING_AT": "TIME",

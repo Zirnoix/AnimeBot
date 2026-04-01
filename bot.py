@@ -16,6 +16,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 
 from modules import core
+from modules import user_reply
 # ========= LOGGING (unique) =========
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -513,7 +514,9 @@ async def on_command_error(ctx: commands.Context, error: Exception) -> None:
         ra = getattr(error, "retry_after", None)
         sec = int(ra) + 1 if ra is not None else 5
         try:
-            await ctx.send(f"⏳ Cooldown : réessaie dans **{sec}s**.")
+            await user_reply.send_prefix_cooldown(
+                ctx, f"⏳ Cooldown : réessaie dans **{sec}s**."
+            )
         except Exception:
             pass
         return

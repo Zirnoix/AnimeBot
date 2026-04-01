@@ -21,6 +21,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from modules import core
+from modules import user_reply
 
 
 def _anime_status_count(statuses: List[Dict[str, Any]] | None, key: str) -> int:
@@ -225,9 +226,10 @@ class Link(commands.Cog):
         """
         core.anilist_clear_link_pending(ctx.author.id)
         if core.unlink_linked_username(ctx.author.id):
-            await ctx.send("🔗 Ton lien AniList a bien été supprimé.")
+            msg = "🔗 Ton lien AniList a bien été supprimé."
         else:
-            await ctx.send("❌ Aucun compte AniList n'était lié à ce profil.")
+            msg = "❌ Aucun compte AniList n'était lié à ce profil."
+        await user_reply.send_ephemeral_or_private(ctx, msg)
 
     @commands.hybrid_command(
         name="duelstats",
