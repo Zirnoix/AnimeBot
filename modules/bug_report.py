@@ -146,16 +146,21 @@ def validate_bug_text_parts(
     attendu: str,
     reproduire: str,
 ) -> Tuple[bool, str]:
+    """
+    Règles : total ≥ MIN_TOTAL_CHARS ; commande non vide (peut être courte, ex. `/quiz`) ;
+    problème, attendu et reproduire ≥ MIN_FIELD_CHARS chacun.
+    """
     c = (commande or "").strip()
     p = (probleme or "").strip()
     a = (attendu or "").strip()
     r = (reproduire or "").strip()
+    if not c:
+        return False, "command_empty"
     total = len(c) + len(p) + len(a) + len(r)
     if total < MIN_TOTAL_CHARS:
         return False, "too_short"
-    if len(c) < MIN_FIELD_CHARS or len(p) < MIN_FIELD_CHARS or len(a) < MIN_FIELD_CHARS:
+    if len(p) < MIN_FIELD_CHARS or len(a) < MIN_FIELD_CHARS or len(r) < MIN_FIELD_CHARS:
         return False, "field_too_short"
-    # Reproduire peut être court si vraiment N/A
     return True, "ok"
 
 
@@ -278,6 +283,29 @@ def refuse_report(report_id: int, _owner_id: int) -> Tuple[bool, Optional[dict[s
             r["reject_cooldown_until_ts"] = cooldown_end
             lim = _user_lim(st, uid)
             lim["reject_until_ts"] = cooldown_end
+            save_store(st)
+            return True, dict(r)
+        return False, None
+
+
+def dismiss_report_no_sanction(report_id: int, _owner_id: int) -> Tuple[bool, Optional[dict[str, Any]]]:
+    """
+    Clôture sans sanction : le signalement a été analysé mais ce n’était pas un « vrai » bug
+    (déjà réglé, API, redémarrage, cas extrême, etc.). Pas de cooldown 7 jours.
+    """
+    rid = int(report_id)
+    with core.DATA_JSON_LOCK:
+        st = load_store()
+        for r in st.get("reports") or []:
+            if int(r.get("id") or 0) != rid:
+                continue
+            if str(r.get("status")) != "pending":
+                return False, None
+            r["status"] = "dismissed"
+            r["processed_at"] = _now_iso()
+            r["treatment"] = "dismissed_no_sanction"
+            r["xp_awarded"] = 0
+            r["reject_cooldown_until_ts"] = None
             save_store(st)
             return True, dict(r)
         return False, None

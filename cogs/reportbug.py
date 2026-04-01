@@ -62,10 +62,10 @@ def _reject_cooldown_message(user_id: int) -> str:
         until = dt.strftime("%d/%m/%Y %H:%M UTC")
     return (
         "⏳ **Signalement temporairement indisponible**\n\n"
-        "Ton dernier rapport a été **refusé** (faux bug ou inexistant). "
-        "Tu pourras refaire un **`/reportbug`** après le **"
+        "Ton dernier rapport a été **refusé avec sanction** (faux signalement **volontaire** / troll / "
+        "abus évident). Tu pourras refaire un **`/reportbug`** après le **"
         f"{until}** (heure de Paris).\n\n"
-        "Merci de ne signaler que des bugs **réels** et **vérifiables**."
+        "Les signalements de **bonne foi** qui ne sont finalement pas des bugs sont traités **sans** cette sanction."
     )
 
 
@@ -101,7 +101,8 @@ class BugReportModal(discord.ui.Modal, title="Décrire le bug"):
             max_length=2000,
         )
         self.repro = discord.ui.TextInput(
-            label="Étapes pour reproduire (ou « N/A »)",
+            label="Étapes pour reproduire",
+            placeholder="Si tu ne peux pas reproduire, explique pourquoi (≥12 caractères).",
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=2000,
@@ -119,11 +120,19 @@ class BugReportModal(discord.ui.Modal, title="Décrire le bug"):
             str(self.repro.value),
         )
         if not ok:
-            hint = (
-                "Ton texte est **trop court** ou trop vague. "
-                f"Détaille au moins **{br.MIN_TOTAL_CHARS} caractères** au total, "
-                f"avec au moins **{br.MIN_FIELD_CHARS} caractères** dans les trois premiers champs."
-            )
+            if code == "command_empty":
+                hint = "Indique **quelle commande ou quel système** est concerné (ce champ peut rester court, ex. `/quiz`)."
+            elif code == "too_short":
+                hint = (
+                    f"Le texte **au total** doit faire au moins **{br.MIN_TOTAL_CHARS} caractères** "
+                    "(tous champs confondus)."
+                )
+            else:
+                hint = (
+                    f"Les champs **problème observé**, **comportement attendu** et **étapes pour reproduire** "
+                    f"doivent avoir au moins **{br.MIN_FIELD_CHARS} caractères** chacun. "
+                    "Le champ **commande / système** peut rester court."
+                )
             await interaction.response.send_message(hint, ephemeral=True)
             return
         body = br.format_bug_body(
@@ -216,6 +225,9 @@ class SendReportView(discord.ui.View):
             value=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             inline=True,
         )
+        embed.set_footer(
+            text="🔍 Analysé = pas un bug sans sanction · ✖️ Refus = troll/faux volontaire (7j) · ✅ Confirmer = XP"
+        )
         try:
             await owner.send(embed=embed, view=OwnerDecisionView(self.bot, rid))
         except discord.HTTPException as e:
@@ -256,7 +268,67 @@ class OwnerDecisionView(discord.ui.View):
         self.bot = bot
         self.report_id = report_id
 
-    @discord.ui.button(label="Refuser le bug", style=discord.ButtonStyle.danger, emoji="✖️")
+    @discord.ui.button(
+        label="Analysé — pas un bug",
+        style=discord.ButtonStyle.secondary,
+        emoji="🔍",
+        row=0,
+    )
+    async def dismiss_no_sanction(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        """Déjà réglé, API, redémarrage, cas rare : pas de cooldown 7 jours."""
+        if not _is_owner(interaction.user.id):
+            await interaction.response.send_message("Réservé au propriétaire du bot.", ephemeral=True)
+            return
+        key = f"dis:{self.report_id}"
+        if key in _owner_lock:
+            await interaction.response.send_message("Traitement déjà en cours.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        _owner_lock.add(key)
+        try:
+            ok, rep = br.dismiss_report_no_sanction(self.report_id, interaction.user.id)
+            if not ok:
+                await interaction.followup.send(
+                    "Ce rapport n’est plus en attente (déjà traité ou introuvable).",
+                    ephemeral=True,
+                )
+                return
+            uid = int(rep.get("user_id") or 0)
+            u = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
+            try:
+                await u.send(
+                    embed=discord.Embed(
+                        title="Signalement analysé",
+                        description=(
+                            "Merci pour ton retour — il a bien été **lu et analysé**.\n\n"
+                            "Dans ce cas, ce n’était **pas un bug** côté bot au sens d’un défaut à corriger "
+                            "avec récompense : par exemple **redémarrage** du bot, **API AniList** temporairement "
+                            "indisponible, **comportement déjà corrigé**, ou un cas **extrêmement rare**.\n\n"
+                            "**Aucune sanction** n’est appliquée : tu peux continuer à utiliser **`/reportbug`** "
+                            "normalement (sous réserve du quota journalier).\n\n"
+                            "_La sanction de **7 jours** ne concerne que les faux signalements **volontaires** "
+                            "(troll / abus évident)._"
+                        ),
+                        color=discord.Color.blue(),
+                    )
+                )
+            except discord.HTTPException:
+                LOG.warning("impossible DM user %s dismiss report %s", uid, self.report_id)
+            for child in self.children:
+                child.disabled = True
+            try:
+                await interaction.message.edit(
+                    content="**Analysé** — pas un bug réel, **sans sanction** (joueur notifié).",
+                    embed=interaction.message.embeds[0] if interaction.message.embeds else None,
+                    view=self,
+                )
+            except Exception:
+                pass
+            await interaction.followup.send("✅ Clôture sans sanction enregistrée.", ephemeral=True)
+        finally:
+            _owner_lock.discard(key)
+
+    @discord.ui.button(label="Refuser (sanction 7j)", style=discord.ButtonStyle.danger, emoji="✖️", row=1)
     async def refuse(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not _is_owner(interaction.user.id):
             await interaction.response.send_message("Réservé au propriétaire du bot.", ephemeral=True)
@@ -280,11 +352,13 @@ class OwnerDecisionView(discord.ui.View):
             try:
                 await u.send(
                     embed=discord.Embed(
-                        title="Signalement refusé",
+                        title="Signalement refusé — sanction",
                         description=(
-                            "Ton report de bug a été **refusé** (faux bug, hors sujet ou non reproductible).\n\n"
-                            "Tu ne pourras pas utiliser **`/reportbug`** pendant **7 jours**. "
-                            "Merci de ne signaler que des bugs **réels** et **vérifiables**."
+                            "Ton signalement a été **refusé avec sanction** : il s’agissait d’un **faux rapport "
+                            "volontaire**, d’un **troll** ou d’un **abus évident** (pas d’un simple malentendu).\n\n"
+                            "Tu ne pourras pas utiliser **`/reportbug`** pendant **7 jours**.\n\n"
+                            "_Les signalements pris au sérieux mais qui ne sont pas des bugs (API, redémarrage, etc.) "
+                            "sont traités **sans** cette sanction._"
                         ),
                         color=discord.Color.dark_red(),
                     )
@@ -295,7 +369,7 @@ class OwnerDecisionView(discord.ui.View):
                 child.disabled = True
             try:
                 await interaction.message.edit(
-                    content="**Refusé** — cooldown 7 jours appliqué au joueur.",
+                    content="**Refusé (sanction 7j)** — faux signalement volontaire / troll.",
                     embed=interaction.message.embeds[0] if interaction.message.embeds else None,
                     view=self,
                 )
@@ -305,7 +379,7 @@ class OwnerDecisionView(discord.ui.View):
         finally:
             _owner_lock.discard(key)
 
-    @discord.ui.button(label="Confirmer le bug", style=discord.ButtonStyle.success, emoji="✅")
+    @discord.ui.button(label="Confirmer le bug", style=discord.ButtonStyle.success, emoji="✅", row=1)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not _is_owner(interaction.user.id):
             await interaction.response.send_message("Réservé au propriétaire du bot.", ephemeral=True)
@@ -479,13 +553,14 @@ class ReportBugCog(commands.Cog):
                 "Merci de participer à l’amélioration du bot.\n\n"
                 "• **Un seul bug par report** — ne mélange pas plusieurs problèmes.\n"
                 "• **Un signalement par jour** (reset à minuit, heure de Paris).\n"
-                "• Si tu abuses ou envoies de faux signalements, tu peux être **bloqué** "
-                "ou **sanctionné** 7 jours après un refus.\n\n"
+                "• En cas d’**abus** (faux signalements **volontaires** / troll), le propriétaire peut appliquer "
+                "un **refus avec sanction 7 jours**. Les retours de **bonne foi** qui ne sont finalement pas des bugs "
+                "(API, redémarrage, etc.) sont traités **sans** cette sanction.\n\n"
                 "Clique sur **Rédiger mon report** : un formulaire te demandera :\n"
                 "• la commande ou le système concerné ;\n"
                 "• le problème observé ;\n"
                 "• le comportement attendu ;\n"
-                "• les étapes pour reproduire (ou « N/A »).\n\n"
+                "• les étapes pour reproduire (ou pourquoi c’est impossible à reproduire).\n\n"
                 "Ensuite, vérifie l’aperçu et envoie avec **Envoyer le report**."
             ),
             color=discord.Color.blue(),
