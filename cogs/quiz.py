@@ -86,11 +86,24 @@ class AnimequizTrackOfferView(discord.ui.View):
     """
     Bouton « ajouter au suivi » sur le message de fin de /animequiz : visible par tout le monde,
     chaque clic ajoute la série au suivi **du joueur qui clique** (même logique que /track add).
+    Au timeout (~1 min), le message est supprimé (ou la vue retirée si suppression impossible).
     """
 
     def __init__(self, romaji_title: str) -> None:
         super().__init__(timeout=60.0)
         self.romaji_title = romaji_title
+
+    async def on_timeout(self) -> None:
+        msg = self.message
+        if msg is None:
+            return
+        try:
+            await msg.delete()
+        except (discord.HTTPException, discord.NotFound):
+            try:
+                await msg.edit(view=None)
+            except Exception:
+                pass
 
     @discord.ui.button(label="Ajouter à mon suivi", style=discord.ButtonStyle.success, emoji="📌", row=0)
     async def add_to_track(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -131,9 +144,12 @@ async def _send_animequiz_track_offer(ctx: commands.Context, anime: Dict[str, An
     cov = (anime.get("coverImage") or {}).get("large") or (anime.get("coverImage") or {}).get("extraLarge")
     if cov:
         embed.set_thumbnail(url=cov)
-    embed.set_footer(text="Anime quiz · bouton actif 1 min · /track list")
+    embed.set_footer(text="Anime quiz · ce message disparaît après 1 min · /track list")
     try:
-        await ctx.send(embed=embed, view=AnimequizTrackOfferView(romaji))
+        view = AnimequizTrackOfferView(romaji)
+        msg = await ctx.send(embed=embed, view=view)
+        # Référence explicite pour on_timeout (suppression du message)
+        view.message = msg
     except Exception:
         pass
 
