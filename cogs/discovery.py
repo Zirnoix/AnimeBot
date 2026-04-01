@@ -1,6 +1,7 @@
 """
 !decouverte (aliases: !discover, !randomanime)
 - Tirage aléatoire entre Popularité / Tendance / Score
+- Slash : réponse **éphémère** (ne spam pas le salon)
 - Traduit la description en FR si DEEPL_API_KEY ou LIBRETRANSLATE_URL est défini
 - Boutons: Encore (rafraîchir) / Ajouter au suivi (track)
 """
@@ -41,6 +42,7 @@ query ($page: Int, $sort: [MediaSort]) {
       format
       season
       seasonYear
+      status
       averageScore
       description(asHtml: false)
       siteUrl
@@ -115,11 +117,14 @@ class Discovery(commands.Cog):
 
     # ----------------- helpers -----------------
 
-    async def _fetch_random_media(self, queue_ctx: Optional[commands.Context] = None) -> Optional[Dict]:
+    async def _fetch_random_media(
+        self, queue_ctx: Optional[commands.Context] = None
+    ) -> Optional[tuple[Dict, str]]:
+        """Retourne (media, libellé FR du tri) ou None."""
         BAD_FORMATS = {"MUSIC"}  # ajoute ici si tu veux en exclure d’autres
         for _ in range(8):  # plusieurs tentatives
             page = random.randint(1, 500)
-            sort_key, _ = random.choice(SORTS)
+            sort_key, sort_label = random.choice(SORTS)
             data = await core.query_anilist_async(
                 QUERY, {"page": page, "sort": [sort_key]}, queue_ctx=queue_ctx
             )
@@ -130,12 +135,22 @@ class Discovery(commands.Cog):
             fmt = (media.get("format") or "").upper()
             if fmt in BAD_FORMATS:
                 continue  # on saute et on retente
-            return media
+            return media, sort_label
         return None
 
 
-    async def _build_embed(self, media: Dict) -> Tuple[discord.Embed, str]:
-        sort_label = None  # on ne l’affiche plus ici, pas critique
+    @staticmethod
+    def _status_fr(status: Optional[str]) -> str:
+        s = (status or "").upper()
+        return {
+            "FINISHED": "Terminé",
+            "RELEASING": "En cours",
+            "NOT_YET_RELEASED": "Pas encore diffusé",
+            "CANCELLED": "Annulé",
+            "HIATUS": "En pause",
+        }.get(s, status or "—")
+
+    async def _build_embed(self, media: Dict, *, sort_label: str = "") -> Tuple[discord.Embed, str]:
         title = (
             media.get("title", {}).get("romaji")
             or media.get("title", {}).get("english")
@@ -163,42 +178,64 @@ class Discovery(commands.Cog):
             infos.append(f"Saison : **{media.get('season','?')} {media['seasonYear']}**")
         if score:
             infos.append(f"Score moyen : **{score}/100**")
+        st = media.get("status")
+        if st:
+            infos.insert(0, f"Statut : **{self._status_fr(st)}**")
 
         embed = discord.Embed(
             title=f"🔎 À découvrir : {title}",
             description=f"{desc_display}\n\n{url or ''}",
-            color=discord.Color.blurple()
+            color=discord.Color.from_rgb(88, 101, 242),
         )
         if img:
             embed.set_image(url=img)
         embed.add_field(name="Genres", value=genres, inline=False)
         if infos:
             embed.add_field(name="Infos", value="\n".join(infos), inline=False)
-        footer = "Source : AniList"
+        footer_parts = ["Source : AniList"]
+        if sort_label:
+            footer_parts.append(f"Tirage : {sort_label}")
         if desc_fr:
-            footer += " • Trad auto"
-        footer += " · /linkanilist → /monnext, /mystats, récaps MP"
-        embed.set_footer(text=footer[:2048])
+            footer_parts.append("Trad auto")
+        footer_parts.append("/track add → alertes MP à la sortie d’un épisode")
+        embed.set_footer(text=" · ".join(footer_parts)[:2048])
         return embed, title
 
     # ----------------- command -----------------
+
+    @staticmethod
+    async def _send_hybrid(ctx: commands.Context, *, content: str | None = None, embed=None, view=None) -> None:
+        """Slash : message éphémère (pas de spam salon). Préfixe : message classique."""
+        itx = getattr(ctx, "interaction", None)
+        if itx:
+            if itx.response.is_done():
+                await itx.followup.send(content=content, embed=embed, view=view, ephemeral=True)
+            else:
+                await itx.response.send_message(content=content, embed=embed, view=view, ephemeral=True)
+        else:
+            await ctx.send(content=content, embed=embed, view=view)
 
     @commands.hybrid_command(name="decouverte", aliases=["discover", "randomanime"])
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def decouverte(self, ctx: commands.Context):
         """Propose un anime à découvrir (mix Popularité/Tendance/Score) + boutons."""
-        await core.maybe_defer_hybrid(ctx)
-        async with ctx.typing():
-            try:
-                media = await self._fetch_random_media(ctx)
-                if not media:
-                    return await ctx.send("❌ Impossible de récupérer une recommandation.")
-                embed, title = await self._build_embed(media)
-            except Exception:
-                return await ctx.send("❌ Impossible de récupérer une recommandation.")
+        is_slash = bool(getattr(ctx, "interaction", None))
+        await core.maybe_defer_hybrid(ctx, ephemeral=is_slash)
+        try:
+            if not is_slash:
+                async with ctx.typing():
+                    fetched = await self._fetch_random_media(ctx)
+            else:
+                fetched = await self._fetch_random_media(ctx)
+            if not fetched:
+                return await self._send_hybrid(ctx, content="❌ Impossible de récupérer une recommandation.")
+            media, sort_label = fetched
+            embed, _title = await self._build_embed(media, sort_label=sort_label)
+        except Exception:
+            return await self._send_hybrid(ctx, content="❌ Impossible de récupérer une recommandation.")
 
         view = DiscoverView(self, ctx.author.id, media)
-        await ctx.send(embed=embed, view=view)
+        await self._send_hybrid(ctx, embed=embed, view=view)
 
 
 class DiscoverView(discord.ui.View):
@@ -217,10 +254,11 @@ class DiscoverView(discord.ui.View):
     @discord.ui.button(label="🔁 Encore une", style=discord.ButtonStyle.primary)
     async def again(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            media = await self.cog._fetch_random_media()
-            if not media:
+            fetched = await self.cog._fetch_random_media()
+            if not fetched:
                 return await interaction.response.send_message("❌ Pas de nouveau résultat.", ephemeral=True)
-            embed, _ = await self.cog._build_embed(media)
+            media, sort_label = fetched
+            embed, _ = await self.cog._build_embed(media, sort_label=sort_label)
             self.media = media
             await interaction.response.edit_message(embed=embed, view=self)
         except Exception:

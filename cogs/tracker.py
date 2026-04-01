@@ -229,17 +229,25 @@ class Tracker(commands.Cog):
 
         matches = await self.find_anime_matches(anime, queue_ctx=ctx)
         if not matches:
-            await self._reply(ctx, content=f"❌ Aucun anime trouvé pour **{anime}**.", ephemeral=True)
+            await self._reply(
+                ctx,
+                content=(
+                    f"❌ Aucun résultat AniList pour **{anime}**.\n"
+                    "Essaie un **autre mot-clé** (début du titre romaji, mot distinctif…)."
+                ),
+                ephemeral=True,
+            )
             return
 
         if len(matches) > 1:
             embed = discord.Embed(
-                title="🔍 Plusieurs résultats trouvés",
+                title="📌 Quel anime suivre ?",
                 description=(
-                    "Réponds avec le **numéro** correspondant **dans ce salon** (30s). "
-                    "Ton message sera **supprimé** après pour éviter le spam."
+                    "Choisis un titre : réponds avec le **numéro** **dans ce salon** (30 s). "
+                    "Tu recevras un **MP** quand un **nouvel épisode** sort.\n"
+                    "_Ton message avec le numéro sera supprimé pour limiter le bruit._"
                 ),
-                color=discord.Color.blue()
+                color=discord.Color.from_rgb(88, 101, 242),
             )
             for i, match in enumerate(matches, 1):
                 title = match["title"]["romaji"]
@@ -312,13 +320,20 @@ class Tracker(commands.Cog):
         if selected.get("status"):
             info.append(f"• Statut : {selected['status']}")
 
+        cover = (selected.get("coverImage") or {}).get("large")
         embed = discord.Embed(
-            title="✅ Anime ajouté",
-            description=f"**{title}** a été ajouté à ta liste de suivi.",
-            color=discord.Color.green()
+            title="📺 Ajouté à ton suivi",
+            description=(
+                f"**{title}** — tu recevras un **message privé** avec une **carte** quand un **épisode sort** "
+                f"(fenêtre ~18 h après la diffusion ; pas d’alerte « X minutes avant »).\n"
+                f"Gère ta liste avec **`/track list`** / **`/track remove`**."
+            ),
+            color=discord.Color.from_rgb(67, 181, 129),
         )
+        if cover:
+            embed.set_thumbnail(url=cover)
         if info:
-            embed.add_field(name="Informations", value="\n".join(info), inline=False)
+            embed.add_field(name="Détails", value="\n".join(info), inline=False)
         ok = await self._dm(ctx, embed=embed)
         if ok and ctx.interaction:
             await self._reply(ctx, content="📬 Détails envoyés en **message privé**.", ephemeral=True)
@@ -430,6 +445,7 @@ class Tracker(commands.Cog):
               episodes
               season
               seasonYear
+              coverImage { large }
             }
           }
         }

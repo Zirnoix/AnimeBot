@@ -17,12 +17,12 @@ DESC_OVERRIDE: Dict[str, str] = {
     # Episodes
     "next": "Prochain épisode — mode **serveur** = ta liste du serveur (`/airings`) ; mode **global** = toutes les sorties.",
     "planning": "Planning de la semaine — mode **serveur** = liste du serveur ; **global** = toutes les sorties.",
-    "decouverte": "Découvre un anime (suggestion ou fiche).",
+    "decouverte": "Anime au hasard (AniList) — en **slash** la réponse est **éphémère** ; boutons Encore / Suivi.",
     "monnext": "Ton prochain épisode (compte AniList lié requis).",
     "monplanning": "Ton planning hebdomadaire (compte AniList lié).",
 
     # Minigames
-    "animequiz": "Quiz anime (solo).",
+    "animequiz": "Quiz anime (solo) — à la fin : bouton **Ajouter à mon suivi** (/track) pour tous.",
     "animequizmulti": "Quiz anime multi-joueurs.",
     "duel": "Duel de quiz entre 2 joueurs.",
     "guess": "Alias historique : utilise **`/guessyear`**, **`/guessepisodes`**, **`/guessgenre`**, **`/guesscharacter`** ou **`/minijeux`**.",

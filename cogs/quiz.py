@@ -1,7 +1,7 @@
 """
 Quiz and duel commands (AniList live).
 
-- /animequiz  (choices de difficulté)
+- /animequiz  (choices de difficulté) — après la manche, message optionnel « Ajouter au suivi » pour tous
 - /animequizmulti
 - /duel       (choices manches + difficulté)
 - /quiztop
@@ -80,6 +80,63 @@ def _mark_duel_ended(uid_a: int, uid_b: int) -> None:
 def _is_jsp(guess: str) -> bool:
     """Réponse type « je passe » (jsp) pour le duel — aligné sur IGNORED_ANSWERS."""
     return (guess or "").strip().lower() in IGNORED_ANSWERS
+
+
+class AnimequizTrackOfferView(discord.ui.View):
+    """
+    Bouton « ajouter au suivi » sur le message de fin de /animequiz : visible par tout le monde,
+    chaque clic ajoute la série au suivi **du joueur qui clique** (même logique que /track add).
+    """
+
+    def __init__(self, romaji_title: str) -> None:
+        super().__init__(timeout=60.0)
+        self.romaji_title = romaji_title
+
+    @discord.ui.button(label="Ajouter à mon suivi", style=discord.ButtonStyle.success, emoji="📌", row=0)
+    async def add_to_track(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        title = self.romaji_title
+        tracker = core.load_tracker()
+        uid = str(interaction.user.id)
+        lst = tracker.setdefault(uid, [])
+        nrm = normalize(title)
+        if any(normalize(t) == nrm for t in lst):
+            await interaction.response.send_message(
+                "ℹ️ Tu **suivis déjà** cette série.",
+                ephemeral=True,
+            )
+            return
+        lst.append(title)
+        tracker[uid] = lst
+        core.save_tracker(tracker)
+        await interaction.response.send_message(
+            f"✅ **{title}** ajouté à ton suivi — tu recevras un **MP** quand un épisode sort.",
+            ephemeral=True,
+        )
+
+
+async def _send_animequiz_track_offer(ctx: commands.Context, anime: Dict[str, Any]) -> None:
+    """Après une manche d’/animequiz, propose d’ajouter l’anime au tracker personnel."""
+    romaji = (anime.get("title") or {}).get("romaji")
+    if not romaji:
+        return
+    embed = discord.Embed(
+        title="🔔 Suivi des sorties",
+        description=(
+            f"Série : **{romaji}**\n\n"
+            "Ajoute-la à **ta** liste personnelle : **alerte en MP** quand un épisode sort (comme **`/track add`**).\n"
+            "**Tout le monde** peut utiliser le bouton : chacun ajoute à **son** suivi."
+        ),
+        color=discord.Color.teal(),
+    )
+    cov = (anime.get("coverImage") or {}).get("large") or (anime.get("coverImage") or {}).get("extraLarge")
+    if cov:
+        embed.set_thumbnail(url=cov)
+    embed.set_footer(text="Anime quiz · bouton actif 1 min · /track list")
+    try:
+        await ctx.send(embed=embed, view=AnimequizTrackOfferView(romaji))
+    except Exception:
+        pass
+
 
 # --- filtres AnimeQuiz ---
 ANI_MIN_YEAR   = 1985
@@ -450,6 +507,7 @@ class Quiz(commands.Cog):
                     ]
                     lines = [x for x in lines if x]
                     await ctx.send("⏭️ Passé.\n" + "\n".join(lines))
+                    await _send_animequiz_track_offer(ctx, anime)
                     return
 
                 if self.title_matcher.find_matches(guess, correct_titles):
@@ -476,11 +534,14 @@ class Quiz(commands.Cog):
                     other_titles = [t for t in correct_titles if normalize(t) != normalize(guess)]
                     if other_titles:
                         await ctx.send(f"💡 Autres titres acceptés : {', '.join(other_titles)}")
+                    await _send_animequiz_track_offer(ctx, anime)
                 else:
                     await ctx.send(f"❌ Mauvaise réponse. C’était **{anime['title'].get('romaji')}**.")
+                    await _send_animequiz_track_offer(ctx, anime)
 
             except asyncio.TimeoutError:
                 await ctx.send(f"⏰ Temps écoulé ! La bonne réponse était **{anime['title'].get('romaji')}**.")
+                await _send_animequiz_track_offer(ctx, anime)
 
         except Exception as e:
             logger.error(f"Erreur dans animequiz: {e}")
