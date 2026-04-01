@@ -264,6 +264,20 @@ def get_report(report_id: int) -> Optional[dict[str, Any]]:
     return None
 
 
+def count_confirmed_reports_for_user(user_id: int) -> int:
+    """Nombre de signalements validés (confirmés) par le propriétaire — affichage /mycard, etc."""
+    uid = str(int(user_id))
+    n = 0
+    with core.DATA_JSON_LOCK:
+        st = load_store()
+        for r in st.get("reports") or []:
+            if str(r.get("user_id")) != uid:
+                continue
+            if str(r.get("status")) == "confirmed":
+                n += 1
+    return n
+
+
 def refuse_report(report_id: int, _owner_id: int) -> Tuple[bool, Optional[dict[str, Any]]]:
     """Refus : 7 jours de blocage pour l’utilisateur."""
     rid = int(report_id)

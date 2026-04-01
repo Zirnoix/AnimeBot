@@ -56,7 +56,8 @@ DESC_OVERRIDE: Dict[str, str] = {
     "mission": "Ta mission du jour : récupère l’XP ou reroll (1/sem.).",
 
     # Stats
-    "mycard": "Carte profil AniList (stats, badges, streak).",
+    "mycard": "Carte profil : XP, quiz, streak, AniList ; encart **bugs validés** si tu en as (`/reportbug`).",
+    "reportbug": "Signale un bug en **MP** ; **XP** si le signalement est confirmé — compteur sur **`/mycard`**.",
     "mystats": "Stats AniList (vus, jours, score moyen, genre favori).",
     "mybadges": "Trophées par catégorie (rangs Initié → Mythe) et barres de progression.",
     "duelstats": "Duel d’engagement AniList : complétés, en cours, épisodes, temps (+ note si les deux notent).",
@@ -125,7 +126,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "linkanilist", "verifyanilist", "unlink"
     ]),
     ("📊 Pages Statistiques", [
-        "mycard", "mystats", "mybadges", "duelstats", "quiztop", "animetop", "quizlevels", "myrank", "stats"
+        "mycard", "reportbug", "mystats", "mybadges", "duelstats", "quiztop", "animetop", "quizlevels", "myrank", "stats"
     ]),
     ("🧭 Pages Tracker", [
         "track", "track add", "track list", "track remove", "track clear"
@@ -524,6 +525,8 @@ class Help(commands.Cog):
             ("/minijeux", DESC_OVERRIDE["minijeux"]),
             ("/next", DESC_OVERRIDE["next"]),
             ("/planning", DESC_OVERRIDE["planning"]),
+            ("/mycard", DESC_OVERRIDE["mycard"]),
+            ("/reportbug", DESC_OVERRIDE["reportbug"]),
             ("/mystats", DESC_OVERRIDE["mystats"]),
             ("/linkanilist", DESC_OVERRIDE["linkanilist"]),
             ("/recap", DESC_OVERRIDE["recap"]),

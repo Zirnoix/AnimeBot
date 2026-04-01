@@ -80,6 +80,13 @@ class BotInfo(commands.Cog):
             inline=False,
         )
 
+        embed.add_field(
+            name="🐞 Signaler un bug",
+            value="**`/reportbug`** — signale un bug en **MP** ; si tu aides à corriger un vrai problème, "
+            "tu peux gagner de l’**XP** (voir aussi **`/mycard`** si tu as déjà des bugs validés).",
+            inline=False,
+        )
+
         try:
             uid = interaction.user.id
             linked = core.get_linked_username(uid)
@@ -98,7 +105,7 @@ class BotInfo(commands.Cog):
         except Exception:
             pass
 
-        embed.set_footer(text="/help · /vote · /airings · /linkanilist")
+        embed.set_footer(text="/help · /vote · /reportbug · /airings · /linkanilist")
         try:
             if self.bot.user and self.bot.user.display_avatar:
                 embed.set_thumbnail(url=self.bot.user.display_avatar.url)

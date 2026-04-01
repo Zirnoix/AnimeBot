@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules import core
+from modules import bug_report as bug_report_store
 from modules.badges import BADGES, BADGE_SECTION_TITLE_FR, evaluate_tier, iter_badges_sorted, tier_name_fr
 from modules.badge_helpers import badge_count_for_spec
 from modules.emoji_utils import get_emoji
@@ -407,7 +408,7 @@ class MyCardTabSelect(discord.ui.Select):
                 label="Aperçu",
                 value="overview",
                 emoji="📋",
-                description="Niveau, XP, quiz, streak",
+                description="Niveau, XP, quiz, streak, encart bugs si validés",
                 default=(act == "overview"),
             ),
             discord.SelectOption(
@@ -448,7 +449,7 @@ class MyCardTabSelect(discord.ui.Select):
 
 
 # ---------- BUILD DES EMBEDS ----------
-def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days):
+def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days, bug_validated: int = 0):
     bar = _xp_bar(xp, next_xp)
     e = discord.Embed(
         title=f"🎴 Profil de {ctx.author.display_name}",
@@ -472,6 +473,15 @@ def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days):
     if next_pal:
         streak_line += f" • Prochain palier : **{streak_days}/{next_pal}**"
     e.add_field(name="🔥 Streak", value=streak_line, inline=False)
+    if bug_validated > 0:
+        e.add_field(
+            name="🐞 Signalements de bugs",
+            value=(
+                f"**{bug_validated}** bug(s) **validé(s)** par le staff — merci pour ton aide !\n"
+                "_Tu peux en signaler d’autres avec **`/reportbug`** (XP si le bug est confirmé)._"
+            ),
+            inline=False,
+        )
     al_name = core.get_linked_username(ctx.author.id)
     if al_name:
         e.add_field(
@@ -832,13 +842,18 @@ class Profile(commands.Cog):
         counts = _get_user_counts(user_id)
         streak_days = int(counts.get("streak_days", 0))
 
+        try:
+            bug_validated = bug_report_store.count_confirmed_reports_for_user(user_id)
+        except Exception:
+            bug_validated = 0
+
         # Page 1 par défaut
-        embed = _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days)
+        embed = _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days, bug_validated)
         view = MyCardNavigator(
             ctx,
             ctx.author,
             {
-                "overview": (level, xp, next_xp, title, quiz_score, streak_days),
+                "overview": (level, xp, next_xp, title, quiz_score, streak_days, bug_validated),
                 "minis": mini_scores,
                 "counts": counts,
             },

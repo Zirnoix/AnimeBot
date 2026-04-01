@@ -20,6 +20,8 @@ PRESENCE_SCENES = [
     "Une question ? Commence par /help",
     "Améliorations régulières — restez à l’affût",
     "Lien AniList, rappels, stats : /help",
+    "/reportbug — XP bonus (vrai bug)",
+    "Bug repéré ? /reportbug",
 ]
 
 class Presence(commands.Cog):
