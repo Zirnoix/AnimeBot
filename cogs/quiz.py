@@ -300,7 +300,7 @@ class DuelInviteView(discord.ui.View):
 
 
 class QuizLevelsSelect(discord.ui.Select):
-    """Menu : titres quiz (score du mois) ou rangs XP globaux (/mycard)."""
+    """Menu : titres quiz (score du mois) ou rangs XP globaux (/profile)."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -313,7 +313,7 @@ class QuizLevelsSelect(discord.ui.Select):
                     default=True,
                 ),
                 discord.SelectOption(
-                    label="Rangs XP globaux (/mycard)",
+                    label="Rangs XP globaux (/profile)",
                     value="xp",
                     emoji="🌟",
                 ),
@@ -1076,7 +1076,7 @@ class Quiz(commands.Cog):
             em_xp = discord.Embed(
                 title="🌟 Rangs XP (global)",
                 description=(
-                    "Ton **niveau** et ta barre d’XP sur **`/mycard`** et **`/myrank`** : "
+                    "Ton **niveau** et ta barre d’XP sur **`/profile`** et **`/myrank`** : "
                     "progression **sur toute la durée** (check-in, mini-jeux, quiz…), **sans** reset mensuel."
                 ),
                 color=discord.Color.purple(),
@@ -1144,13 +1144,13 @@ class Quiz(commands.Cog):
             if alu:
                 embed.add_field(
                     name="🔗 AniList",
-                    value=f"Compte lié : **`{alu}`** — `/mystats` sans pseudo, `/duelstats`, récaps…",
+                    value=f"Compte lié : **`{alu}`**",
                     inline=False,
                 )
             else:
                 embed.add_field(
                     name="🔗 AniList",
-                    value="Non lié — **`/linkanilist`** pour lier ton profil (stats, duel de stats, MP…).",
+                    value="Non lié — **`/linkanilist`**",
                     inline=False,
                 )
 

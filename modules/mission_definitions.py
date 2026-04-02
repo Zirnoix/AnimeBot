@@ -116,12 +116,12 @@ MISSION_DEFINITIONS: List[MissionDef] = [
     ),
     MissionDef(
         "use_mycard",
-        "Ouvre ta carte avec `/mycard`",
+        "Ouvre ta carte avec `/mycard` ou `/profile`",
         _fs("mycard"),
         1,
         "EASY",
         False,
-        "Ouvre **`/mycard`** pour afficher ta carte de membre.",
+        "Ouvre **`/mycard`** (rapide) ou **`/profile`** (détail).",
     ),
     MissionDef(
         "use_mystats",

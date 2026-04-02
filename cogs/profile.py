@@ -1,4 +1,4 @@
-# cogs/profile.py — mycard en onglets + mybadges
+# cogs/profile.py — /mycard (carte), /profile (détail), /mybadges (trophées)
 from __future__ import annotations
 
 import asyncio
@@ -278,6 +278,62 @@ def _pct_bar(cur: int, total: int, width: int = 14) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+def _pct_bar_pretty(cur: int, total: int, width: int = 12) -> str:
+    """Barre visuelle (badges / progression) — carrés violets + gris."""
+    if total <= 0:
+        return "⬜" * width
+    p = max(0.0, min(1.0, cur / total))
+    filled = int(round(p * width))
+    return "🟪" * filled + "⬜" * (width - filled)
+
+
+_ENGAGE_MINI_KEYS = frozenset({"mission_completed", "checkin", "mycard_visits"})
+
+
+def _top_mini_game_play(mini_scores: dict) -> tuple[str, int] | None:
+    """Mini-jeu le plus « joué » (compteur max hors engagement)."""
+    if not mini_scores:
+        return None
+    best_k = None
+    best_v = -1
+    for k, raw in mini_scores.items():
+        if k in _ENGAGE_MINI_KEYS:
+            continue
+        try:
+            v = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if v > best_v:
+            best_v = v
+            best_k = k
+    if best_k is None or best_v <= 0:
+        return None
+    return (_mini_label(best_k), best_v)
+
+
+def _top_mini_game_wins(mini_scores: dict) -> tuple[str, int] | None:
+    """Meilleure stat de victoires (ex. duels gagnés) si présente."""
+    if not mini_scores:
+        return None
+    dv = int(mini_scores.get("duel_victory") or 0)
+    if dv > 0:
+        return (_mini_label("duel_victory"), dv)
+    return None
+
+
+def _format_minis_compact(mini_scores: dict) -> str:
+    if not mini_scores:
+        return "— Aucune activité enregistrée."
+    items = sorted(
+        ((k, int(v)) for k, v in mini_scores.items() if int(v or 0) > 0),
+        key=lambda x: -x[1],
+    )[:20]
+    if not items:
+        return "— Aucune activité enregistrée."
+    lines = [f"• **{_mini_label(k)}** — {_fmt_number(v)}" for k, v in items]
+    return "\n".join(lines)[:1020]
+
+
 def _fmt_number(n: int) -> str:
     return f"{n:,}".replace(",", " ")
 
@@ -431,216 +487,117 @@ def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
     }
 
 
-# ---------- VUE À ONGLETS (menu déroulant : pas de saut de boutons) ----------
-class MyCardNavigator(discord.ui.View):
-    """Menu déroulant : reste aligné ; l’onglet actif est coché dans la liste."""
-
-    def __init__(self, ctx: commands.Context, author: discord.abc.User, data: dict, bot: commands.Bot, active: str = "overview"):
-        super().__init__(timeout=120)
-        self.ctx = ctx
-        self.author = author
-        self.data = data
-        self.bot = bot
-        self.active = active
-        self.add_item(MyCardTabSelect(self))
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author.id:
-            await interaction.response.send_message("Ce panneau n’est pas pour toi.", ephemeral=True)
-            return False
-        return True
-
-    async def on_timeout(self) -> None:
-        for c in self.children:
-            if isinstance(c, (discord.ui.Button, discord.ui.Select)):
-                c.disabled = True
-
-
-class MyCardTabSelect(discord.ui.Select):
-    def __init__(self, nav: MyCardNavigator):
-        self.nav = nav
-        act = nav.active
-        opts = [
-            discord.SelectOption(
-                label="Aperçu",
-                value="overview",
-                emoji="📋",
-                description="Niveau, XP, quiz, streak, anime favori, encart bugs si validés",
-                default=(act == "overview"),
-            ),
-            discord.SelectOption(
-                label="Mini-jeux",
-                value="minis",
-                emoji="🎮",
-                description="Scores par catégorie",
-                default=(act == "minis"),
-            ),
-            discord.SelectOption(
-                label="Trophées",
-                value="badges",
-                emoji="🏅",
-                description="Progression des trophées",
-                default=(act == "badges"),
-            ),
-        ]
-        ph = {
-            "overview": "📋 Aperçu — carte",
-            "minis": "🎮 Mini-jeux",
-            "badges": "🏅 Trophées",
-        }.get(act, "Choisir un onglet…")
-        super().__init__(placeholder=ph, min_values=1, max_values=1, options=opts, row=0)
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        tab = self.values[0]
-        ctx = self.nav.ctx
-        d = self.nav.data
-        bot = self.nav.bot
-        if tab == "overview":
-            emb = _embed_overview(ctx, *d["overview"])
-        elif tab == "minis":
-            emb = _embed_minis(ctx, d["minis"])
-        else:
-            emb = _embed_badges(ctx, bot, d["counts"])
-        nv = MyCardNavigator(ctx, self.nav.author, d, bot, active=tab)
-        await interaction.response.edit_message(embed=emb, view=nv)
-
-
-# ---------- BUILD DES EMBEDS ----------
-def _embed_overview(
-    ctx,
-    level,
-    xp,
-    next_xp,
-    title,
-    quiz_score,
-    streak_days,
-    bug_validated: int = 0,
-    anime_fav: Optional[dict] = None,
-):
-    bar = _xp_bar(xp, next_xp)
+# ---------- BUILD DES EMBEDS (carte / profil) ----------
+def _embed_mycard_simple(
+    ctx: commands.Context,
+    *,
+    anime_fav: Optional[dict],
+    al_name: Optional[str],
+    mini_scores: dict,
+    bug_validated: int,
+) -> discord.Embed:
+    """Carte courte : pas de menu, pas de timeout."""
     e = discord.Embed(
-        title=f"🎴 Profil de {ctx.author.display_name}",
+        title=f"🎴 {ctx.author.display_name}",
+        description="Vue rapide — tout le détail : **`/profile`**",
         color=_EMBED_OVERVIEW,
     )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
-    # Trois colonnes : évite le débordement titre+niveau dans une seule ligne + quiz à côté de la barre
-    e.add_field(name="🏅 Titre", value=f"**{title}**", inline=True)
-    e.add_field(name="🧬 Niveau", value=f"**{level}**", inline=True)
-    e.add_field(name="🧪 XP", value=f"{_fmt_number(xp)} / {_fmt_number(next_xp)}", inline=True)
+    if al_name:
+        e.add_field(name="🔗 AniList", value=f"`{al_name}`", inline=False)
+    else:
+        e.add_field(name="🔗 AniList", value="Non lié · `/linkanilist`", inline=False)
     if anime_fav:
         ft = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
         su = (anime_fav.get("site_url") or "").strip()
         fav_val = f"[{ft}]({su})" if su else f"**{ft}**"
         e.add_field(name="⭐ Anime favori", value=fav_val, inline=False)
-    e.add_field(name="📈 Progression", value=bar, inline=False)
-    e.add_field(name="🏆 Score Quiz", value=str(_fmt_number(quiz_score)), inline=False)
+    tp = _top_mini_game_play(mini_scores or {})
+    if tp:
+        e.add_field(name="🎮 Le plus joué", value=f"{tp[0]} · **{_fmt_number(tp[1])}**", inline=True)
+    tw = _top_mini_game_wins(mini_scores or {})
+    if tw:
+        e.add_field(name="🏆 Plus de victoires", value=f"{tw[0]} · **{_fmt_number(tw[1])}**", inline=True)
+    if bug_validated > 0:
+        e.add_field(name="🐞 Bugs validés (staff)", value=f"**{bug_validated}**", inline=True)
+    e.set_footer(text="/profile · /mybadges · /animefav")
+    return e
 
-    # Streak
+
+def _embed_profile_full(
+    ctx: commands.Context,
+    bot: commands.Bot,
+    *,
+    level: int,
+    xp: int,
+    next_xp: int,
+    title: str,
+    quiz_score: int,
+    streak_days: int,
+    bug_validated: int,
+    anime_fav: Optional[dict],
+    mini_scores: dict,
+    counts: dict,
+) -> discord.Embed:
+    """Profil détaillé : XP, streak, mini-jeux, sanctions, trophées (aperçu)."""
+    bar = _xp_bar(xp, next_xp)
+    e = discord.Embed(
+        title=f"📋 Profil — {ctx.author.display_name}",
+        description="Stats complètes sur le bot (niveau, activité, trophées…).",
+        color=_EMBED_MINIS,
+    )
+    e.set_thumbnail(url=ctx.author.display_avatar.url)
+    e.add_field(name="🏅 Titre", value=f"**{title}**", inline=True)
+    e.add_field(name="🧬 Niveau", value=f"**{level}**", inline=True)
+    e.add_field(name="🧪 XP", value=f"{_fmt_number(xp)} / {_fmt_number(next_xp)}", inline=True)
+    e.add_field(name="📈 Progression XP", value=bar, inline=False)
+    e.add_field(name="🏆 Score quiz", value=str(_fmt_number(quiz_score)), inline=False)
+
     next_pal = None
     for t in sorted(BADGES.get("serie", {}).get("thresholds", [])):
         if streak_days < t:
             next_pal = t
             break
-    streak_line = f"🔥 Série actuelle : **{streak_days}** jour(s)"
+    streak_line = f"**{streak_days}** jour(s)"
     if next_pal:
-        streak_line += f" • Prochain palier : **{streak_days}/{next_pal}**"
-    e.add_field(name="🔥 Streak", value=streak_line, inline=False)
+        streak_line += f" · prochain palier série : **{streak_days}/{next_pal}**"
+    e.add_field(name="🔥 Streak (check-in)", value=streak_line, inline=False)
+
     if bug_validated > 0:
         e.add_field(
-            name="🐞 Signalements de bugs",
-            value=(
-                f"**{bug_validated}** bug(s) **validé(s)** par le staff — merci pour ton aide !\n"
-                "_Tu peux en signaler d’autres avec **`/reportbug`** (XP si le bug est confirmé)._"
-            ),
+            name="🐞 Bugs validés",
+            value=f"**{bug_validated}** — _signaler : `/reportbug`_",
             inline=False,
         )
+
     al_name = core.get_linked_username(ctx.author.id)
     if al_name:
-        e.add_field(
-            name="🔗 AniList",
-            value=f"Compte lié : **`{al_name}`**",
-            inline=False,
-        )
+        e.add_field(name="🔗 AniList", value=f"Compte lié : **`{al_name}`**", inline=False)
     else:
-        e.add_field(
-            name="🔗 AniList",
-            value="Non lié — **`/linkanilist`** pour stats perso, récaps MP, `/mystats` sans pseudo, etc.",
-            inline=False,
-        )
+        e.add_field(name="🔗 AniList", value="Non lié — `/linkanilist`", inline=False)
+
+    if anime_fav:
+        ft = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
+        su = (anime_fav.get("site_url") or "").strip()
+        fav_val = f"[{ft}]({su})" if su else f"**{ft}**"
+        e.add_field(name="⭐ Anime favori", value=fav_val, inline=False)
+
     gg_pen = core.get_guess_genre_penalty_count(ctx.author.id)
-    e.add_field(
-        name="⚠️ Sanctions Guess genre",
-        value=str(gg_pen) if gg_pen else "0",
-        inline=False,
-    )
-    e.set_footer(text="Onglet : menu ci-dessous")
-    return e
+    e.add_field(name="⚠️ Sanctions Guess genre", value=str(gg_pen) if gg_pen else "0", inline=False)
 
+    e.add_field(name="🎮 Activité (compteurs)", value=_format_minis_compact(mini_scores), inline=False)
 
-def _embed_minis(ctx, mini_scores):
-    e = discord.Embed(
-        title="🎮 Mini-jeux",
-        description=(
-            "Barres **relatives** au meilleur score **dans chaque bloc** (pas des records globaux)."
-        ),
-        color=_EMBED_MINIS,
-    )
-    e.set_thumbnail(url=ctx.author.display_avatar.url)
-    blocks = _mini_group_blocks(mini_scores)
-    if not blocks:
-        e.add_field(name="Stats", value="— Aucune partie enregistrée pour l’instant.", inline=False)
-        e.set_footer(text="Onglet : menu ci-dessous")
-    else:
-        total = sum(int(v) for v in mini_scores.values())
-        for emoji, title, rows in blocks:
-            block_txt = _format_mini_group(emoji, title, rows)
-            if len(block_txt) < 1024:
-                e.add_field(name="\u200b", value=block_txt, inline=False)
-            else:
-                # Discord embed field limit
-                e.add_field(name="\u200b", value=block_txt[:1020] + "…", inline=False)
-        e.set_footer(text=f"Total compté : {_fmt_number(total)} · Onglet : menu ci-dessous")
-    return e
-
-
-def _embed_badges(ctx, bot, counts):
     s = _badge_mycard_summary(bot, counts)
     vt = max(1, int(s["visible_total"] or 1))
     un = int(s["unlocked_n"] or 0)
     pct = min(100, int(round(100 * un / vt))) if s["visible_total"] else 0
-    bar = _pct_bar(un, vt, 14)
-    e = discord.Embed(
-        title="🏅 Trophées",
-        description=(
-            f"{bar} **{pct}%** · **{un}** / **{s['visible_total']}** séries avec au moins un rang (**Initié → Mythe**)\n"
-            f"_Détail par catégorie : **`/mybadges`**_"
-        ),
-        color=_EMBED_BADGES,
+    badge_line = (
+        f"{_pct_bar_pretty(un, vt, 10)} **{pct}%** — **{un}/{s['visible_total']}** séries\n"
+        f"_Rangs : Initié → Confirmé → Vétéran → Élite → Mythe · détail : `/mybadges`_"
     )
-    e.set_thumbnail(url=ctx.author.display_avatar.url)
-    if s["unlocked_lines"]:
-        body = "\n".join(f"• {line}" for line in s["unlocked_lines"])
-        if s["unlocked_extra"] > 0:
-            body += f"\n_… **+{s['unlocked_extra']}** autre(s) dans `/mybadges`_"
-        e.add_field(name="En poche", value=body[:1024], inline=False)
-    else:
-        e.add_field(
-            name="En poche",
-            value="— Aucun palier encore. Lance des mini-jeux ou entretiens ta série !",
-            inline=False,
-        )
+    e.add_field(name="🏅 Trophées (aperçu)", value=badge_line[:1024], inline=False)
 
-    if s["next_lines"]:
-        nxt = "\n".join(f"• {line}" for line in s["next_lines"])
-        e.add_field(name="Les plus proches", value=nxt[:1024], inline=False)
-    else:
-        e.add_field(
-            name="Les plus proches",
-            value="— Rien en attente côté pistes visibles (ou déjà au max).",
-            inline=False,
-        )
-
-    e.set_footer(text="Onglet : menu ci-dessous")
+    e.set_footer(text="/mybadges · /mycard")
     return e
 
 
@@ -685,7 +642,7 @@ def _build_mybadges_payload(bot: commands.Bot, counts: dict) -> dict[str, Any]:
             need = int(thresholds[0])
             rest = max(0, need - count)
             pct = min(100, int(round(100 * count / need))) if need else 0
-            bar = _pct_bar(count, need, 10)
+            bar = _pct_bar_pretty(count, need, 10)
             _append_badge_section_header(locked, sec_l, cat)
             locked.append(
                 f"{bar} **{spec['name']}** — {count}/{need} ({pct}%) · reste **{rest}**\n"
@@ -722,37 +679,49 @@ def _chunk_text_blocks(lines: list[str], max_len: int = 950) -> list[str]:
     return chunks
 
 
+def _mybadges_embed_color(section: str) -> discord.Color:
+    if section == "summary":
+        return discord.Color.from_rgb(163, 89, 255)
+    if section == "unlocked":
+        return discord.Color.from_rgb(46, 204, 113)
+    if section == "locked":
+        return discord.Color.from_rgb(241, 196, 15)
+    return discord.Color.dark_gray()
+
+
 def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str, Any], section: str) -> discord.Embed:
     """section: summary | unlocked | locked | mystery"""
     s = payload["summary"]
     vt = max(1, int(s["visible_total"] or 1))
     un = int(s["unlocked_n"] or 0)
     pct = min(100, int(round(100 * un / vt))) if s["visible_total"] else 0
-    bar = _pct_bar(un, vt, 14)
+    bar = _pct_bar_pretty(un, vt, 14)
+    col = _mybadges_embed_color(section)
 
     if section == "summary":
         e = discord.Embed(
             title=f"🏅 Trophées — {ctx.author.display_name}",
             description=(
-                f"{bar} **{pct}%** · **{un}** rangs obtenus sur **{s['visible_total']}** séries visibles\n"
-                f"_Rangs : **Initié** → **Confirmé** → **Vétéran** → **Élite** → **Mythe** · Menu ci-dessous._"
+                f"{bar}  **{pct}%** complété\n"
+                f"**{un}** / **{s['visible_total']}** séries avec au moins un rang\n\n"
+                "**Rangs :** 🌱 Initié → **Confirmé** → **Vétéran** → **Élite** → **Mythe** ✨"
             ),
-            color=_EMBED_BADGES,
+            color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
         if s["next_lines"]:
             e.add_field(
-                name="Prochains paliers (les plus proches)",
+                name="🎯 Prochains paliers",
                 value="\n".join(f"• {x}" for x in s["next_lines"])[:1024],
                 inline=False,
             )
         else:
-            e.add_field(name="Prochains paliers", value="— Rien en attente.", inline=False)
+            e.add_field(name="🎯 Prochains paliers", value="— Rien en attente.", inline=False)
         if s["unlocked_lines"]:
             snap = "\n".join(f"• {x}" for x in s["unlocked_lines"][:6])
             if s["unlocked_extra"] > 0:
-                snap += f"\n_… **+{s['unlocked_extra']}** dans l’onglet « Débloqués »_"
-            e.add_field(name="Aperçu des obtenus", value=snap[:1024], inline=False)
+                snap += f"\n_… **+{s['unlocked_extra']}** dans « Débloqués »_"
+            e.add_field(name="✨ En poche (aperçu)", value=snap[:1024], inline=False)
         e.set_footer(text="Menu : changer de section sans nouvelle commande")
         return e
 
@@ -762,7 +731,7 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
         e = discord.Embed(
             title=f"✅ Débloqués — {ctx.author.display_name}",
             description=f"**{len(lines)}** trophée(s) avec au moins un palier.",
-            color=_EMBED_BADGES,
+            color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
         if not chunks:
@@ -781,8 +750,8 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
         chunks = _chunk_text_blocks(lines)
         e = discord.Embed(
             title=f"🎯 À débloquer — {ctx.author.display_name}",
-            description=f"**{len(lines)}** piste(s) en cours.",
-            color=_EMBED_BADGES,
+            description=f"**{len(lines)}** piste(s) en cours — barres **🟪** = progression vers le palier.",
+            color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
         if not chunks:
@@ -799,7 +768,7 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
     e = discord.Embed(
         title=f"🔒 Badges secrets — {ctx.author.display_name}",
         description="Tant que le palier n’est pas atteint, le nom reste masqué.",
-        color=discord.Color.dark_gray(),
+        color=col,
     )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
     if not lines:
@@ -812,7 +781,7 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
 
 class MyBadgesNavigator(discord.ui.View):
     def __init__(self, ctx: commands.Context, author: discord.abc.User, bot: commands.Bot, payload: dict[str, Any], section: str = "summary"):
-        super().__init__(timeout=180)
+        super().__init__(timeout=3600.0)
         self.ctx = ctx
         self.author = author
         self.bot = bot
@@ -883,23 +852,53 @@ class MyBadgesSectionSelect(discord.ui.Select):
 
 # ---------- COG ----------
 class Profile(commands.Cog):
-    """Profil + stats + badges (onglets) + commande mybadges dédiée."""
+    """Carte courte (/mycard), profil détaillé (/profile), trophées (/mybadges)."""
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @commands.hybrid_command(name="mycard", description="Affiche ta carte de membre (onglets)")
+    @commands.hybrid_command(name="mycard", description="Carte rapide : AniList, anime favori, activité, bugs validés.")
     @commands.cooldown(1, 20, commands.BucketType.user)
     async def mycard(self, ctx: commands.Context) -> None:
         await core.maybe_defer_hybrid(ctx)
         user_id = ctx.author.id
-        user_id_str = str(user_id)
 
         try:
             core.add_mini_score(user_id, "mycard_visits", 1)
         except Exception:
             pass
 
-        # Données globales
+        mini_scores = core.get_mini_scores(user_id) or {}
+        try:
+            bug_validated = bug_report_store.count_confirmed_reports_for_user(user_id)
+        except Exception:
+            bug_validated = 0
+        anime_fav = core.get_anime_favorite(user_id)
+        al_name = core.get_linked_username(user_id)
+
+        embed = _embed_mycard_simple(
+            ctx,
+            anime_fav=anime_fav,
+            al_name=al_name,
+            mini_scores=mini_scores,
+            bug_validated=bug_validated,
+        )
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_command(
+        name="profile",
+        description="Profil détaillé : XP, streak, mini-jeux, sanctions, trophées (aperçu).",
+    )
+    @commands.cooldown(1, 25, commands.BucketType.user)
+    async def profile_cmd(self, ctx: commands.Context) -> None:
+        is_slash = bool(getattr(ctx, "interaction", None))
+        if is_slash and ctx.guild is not None:
+            await core.maybe_defer_hybrid(ctx, ephemeral=True)
+        else:
+            await core.maybe_defer_hybrid(ctx)
+
+        user_id = ctx.author.id
+        user_id_str = str(user_id)
+
         levels = core.load_levels()
         user_data = levels.get(user_id_str, {"xp": 0, "level": 0})
         xp = int(user_data.get("xp", 0))
@@ -910,7 +909,6 @@ class Profile(commands.Cog):
         scores = core.load_scores()
         quiz_score = int(scores.get(user_id_str, 0))
         mini_scores = core.get_mini_scores(user_id) or {}
-
         counts = _get_user_counts(user_id)
         streak_days = int(counts.get("streak_days", 0))
 
@@ -921,32 +919,25 @@ class Profile(commands.Cog):
 
         anime_fav = core.get_anime_favorite(user_id)
 
-        # Page 1 par défaut
-        embed = _embed_overview(
-            ctx, level, xp, next_xp, title, quiz_score, streak_days, bug_validated, anime_fav
-        )
-        view = MyCardNavigator(
+        embed = _embed_profile_full(
             ctx,
-            ctx.author,
-            {
-                "overview": (
-                    level,
-                    xp,
-                    next_xp,
-                    title,
-                    quiz_score,
-                    streak_days,
-                    bug_validated,
-                    anime_fav,
-                ),
-                "minis": mini_scores,
-                "counts": counts,
-            },
             self.bot,
-            active="overview",
+            level=level,
+            xp=xp,
+            next_xp=next_xp,
+            title=title,
+            quiz_score=quiz_score,
+            streak_days=streak_days,
+            bug_validated=bug_validated,
+            anime_fav=anime_fav,
+            mini_scores=mini_scores,
+            counts=counts,
         )
-
-        await ctx.send(embed=embed, view=view)
+        ep = is_slash and ctx.guild is not None
+        if is_slash and ctx.interaction:
+            await ctx.interaction.followup.send(embed=embed, ephemeral=ep)
+        else:
+            await ctx.send(embed=embed)
 
     @commands.hybrid_command(
         name="animefav",
@@ -973,7 +964,7 @@ class Profile(commands.Cog):
                 desc = (
                     "Indique un **nom** (recherche sur AniList), un **ID** ou une **URL** "
                     "`https://anilist.co/anime/...`. "
-                    "Ce sera affiché sur **`/mycard`** (onglet Aperçu). "
+                    "Ce sera affiché sur **`/mycard`**. "
                     "Écris **`clear`** pour retirer un favori déjà enregistré."
                 )
             em = discord.Embed(title="⭐ Anime favori", description=desc, color=_EMBED_OVERVIEW)
@@ -1021,7 +1012,7 @@ class Profile(commands.Cog):
 
         assert kind == "set" and isinstance(data, dict)
         core.set_anime_favorite(uid, data)
-        msg = f"✅ **{data['title']}** est enregistré comme favori — regarde **`/mycard`** (Aperçu)."
+        msg = f"✅ **{data['title']}** est enregistré comme favori — voir **`/mycard`**."
         if is_slash and ctx.interaction:
             await ctx.interaction.followup.send(msg, ephemeral=True)
         else:
@@ -1198,12 +1189,19 @@ class Profile(commands.Cog):
         description="Trophées par catégorie (rangs Initié→Mythe) et progression.",
     )
     async def mybadges(self, ctx: commands.Context) -> None:
+        is_slash = bool(getattr(ctx, "interaction", None))
+        ephemeral = bool(is_slash and ctx.guild is not None)
+        await core.maybe_defer_hybrid(ctx, ephemeral=ephemeral)
+
         user_id = ctx.author.id
         counts = _get_user_counts(user_id)
         payload = _build_mybadges_payload(self.bot, counts)
         embed = _embed_mybadges(ctx, self.bot, payload, "summary")
         view = MyBadgesNavigator(ctx, ctx.author, self.bot, payload, section="summary")
-        await ctx.send(embed=embed, view=view)
+        if is_slash and ctx.interaction:
+            await ctx.interaction.followup.send(embed=embed, view=view, ephemeral=ephemeral)
+        else:
+            await ctx.send(embed=embed, view=view)
 
 
 class AnimetopCategorySelect(discord.ui.Select):

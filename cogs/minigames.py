@@ -835,7 +835,7 @@ class MiniGames(commands.Cog):
                     elif same_attempts == _ATTEMPT_HARD_WARN:
                         await ctx.send(
                             f"🚨 **Dernier avertissement** pour **{guess_raw}** : une répétition de plus = "
-                            f"**sanction** (−XP, cooldown long, entrée `/mycard`). Varie vraiment.\n"
+                            f"**sanction** (−XP, cooldown long, voir `/profile`). Varie vraiment.\n"
                             f"{_easy_genre_hint_short()}"
                         )
 
@@ -855,7 +855,7 @@ class MiniGames(commands.Cog):
                                 f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de répétitions du même "
                                 f"genre « facile » en ~5 min.\n"
                                 f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
-                                f"**{total_pen}** (voir `/mycard`).\n"
+                                f"**{total_pen}** (voir `/profile`).\n"
                                 f"Genres de **{title}** : {', '.join(anime['genres'])}."
                             )
                         else:
@@ -863,7 +863,7 @@ class MiniGames(commands.Cog):
                                 f"❌ **{guess_raw}** ne fait pas partie des genres de **{title}**.\n"
                                 f"**Anti-spam** : même genre « facile » répété **{same_attempts}×** en ~5 min.\n"
                                 f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
-                                f"**{total_pen}** (voir `/mycard`).\n"
+                                f"**{total_pen}** (voir `/profile`).\n"
                                 f"Les genres étaient : {', '.join(anime['genres'])}."
                             )
                         return
@@ -899,7 +899,7 @@ class MiniGames(commands.Cog):
                                 f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de réponses « faciles » "
                                 f"d’affilée ou en 5 min.\n"
                                 f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
-                                f"**{total_pen}** (voir `/mycard`).\n"
+                                f"**{total_pen}** (voir `/profile`).\n"
                                 f"Genres de **{title}** : {', '.join(anime['genres'])}."
                             )
                         else:

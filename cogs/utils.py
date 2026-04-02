@@ -75,7 +75,7 @@ class Utils(commands.Cog):
             core.set_guild_levelup_channel(ctx.guild.id, ctx.channel.id)
             await ctx.send(
                 "✅ Ce salon recevra les **annonces** suivantes (au lieu du salon où la partie a lieu) :\n"
-                "• **Nouveau titre global** (XP `/mycard`, `/myrank`) — une annonce par **palier de titre**, pas à chaque niveau.\n"
+                "• **Nouveau titre global** (XP `/profile`, `/myrank`) — une annonce par **palier de titre**, pas à chaque niveau.\n"
                 "• **Nouveau titre quiz** (score des quiz solo `/animequiz`, `/animequizmulti`) — mêmes paliers que sur la carte.\n"
                 "• Pour revenir au comportement par défaut : **`/clearlevelupchannel`**."
             )

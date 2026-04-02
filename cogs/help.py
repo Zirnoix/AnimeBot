@@ -56,8 +56,9 @@ DESC_OVERRIDE: Dict[str, str] = {
     "mission": "Ta mission du jour : récupère l’XP ou reroll (1/sem.).",
 
     # Stats
-    "mycard": "Carte profil : XP, quiz, streak, AniList, **anime favori** (`/animefav`) ; encart **bugs validés** si tu en as (`/reportbug`).",
-    "animefav": "Choisis ton anime préféré (titre, ID ou URL AniList) — affiché sur **`/mycard`** (Aperçu).",
+    "mycard": "Carte courte : AniList, **anime favori**, activité mini-jeux, bugs validés — détail : **`/profile`**.",
+    "profile": "Profil détaillé : XP, streak, compteurs mini-jeux, sanctions Guess genre, aperçu trophées.",
+    "animefav": "Choisis ton anime préféré (titre, ID ou URL AniList) — affiché sur **`/mycard`**.",
     "reportbug": "Signale un bug en **MP** ; **XP** si le signalement est confirmé — compteur sur **`/mycard`**.",
     "mystats": "Stats AniList (vus, jours, score moyen, genre favori).",
     "mybadges": "Trophées par catégorie (rangs Initié → Mythe) et barres de progression.",
@@ -125,7 +126,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "linkanilist", "verifyanilist", "unlink"
     ]),
     ("📊 Pages Statistiques", [
-        "mycard", "animefav", "reportbug", "mystats", "mybadges", "duelstats", "quiztop", "animetop", "quizlevels", "myrank", "stats"
+        "mycard", "profile", "animefav", "reportbug", "mystats", "mybadges", "duelstats", "quiztop", "animetop", "quizlevels", "myrank", "stats"
     ]),
     ("🧭 Pages Tracker", [
         "track", "track add", "track list", "track remove", "track clear"
@@ -549,6 +550,7 @@ class Help(commands.Cog):
             ("/next", DESC_OVERRIDE["next"]),
             ("/planning", DESC_OVERRIDE["planning"]),
             ("/mycard", DESC_OVERRIDE["mycard"]),
+            ("/profile", DESC_OVERRIDE["profile"]),
             ("/animefav", DESC_OVERRIDE["animefav"]),
             ("/reportbug", DESC_OVERRIDE["reportbug"]),
             ("/mystats", DESC_OVERRIDE["mystats"]),

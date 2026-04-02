@@ -116,8 +116,8 @@ class Onboarding(commands.Cog):
                 title="📈 XP, niveaux et badges",
                 color=discord.Color.orange(),
                 description=(
-                    "• L’**XP** augmente ton **niveau global** et change ton **titre** (voir **`/mycard`**, **`/myrank`**).\n"
-                    "• **`/animefav`** — enregistre ton **anime préféré** (recherche AniList, ID ou URL) : il apparaît sur **`/mycard`**.\n"
+                    "• L’**XP** augmente ton **niveau global** et change ton **titre** (voir **`/mycard`**, **`/profile`**, **`/myrank`**).\n"
+                    "• **`/animefav`** — ton **anime préféré** sur la carte ; **`/profile`** pour le détail (streak, stats, trophées…).\n"
                     "• Tu en gagnes en jouant (**`/animequiz`**, devinettes, **`/duel`**, **raid boss**, etc.), "
                     "avec **`/checkin`** (quotidien + streak) et **`/mission`** (objectif du jour).\n"
                     "• **`/reportbug`** — signale un bug en MP ; si c’est confirmé, **XP bonus** (compteur sur **`/mycard`**).\n"
