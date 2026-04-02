@@ -500,7 +500,7 @@ def generate_mycard_image(
     tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
     gap_xp_bar = 8
     gap_bar_lvl = 6
-    xp_lift = 12
+    xp_lift = 50
     bar_h = 24
     radius = 12
     ratio = 1.0 if next_xp <= 0 else max(0.0, min(1.0, float(xp) / float(next_xp)))
