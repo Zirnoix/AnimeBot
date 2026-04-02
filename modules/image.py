@@ -1,5 +1,6 @@
 # modules/image.py (extrait)
 import os
+import re
 import tempfile
 import time
 from typing import Dict, Any, Optional
@@ -196,19 +197,145 @@ _MYCARD_COL_PINK = (236, 72, 153)
 _MYCARD_COL_BLUE = (59, 130, 246)
 _MYCARD_COL_TEXT = (252, 231, 243)
 _MYCARD_COL_MUTED = (148, 163, 184)
+# Stats (lisibilité + identité)
+_MYCARD_COL_STAT_LABEL = (255, 196, 228)  # libellé (Quiz, Devinettes…)
+_MYCARD_COL_STAT_SEP = (130, 120, 155)  # tirets « — »
+_MYCARD_COL_STAT_HINT = (165, 210, 252)  # précision entre parenthèses
+_MYCARD_COL_STAT_SHADOW = (12, 8, 22)
+_MYCARD_COL_STAT_BULLET = (150, 195, 255)  # puce ▸
+_MYCARD_COL_STAT_NUM = (255, 210, 235)  # chiffres (un peu plus vifs)
+
+_STAT_NUM_RE = re.compile(r"\b(\d{1,3}(?:\s\d{3})*|\d+)\b")
 
 
-def _mycard_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    names = ("DejaVuSans-Bold.ttf", "DejaVuSans.ttf") if bold else ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")
-    for n in names:
+def _mycard_project_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _mycard_bundled_font(*parts: str) -> Optional[str]:
+    p = os.path.join(_mycard_project_root(), *parts)
+    return p if os.path.isfile(p) else None
+
+
+def _mycard_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
+    """Noto Sans dans fonts/ (repo), sinon DejaVu à la racine du projet, sinon système."""
+    noto = "NotoSans-Bold.ttf" if bold else "NotoSans-Regular.ttf"
+    path = _mycard_bundled_font("fonts", noto)
+    if path:
         try:
-            return ImageFont.truetype(n, size)
+            return ImageFont.truetype(path, size)
         except Exception:
             pass
+    for n in ("DejaVuSans-Bold.ttf", "DejaVuSans.ttf") if bold else ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"):
+        p = _mycard_bundled_font(n)
+        if p:
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                pass
     try:
         return ImageFont.truetype("arial.ttf", size)
     except Exception:
         return ImageFont.load_default()
+
+
+def _mycard_font_oblique(size: int) -> ImageFont.ImageFont:
+    """Italique : Noto Italic dans fonts/, sinon DejaVu oblique / droit."""
+    p = _mycard_bundled_font("fonts", "NotoSans-Italic.ttf")
+    if p:
+        try:
+            return ImageFont.truetype(p, size)
+        except Exception:
+            pass
+    for n in ("DejaVuSans-Oblique.ttf", "DejaVuSans-Italic.ttf"):
+        bp = _mycard_bundled_font(n)
+        if bp:
+            try:
+                return ImageFont.truetype(bp, size)
+            except Exception:
+                pass
+    return _mycard_font(size, bold=False)
+
+
+def _mycard_iter_body_segments(body: str) -> list[tuple[str, bool]]:
+    """Découpe le corps : nombres (avec espaces milliers) en gras ; le reste en normal."""
+    if not body:
+        return []
+    parts: list[tuple[str, bool]] = []
+    pos = 0
+    for m in _STAT_NUM_RE.finditer(body):
+        if m.start() > pos:
+            parts.append((body[pos : m.start()], False))
+        parts.append((m.group(1), True))
+        pos = m.end()
+    if pos < len(body):
+        parts.append((body[pos:], False))
+    return parts
+
+
+def _mycard_parse_stat_line(line: str) -> tuple[str, str, str]:
+    """Découpe label — corps … (hint optionnel en fin de ligne)."""
+    line = line.strip()
+    hint = ""
+    mp = re.search(r"\s*\(([^)]+)\)\s*$", line)
+    if mp:
+        hint = mp.group(1).strip()
+        line = line[: mp.start()].rstrip()
+    if " — " in line:
+        a, b = line.split(" — ", 1)
+        return (a.strip(), b.strip(), hint)
+    return (line, "", hint)
+
+
+def _mycard_draw_stat_line(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    line: str,
+    max_chars: int,
+) -> None:
+    """Puce ▸ + libellé rosé, corps avec chiffres en gras plus grands, parenthèses en italique."""
+    line = _mycard_trunc(line, max_chars)
+    label, body, hint = _mycard_parse_stat_line(line)
+    font_lb = _mycard_font(22, bold=True)
+    font_bd = _mycard_font(21, bold=False)
+    font_num = _mycard_font(25, bold=True)
+    font_hi = _mycard_font_oblique(17)
+    font_bullet = _mycard_font(19, bold=True)
+    sep = " — "
+    bullet = "▸ "
+
+    cx = x
+    for txt, font, fill in ((bullet, font_bullet, _MYCARD_COL_STAT_BULLET),):
+        draw.text((cx + 1, y + 1), txt, font=font, fill=_MYCARD_COL_STAT_SHADOW)
+        draw.text((cx, y), txt, font=font, fill=fill)
+        cx += _mycard_text_width(draw, txt, font)
+    cx += 2
+
+    for txt, font, fill in ((label, font_lb, _MYCARD_COL_STAT_LABEL),):
+        if not txt:
+            continue
+        draw.text((cx + 1, y + 1), txt, font=font, fill=_MYCARD_COL_STAT_SHADOW)
+        draw.text((cx, y), txt, font=font, fill=fill)
+        cx += _mycard_text_width(draw, txt, font)
+
+    if body:
+        for txt, font, fill in ((sep, font_bd, _MYCARD_COL_STAT_SEP),):
+            draw.text((cx + 1, y + 1), txt, font=font, fill=_MYCARD_COL_STAT_SHADOW)
+            draw.text((cx, y), txt, font=font, fill=fill)
+            cx += _mycard_text_width(draw, txt, font)
+        for seg, is_num in _mycard_iter_body_segments(body):
+            font = font_num if is_num else font_bd
+            fill = _MYCARD_COL_STAT_NUM if is_num else _MYCARD_COL_TEXT
+            dy = -2 if is_num else 0
+            draw.text((cx + 1, y + 1 + dy), seg, font=font, fill=_MYCARD_COL_STAT_SHADOW)
+            draw.text((cx, y + dy), seg, font=font, fill=fill)
+            cx += _mycard_text_width(draw, seg, font)
+
+    if hint:
+        ht = f" ({hint})"
+        draw.text((cx + 1, y + 1), ht, font=font_hi, fill=_MYCARD_COL_STAT_SHADOW)
+        draw.text((cx, y), ht, font=font_hi, fill=_MYCARD_COL_STAT_HINT)
 
 
 def _mycard_fmt_xp(n: int) -> str:
@@ -325,7 +452,6 @@ def generate_mycard_image(
     font_al = _mycard_font(22, bold=False)
     font_xp = _mycard_font(22, bold=False)
     font_lvl = _mycard_font(34, bold=True)
-    font_stat = _mycard_font(22, bold=False)
 
     tx = ax + av_size + 22
     name = _mycard_trunc(display_name or "?", 28)
@@ -377,22 +503,12 @@ def generate_mycard_image(
     tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
     draw.text((tx + bar_w - tw_lv, bar_y + bar_h + 10), lvl_txt, font=font_lvl, fill=_MYCARD_COL_TEXT)
 
-    y_stats = bar_y + bar_h + 42
+    y_stats = bar_y + bar_h + 40
     if line_play:
-        draw.text(
-            (tx, y_stats),
-            _mycard_trunc(line_play, 88),
-            font=font_stat,
-            fill=_MYCARD_COL_MUTED,
-        )
-        y_stats += 30
+        _mycard_draw_stat_line(draw, tx, y_stats, line_play, 90)
+        y_stats += 32
     if line_record:
-        draw.text(
-            (tx, y_stats),
-            _mycard_trunc(line_record, 88),
-            font=font_stat,
-            fill=_MYCARD_COL_MUTED,
-        )
+        _mycard_draw_stat_line(draw, tx, y_stats, line_record, 90)
 
     out = base.convert("RGB")
     buf = BytesIO()
