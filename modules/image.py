@@ -491,15 +491,36 @@ def generate_mycard_image(
         draw.text((tx, y), fav_txt, font=font_sub, fill=_MYCARD_COL_MUTED)
         y += 32
 
-    bar_y = y + 14
+    row_top = y + 14
+    xp_txt = f"{_mycard_fmt_xp(xp)} / {_mycard_fmt_xp(next_xp)} XP"
     lvl_txt = f"Niveau {int(level)}"
+    tw_xp = _mycard_text_width(draw, xp_txt, font_xp)
     tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
-    lvl_gap = 12
-    bar_w = max(120, W - tx - pad - tw_lv - lvl_gap)
+    gap_bar_xp = 10
+    gap_xp_lvl = 12
+    inner_w = W - tx - pad
+    bar_w = max(100, inner_w - tw_xp - tw_lv - gap_bar_xp - gap_xp_lvl)
     bar_h = 24
     radius = 12
     ratio = 1.0 if next_xp <= 0 else max(0.0, min(1.0, float(xp) / float(next_xp)))
     fill_w = max(6, int(bar_w * ratio))
+
+    try:
+        bb_xp = draw.textbbox((0, 0), xp_txt, font=font_xp)
+        h_xp = float(bb_xp[3] - bb_xp[1])
+    except Exception:
+        h_xp = 22.0
+    try:
+        bb_lv = draw.textbbox((0, 0), lvl_txt, font=font_lvl)
+        h_lv = float(bb_lv[3] - bb_lv[1])
+    except Exception:
+        h_lv = 34.0
+    content_h = int(max(bar_h, h_xp, h_lv))
+    bar_y = int(row_top + (content_h - bar_h) / 2)
+    xp_x = tx + bar_w + gap_bar_xp
+    xp_y = int(row_top + (content_h - h_xp) / 2)
+    lvl_x = xp_x + tw_xp + gap_xp_lvl
+    lvl_y = int(row_top + (content_h - h_lv) / 2)
 
     draw.rounded_rectangle(
         (tx, bar_y, tx + bar_w, bar_y + bar_h),
@@ -522,21 +543,12 @@ def generate_mycard_image(
     base.alpha_composite(grad_rgba, (tx, bar_y))
 
     draw = ImageDraw.Draw(base)
-    xp_txt = f"{_mycard_fmt_xp(xp)} / {_mycard_fmt_xp(next_xp)} XP"
-    tw_xp = _mycard_text_width(draw, xp_txt, font_xp)
-    draw.text((tx + bar_w - tw_xp, bar_y - 26), xp_txt, font=font_xp, fill=_MYCARD_COL_MUTED)
-
-    try:
-        bb_lv = draw.textbbox((0, 0), lvl_txt, font=font_lvl)
-        lh_lv = float(bb_lv[3] - bb_lv[1])
-    except Exception:
-        lh_lv = 34.0
-    lvl_x = tx + bar_w + lvl_gap
-    lvl_y = int(bar_y + (bar_h - lh_lv) / 2)
+    draw.text((xp_x + 1, xp_y + 1), xp_txt, font=font_xp, fill=(8, 6, 14))
+    draw.text((xp_x, xp_y), xp_txt, font=font_xp, fill=_MYCARD_COL_MUTED)
     draw.text((lvl_x + 1, lvl_y + 1), lvl_txt, font=font_lvl, fill=(8, 6, 14))
     draw.text((lvl_x, lvl_y), lvl_txt, font=font_lvl, fill=_MYCARD_COL_TEXT)
 
-    y_stats = bar_y + bar_h + 34
+    y_stats = row_top + content_h + 28
     if line_play:
         _mycard_draw_stat_line(draw, tx, y_stats, line_play, 90)
         y_stats += 32
