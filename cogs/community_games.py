@@ -498,18 +498,14 @@ class RaidConfigPanelView(View):
 
     @discord.ui.button(label="💾 Enregistrer", style=discord.ButtonStyle.success, row=4)
     async def raid_config_save(self, interaction: discord.Interaction, button: Button) -> None:
-        await interaction.response.defer()
-        try:
-            await interaction.message.delete()
-        except discord.HTTPException:
-            try:
-                await interaction.message.edit(
-                    content="✅ **Configuration enregistrée.**",
-                    embed=None,
-                    view=None,
-                )
-            except Exception:
-                pass
+        # Panneau envoyé en ephemeral : Message.delete() ne suffit pas — webhook + message_id.
+        await interaction.response.defer(ephemeral=True)
+        msg = interaction.message
+        if msg is not None:
+            if isinstance(msg.channel, discord.Thread):
+                await interaction.followup.delete_message(msg.id, thread=msg.channel)
+            else:
+                await interaction.followup.delete_message(msg.id)
         await interaction.followup.send(
             "✅ La configuration du **raid boss** a bien été enregistrée.",
             ephemeral=True,
@@ -517,14 +513,13 @@ class RaidConfigPanelView(View):
 
     @discord.ui.button(label="Fermer", style=discord.ButtonStyle.secondary, row=4)
     async def raid_config_close(self, interaction: discord.Interaction, button: Button) -> None:
-        await interaction.response.defer()
-        try:
-            await interaction.message.delete()
-        except discord.HTTPException:
-            try:
-                await interaction.message.edit(content="\u200b", embed=None, view=None)
-            except Exception:
-                pass
+        await interaction.response.defer(ephemeral=True)
+        msg = interaction.message
+        if msg is not None:
+            if isinstance(msg.channel, discord.Thread):
+                await interaction.followup.delete_message(msg.id, thread=msg.channel)
+            else:
+                await interaction.followup.delete_message(msg.id)
 
 
 class _RaidChannelSelect(ChannelSelect):

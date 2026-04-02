@@ -107,3 +107,4 @@ RuntimeError: Client has not been properly initialised. Please use the login met
 2026-04-02 18:47:02,937 - modules.core - INFO - [AniList] Concurrence HTTP limitée à 4 (variable ANILIST_MAX_CONCURRENT, défaut 4).
 2026-04-02 18:51:39,878 - modules.core - INFO - [AniList] Concurrence HTTP limitée à 4 (variable ANILIST_MAX_CONCURRENT, défaut 4).
 2026-04-02 19:01:51,217 - modules.core - INFO - [AniList] Concurrence HTTP limitée à 4 (variable ANILIST_MAX_CONCURRENT, défaut 4).
+2026-04-02 19:28:00,077 - modules.core - INFO - [AniList] Concurrence HTTP limitée à 4 (variable ANILIST_MAX_CONCURRENT, défaut 4).

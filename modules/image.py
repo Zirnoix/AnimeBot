@@ -293,16 +293,16 @@ def generate_mycard_image(
     level: int,
     xp: int,
     next_xp: int,
-    title: str,
     anilist_username: Optional[str] = None,
+    anime_fav: Optional[str] = None,
     line_play: Optional[str] = None,
     line_record: Optional[str] = None,
 ) -> BytesIO:
     """
-    Carte panoramique (largeur proche des cartes « next ») : avatar, pseudo, titre global,
-    AniList optionnel, barre XP (dégradé rose → bleu), lignes mini-jeux.
+    Carte panoramique : avatar, pseudo, AniList / favori optionnels, barre XP (rose → bleu), mini-jeux.
+    (Pas de titre global : les emojis Discord ne rendent pas dans Pillow.)
     """
-    W, H = 1280, 320
+    W, H = 1280, 340
     av_size = 132
     stripe_w = 12
     pad = 22
@@ -331,14 +331,14 @@ def generate_mycard_image(
     name = _mycard_trunc(display_name or "?", 36)
     y = 28
     draw.text((tx, y), name, font=font_name, fill=_MYCARD_COL_TEXT)
-    y += 38
-    sub = (title or "").strip()
-    if sub:
-        draw.text((tx, y), _mycard_trunc(sub, 64), font=font_sub, fill=_MYCARD_COL_MUTED)
-        y += 28
+    y += 42
     if anilist_username:
-        al_txt = f"AniList · {_mycard_trunc(anilist_username, 48)}"
+        al_txt = f"AniList · {_mycard_trunc(anilist_username, 52)}"
         draw.text((tx, y), al_txt, font=font_al, fill=(167, 139, 250))
+        y += 28
+    if anime_fav:
+        fav_txt = f"Favori · {_mycard_trunc(anime_fav, 60)}"
+        draw.text((tx, y), fav_txt, font=font_sub, fill=_MYCARD_COL_MUTED)
         y += 28
 
     bar_y = y + 12

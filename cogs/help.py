@@ -56,7 +56,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "mission": "Ta mission du jour : récupère l’XP ou reroll (1/sem.).",
 
     # Stats
-    "mycard": "Carte panoramique (niveau, XP, AniList, mini-jeux) — détail : **`/profile`** ; anime favori : **`/animefav`**.",
+    "mycard": "Image panoramique (niveau, XP, AniList, favori, mini-jeux) — sans embed ; détail : **`/profile`**.",
     "profile": "Profil détaillé : XP, streak, compteurs mini-jeux, sanctions Guess genre, aperçu trophées.",
     "animefav": "Choisis ton anime préféré (titre, ID ou URL AniList) — affiché sur **`/mycard`**.",
     "reportbug": "Signale un bug en **MP** ; **XP** si le signalement est confirmé — compteur sur **`/mycard`**.",

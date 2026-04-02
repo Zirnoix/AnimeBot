@@ -521,15 +521,6 @@ def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
 
 
 # ---------- BUILD DES EMBEDS (carte / profil) ----------
-def _embed_mycard_minimal(ctx: commands.Context) -> discord.Embed:
-    """Embed léger quand la carte PNG contient déjà tout (évite doublon avec l’image)."""
-    return discord.Embed(
-        title="🎴 Carte",
-        description="Tout est sur l’image — détail : **`/profile`** · **`/mybadges`**",
-        color=_EMBED_OVERVIEW,
-    ).set_footer(text="/profile · /mybadges · /animefav")
-
-
 def _embed_mycard_simple(
     ctx: commands.Context,
     *,
@@ -537,11 +528,8 @@ def _embed_mycard_simple(
     al_name: Optional[str],
     mini_scores: dict,
     bug_validated: int,
-    with_image_card: bool = False,
 ) -> discord.Embed:
     """Carte courte : pas de menu, pas de timeout."""
-    if with_image_card:
-        return _embed_mycard_minimal(ctx)
     e = discord.Embed(
         title=f"🎴 {ctx.author.display_name}",
         description="Vue rapide — tout le détail : **`/profile`**",
@@ -903,7 +891,7 @@ class Profile(commands.Cog):
 
     @commands.hybrid_command(
         name="mycard",
-        description="Carte panoramique : niveau, XP, AniList, mini-jeux (détail : /profile).",
+        description="Image panoramique (niveau, XP, AniList, favori, mini-jeux) — sans embed.",
     )
     @commands.cooldown(1, 20, commands.BucketType.user)
     async def mycard(self, ctx: commands.Context) -> None:
@@ -928,9 +916,11 @@ class Profile(commands.Cog):
         xp = int(ud.get("xp", 0))
         level = int(ud.get("level", 0))
         next_xp = core.xp_for_next_level(level)
-        title = core.get_title_for_global_level(level)
         play_line = _mycard_play_line(mini_scores)
         record_line = _mycard_record_line(mini_scores)
+        fav_plain: Optional[str] = None
+        if anime_fav:
+            fav_plain = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
 
         try:
             buf = await asyncio.to_thread(
@@ -940,23 +930,13 @@ class Profile(commands.Cog):
                     level=level,
                     xp=xp,
                     next_xp=next_xp,
-                    title=title,
                     anilist_username=al_name,
+                    anime_fav=fav_plain,
                     line_play=play_line,
                     line_record=record_line,
                 )
             )
-            file = discord.File(buf, filename="mycard.png")
-            embed = _embed_mycard_simple(
-                ctx,
-                anime_fav=anime_fav,
-                al_name=al_name,
-                mini_scores=mini_scores,
-                bug_validated=bug_validated,
-                with_image_card=True,
-            )
-            embed.set_image(url="attachment://mycard.png")
-            await ctx.send(embed=embed, file=file)
+            await ctx.send(file=discord.File(buf, filename="mycard.png"))
         except Exception:
             embed = _embed_mycard_simple(
                 ctx,
@@ -964,7 +944,6 @@ class Profile(commands.Cog):
                 al_name=al_name,
                 mini_scores=mini_scores,
                 bug_validated=bug_validated,
-                with_image_card=False,
             )
             await ctx.send(embed=embed)
 
