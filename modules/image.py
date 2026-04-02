@@ -185,3 +185,192 @@ def generate_next_card(
 
     out.save(out_path, format="PNG", quality=95)
     return out_path
+
+
+# --- Couleurs identité « rosé / bleu » (carte /mycard) ---
+_MYCARD_COL_BG_TOP = (26, 22, 42)
+_MYCARD_COL_BG_BOT = (40, 32, 58)
+_MYCARD_COL_STRIPE_TOP = (244, 114, 182)  # pink
+_MYCARD_COL_STRIPE_BOT = (96, 165, 250)  # blue
+_MYCARD_COL_PINK = (236, 72, 153)
+_MYCARD_COL_BLUE = (59, 130, 246)
+_MYCARD_COL_TEXT = (252, 231, 243)
+_MYCARD_COL_MUTED = (148, 163, 184)
+
+
+def _mycard_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    names = ("DejaVuSans-Bold.ttf", "DejaVuSans.ttf") if bold else ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")
+    for n in names:
+        try:
+            return ImageFont.truetype(n, size)
+        except Exception:
+            pass
+    try:
+        return ImageFont.truetype("arial.ttf", size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _mycard_fmt_xp(n: int) -> str:
+    """Affichage compact type 12k / 123k."""
+    n = int(n)
+    if n >= 1_000_000:
+        s = f"{n / 1_000_000:.1f}M"
+        return s.replace(".0M", "M")
+    if n >= 1000:
+        s = f"{n / 1000:.1f}k"
+        return s.replace(".0k", "k")
+    return str(n)
+
+
+def _mycard_gradient_bg(w: int, h: int) -> Image.Image:
+    img = Image.new("RGB", (w, h))
+    r0, g0, b0 = _MYCARD_COL_BG_TOP
+    r1, g1, b1 = _MYCARD_COL_BG_BOT
+    for y in range(h):
+        t = y / max(1, h - 1)
+        img.putpixel(
+            (0, y),
+            (
+                int(r0 + (r1 - r0) * t),
+                int(g0 + (g1 - g0) * t),
+                int(b0 + (b1 - b0) * t),
+            ),
+        )
+    for x in range(1, w):
+        for y in range(h):
+            img.putpixel((x, y), img.getpixel((0, y)))
+    return img
+
+
+def _mycard_left_stripe(img: Image.Image, stripe_w: int) -> None:
+    h = img.height
+    rt, gt, bt = _MYCARD_COL_STRIPE_TOP
+    rb, gb, bb = _MYCARD_COL_STRIPE_BOT
+    for y in range(h):
+        t = y / max(1, h - 1)
+        r = int(rt + (rb - rt) * t)
+        g = int(gt + (gb - gt) * t)
+        b = int(bt + (bb - bt) * t)
+        for x in range(stripe_w):
+            img.putpixel((x, y), (r, g, b))
+
+
+def _mycard_circle_avatar(raw: Image.Image, size: int) -> Image.Image:
+    raw = raw.convert("RGBA").resize((size, size), Image.LANCZOS)
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out.paste(raw, (0, 0), mask)
+    return out
+
+
+def _mycard_rounded_rect_mask(size: tuple[int, int], radius: int) -> Image.Image:
+    m = Image.new("L", size, 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, size[0], size[1]), radius=radius, fill=255)
+    return m
+
+
+def _mycard_text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont) -> float:
+    try:
+        return float(font.getlength(text))
+    except Exception:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return float(bbox[2] - bbox[0])
+
+
+def generate_mycard_image(
+    *,
+    display_name: str,
+    avatar_url: str,
+    level: int,
+    xp: int,
+    next_xp: int,
+    title: str,
+    anime_fav: Optional[str] = None,
+) -> BytesIO:
+    """
+    Carte horizontale PNG : avatar, pseudo, niveau global, barre XP (dégradé rose → bleu).
+    """
+    W, H = 960, 300
+    av_size = 128
+    stripe_w = 10
+    pad = 20
+    base_rgb = _mycard_gradient_bg(W, H)
+    _mycard_left_stripe(base_rgb, stripe_w)
+    base = base_rgb.convert("RGBA")
+
+    try:
+        av_src = _fetch_image(avatar_url)
+        av = _mycard_circle_avatar(av_src, av_size)
+    except Exception:
+        av = Image.new("RGBA", (av_size, av_size), (60, 55, 75, 255))
+    ax = stripe_w + pad
+    ay = (H - av_size) // 2
+    base.paste(av, (ax, ay), av)
+
+    draw = ImageDraw.Draw(base)
+    font_name = _mycard_font(30, bold=True)
+    font_sub = _mycard_font(18, bold=False)
+    font_xp = _mycard_font(17, bold=False)
+    font_lvl = _mycard_font(22, bold=True)
+
+    tx = ax + av_size + 18
+    name = (display_name or "?")[:32]
+    draw.text((tx, 52), name, font=font_name, fill=_MYCARD_COL_TEXT)
+
+    sub = (title or "")[:48]
+    y_sub = 90
+    if sub:
+        draw.text((tx, y_sub), sub, font=font_sub, fill=_MYCARD_COL_MUTED)
+        y_sub += 26
+
+    fav_line = ""
+    if anime_fav:
+        fav_line = ("⭐ " + anime_fav)[:52]
+        draw.text((tx, y_sub), fav_line, font=font_sub, fill=_MYCARD_COL_MUTED)
+        y_sub += 26
+
+    bar_y = max(158, y_sub + 8)
+    bar_w = W - tx - pad
+    bar_h = 20
+    radius = 10
+    ratio = 1.0 if next_xp <= 0 else max(0.0, min(1.0, float(xp) / float(next_xp)))
+    fill_w = max(4, int(bar_w * ratio))
+
+    # Piste (fond sombre)
+    draw.rounded_rectangle(
+        (tx, bar_y, tx + bar_w, bar_y + bar_h),
+        radius=radius,
+        fill=(35, 30, 52, 255),
+    )
+
+    # Remplissage dégradé rose → bleu
+    grad = Image.new("RGB", (fill_w, bar_h))
+    rp, gp, bp = _MYCARD_COL_PINK
+    rb_, gb_, bb_ = _MYCARD_COL_BLUE
+    for x in range(fill_w):
+        t = x / max(1, fill_w - 1)
+        r = int(rp + (rb_ - rp) * t)
+        g = int(gp + (gb_ - gp) * t)
+        b = int(bp + (bb_ - bp) * t)
+        for yy in range(bar_h):
+            grad.putpixel((x, yy), (r, g, b))
+    mask = _mycard_rounded_rect_mask((fill_w, bar_h), radius)
+    grad_rgba = Image.merge("RGBA", (*grad.split(), mask))
+    base.alpha_composite(grad_rgba, (tx, bar_y))
+
+    draw = ImageDraw.Draw(base)
+    xp_txt = f"{_mycard_fmt_xp(xp)} / {_mycard_fmt_xp(next_xp)} XP"
+    tw_xp = _mycard_text_width(draw, xp_txt, font_xp)
+    draw.text((tx + bar_w - tw_xp, bar_y - 24), xp_txt, font=font_xp, fill=_MYCARD_COL_MUTED)
+
+    lvl_txt = f"Niveau {int(level)}"
+    tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
+    draw.text((tx + bar_w - tw_lv, bar_y + bar_h + 6), lvl_txt, font=font_lvl, fill=_MYCARD_COL_TEXT)
+
+    out = base.convert("RGB")
+    buf = BytesIO()
+    out.save(buf, format="PNG", quality=95)
+    buf.seek(0)
+    return buf

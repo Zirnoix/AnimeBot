@@ -12,6 +12,7 @@ from discord.ext import commands
 
 from modules import core
 from modules import bug_report as bug_report_store
+from modules.image import generate_mycard_image
 from modules.badges import BADGES, BADGE_SECTION_TITLE_FR, evaluate_tier, iter_badges_sorted, tier_name_fr
 from modules.badge_helpers import badge_count_for_spec
 from modules.emoji_utils import get_emoji
@@ -495,14 +496,22 @@ def _embed_mycard_simple(
     al_name: Optional[str],
     mini_scores: dict,
     bug_validated: int,
+    with_image_card: bool = False,
 ) -> discord.Embed:
     """Carte courte : pas de menu, pas de timeout."""
-    e = discord.Embed(
-        title=f"🎴 {ctx.author.display_name}",
-        description="Vue rapide — tout le détail : **`/profile`**",
-        color=_EMBED_OVERVIEW,
-    )
-    e.set_thumbnail(url=ctx.author.display_avatar.url)
+    if with_image_card:
+        e = discord.Embed(
+            title="🎴 Carte",
+            description="Niveau global et XP sur l’image — détail : **`/profile`**",
+            color=_EMBED_OVERVIEW,
+        )
+    else:
+        e = discord.Embed(
+            title=f"🎴 {ctx.author.display_name}",
+            description="Vue rapide — tout le détail : **`/profile`**",
+            color=_EMBED_OVERVIEW,
+        )
+        e.set_thumbnail(url=ctx.author.display_avatar.url)
     if al_name:
         e.add_field(name="🔗 AniList", value=f"`{al_name}`", inline=False)
     else:
@@ -856,7 +865,10 @@ class Profile(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @commands.hybrid_command(name="mycard", description="Carte rapide : AniList, anime favori, activité, bugs validés.")
+    @commands.hybrid_command(
+        name="mycard",
+        description="Carte visuelle (niveau global, XP) + AniList, anime favori, activité, bugs validés.",
+    )
     @commands.cooldown(1, 20, commands.BucketType.user)
     async def mycard(self, ctx: commands.Context) -> None:
         await core.maybe_defer_hybrid(ctx)
@@ -875,14 +887,49 @@ class Profile(commands.Cog):
         anime_fav = core.get_anime_favorite(user_id)
         al_name = core.get_linked_username(user_id)
 
-        embed = _embed_mycard_simple(
-            ctx,
-            anime_fav=anime_fav,
-            al_name=al_name,
-            mini_scores=mini_scores,
-            bug_validated=bug_validated,
-        )
-        await ctx.send(embed=embed)
+        levels = core.load_levels()
+        ud = levels.get(str(user_id), {"xp": 0, "level": 0})
+        xp = int(ud.get("xp", 0))
+        level = int(ud.get("level", 0))
+        next_xp = core.xp_for_next_level(level)
+        title = core.get_title_for_global_level(level)
+        fav_plain: Optional[str] = None
+        if anime_fav:
+            fav_plain = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
+
+        try:
+            buf = await asyncio.to_thread(
+                lambda: generate_mycard_image(
+                    display_name=ctx.author.display_name,
+                    avatar_url=str(ctx.author.display_avatar.url),
+                    level=level,
+                    xp=xp,
+                    next_xp=next_xp,
+                    title=title,
+                    anime_fav=fav_plain,
+                )
+            )
+            file = discord.File(buf, filename="mycard.png")
+            embed = _embed_mycard_simple(
+                ctx,
+                anime_fav=anime_fav,
+                al_name=al_name,
+                mini_scores=mini_scores,
+                bug_validated=bug_validated,
+                with_image_card=True,
+            )
+            embed.set_image(url="attachment://mycard.png")
+            await ctx.send(embed=embed, file=file)
+        except Exception:
+            embed = _embed_mycard_simple(
+                ctx,
+                anime_fav=anime_fav,
+                al_name=al_name,
+                mini_scores=mini_scores,
+                bug_validated=bug_validated,
+                with_image_card=False,
+            )
+            await ctx.send(embed=embed)
 
     @commands.hybrid_command(
         name="profile",
