@@ -322,6 +322,38 @@ def _top_mini_game_wins(mini_scores: dict) -> tuple[str, int] | None:
     return None
 
 
+def _mycard_play_line(mini_scores: dict) -> Optional[str]:
+    """Une ligne pour la carte image : mini-jeu le plus joué."""
+    tp = _top_mini_game_play(mini_scores or {})
+    if not tp:
+        return None
+    return f"Plus joué · {tp[0]} — {_fmt_number(tp[1])}"
+
+
+def _mycard_record_line(mini_scores: dict) -> Optional[str]:
+    """Victoires duels en priorité, sinon 2e meilleur mini-jeu (hors engagement)."""
+    if not mini_scores:
+        return None
+    dv = int(mini_scores.get("duel_victory") or 0)
+    if dv > 0:
+        return f"Victoires · {_mini_label('duel_victory')} — {_fmt_number(dv)}"
+    items: list[tuple[str, int]] = []
+    for k, raw in mini_scores.items():
+        if k in _ENGAGE_MINI_KEYS:
+            continue
+        try:
+            v = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            items.append((k, v))
+    items.sort(key=lambda x: -x[1])
+    if len(items) >= 2:
+        k, v = items[1]
+        return f"2e activité · {_mini_label(k)} — {_fmt_number(v)}"
+    return None
+
+
 def _format_minis_compact(mini_scores: dict) -> str:
     if not mini_scores:
         return "— Aucune activité enregistrée."
@@ -489,6 +521,15 @@ def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
 
 
 # ---------- BUILD DES EMBEDS (carte / profil) ----------
+def _embed_mycard_minimal(ctx: commands.Context) -> discord.Embed:
+    """Embed léger quand la carte PNG contient déjà tout (évite doublon avec l’image)."""
+    return discord.Embed(
+        title="🎴 Carte",
+        description="Tout est sur l’image — détail : **`/profile`** · **`/mybadges`**",
+        color=_EMBED_OVERVIEW,
+    ).set_footer(text="/profile · /mybadges · /animefav")
+
+
 def _embed_mycard_simple(
     ctx: commands.Context,
     *,
@@ -500,18 +541,13 @@ def _embed_mycard_simple(
 ) -> discord.Embed:
     """Carte courte : pas de menu, pas de timeout."""
     if with_image_card:
-        e = discord.Embed(
-            title="🎴 Carte",
-            description="Niveau global et XP sur l’image — détail : **`/profile`**",
-            color=_EMBED_OVERVIEW,
-        )
-    else:
-        e = discord.Embed(
-            title=f"🎴 {ctx.author.display_name}",
-            description="Vue rapide — tout le détail : **`/profile`**",
-            color=_EMBED_OVERVIEW,
-        )
-        e.set_thumbnail(url=ctx.author.display_avatar.url)
+        return _embed_mycard_minimal(ctx)
+    e = discord.Embed(
+        title=f"🎴 {ctx.author.display_name}",
+        description="Vue rapide — tout le détail : **`/profile`**",
+        color=_EMBED_OVERVIEW,
+    )
+    e.set_thumbnail(url=ctx.author.display_avatar.url)
     if al_name:
         e.add_field(name="🔗 AniList", value=f"`{al_name}`", inline=False)
     else:
@@ -867,7 +903,7 @@ class Profile(commands.Cog):
 
     @commands.hybrid_command(
         name="mycard",
-        description="Carte visuelle (niveau global, XP) + AniList, anime favori, activité, bugs validés.",
+        description="Carte panoramique : niveau, XP, AniList, mini-jeux (détail : /profile).",
     )
     @commands.cooldown(1, 20, commands.BucketType.user)
     async def mycard(self, ctx: commands.Context) -> None:
@@ -893,9 +929,8 @@ class Profile(commands.Cog):
         level = int(ud.get("level", 0))
         next_xp = core.xp_for_next_level(level)
         title = core.get_title_for_global_level(level)
-        fav_plain: Optional[str] = None
-        if anime_fav:
-            fav_plain = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
+        play_line = _mycard_play_line(mini_scores)
+        record_line = _mycard_record_line(mini_scores)
 
         try:
             buf = await asyncio.to_thread(
@@ -906,7 +941,9 @@ class Profile(commands.Cog):
                     xp=xp,
                     next_xp=next_xp,
                     title=title,
-                    anime_fav=fav_plain,
+                    anilist_username=al_name,
+                    line_play=play_line,
+                    line_record=record_line,
                 )
             )
             file = discord.File(buf, filename="mycard.png")
