@@ -36,7 +36,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "chainquiz": "Enchaîne des quiz solo : la difficulté monte à chaque bonne réponse.",
     "raid": "Groupe : statut du raid (tout le monde).",
     "raid statut": "Salon, horaire, auto ou non, prochain créneau (fuseau du bot).",
-    "raidconfig": "Admins : une commande — salon, lancement auto, jour, heure (paramètres omis = inchangés).",
+    "raidconfig": "Admins : panneau interactif (salon, auto ON/OFF, jour, heure, minutes, HH:MM précis).",
     "raidstart": "Lance un raid boss (admin) : confirmation + max 1× par semaine / serveur.",
     "raidalerttest": "Envoie un message de test type « raid dans 1 h » (admin).",
     "minijeux": "Deux menus : **Devinettes (Guess)** et **Autres** — choix = lance la partie (duel → /duel @membre).",

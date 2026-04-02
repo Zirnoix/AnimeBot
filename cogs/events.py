@@ -232,7 +232,7 @@ class Onboarding(commands.Cog):
                     "**3) `/setlevelupchannel`** — salon des **annonces** : **nouveau titre global** (XP) et **nouveau titre quiz** "
                     "(score du mois, `/animequiz` / `/animequizmulti`) ; sinon dans le salon où la partie a lieu. "
                     "**`/clearlevelupchannel`** pour réinitialiser.\n"
-                    "**4) `/raidconfig`** (admins) — salon, auto, jour, heure ; **`/raid statut`** pour tout le monde ; "
+                    "**4) `/raidconfig`** (admins) — panneau (salon, auto, jour, heure) ; **`/raid statut`** pour tout le monde ; "
                     "**`/raidstart`** manuel (1×/semaine serveur après confirmation)."
                 ),
             )
