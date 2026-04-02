@@ -314,8 +314,32 @@ def _mycard_devinettes_total(mini_scores: dict) -> int:
     return s
 
 
+def _mycard_score_hint(key: str) -> str:
+    """
+    Ce que mesure réellement le compteur (d’après add_mini_score dans le code).
+    Phrase courte pour carte / embed.
+    """
+    if key == "bossraid":
+        return "coups au raid boss"
+    if key == "duel":
+        return "manches où tu marques le point (duel)"
+    if key == "duel_victory":
+        return "duels remportés (match gagné)"
+    if key in ("animequiz", "animequizmulti"):
+        return "bonnes réponses (questions justes)"
+    if key == "chainquiz":
+        return "bonnes réponses (chaîne)"
+    if key == "higherlower":
+        return "comparaisons gagnées (H/L)"
+    if key in _MYCARD_GUESS_KEYS or key == "guesswho":
+        return "bonnes réponses (devinette réussie)"
+    if key == "topgg_vote":
+        return "votes Top.gg"
+    return "activité (compteur bot)"
+
+
 def _top_mini_game_play(mini_scores: dict) -> tuple[str, int] | None:
-    """Mini-jeu le plus « joué » (compteur max hors engagement)."""
+    """Mini-jeu le plus « actif » : (clé interne, valeur max hors engagement)."""
     if not mini_scores:
         return None
     best_k = None
@@ -332,25 +356,27 @@ def _top_mini_game_play(mini_scores: dict) -> tuple[str, int] | None:
             best_k = k
     if best_k is None or best_v <= 0:
         return None
-    return (_mini_label(best_k), best_v)
+    return (best_k, best_v)
 
 
 def _top_mini_game_wins(mini_scores: dict) -> tuple[str, int] | None:
-    """Meilleure stat de victoires (ex. duels gagnés) si présente."""
+    """(clé, valeur) si victoires duels > 0."""
     if not mini_scores:
         return None
     dv = int(mini_scores.get("duel_victory") or 0)
     if dv > 0:
-        return (_mini_label("duel_victory"), dv)
+        return ("duel_victory", dv)
     return None
 
 
 def _mycard_play_line(mini_scores: dict) -> Optional[str]:
-    """Une ligne pour la carte image : mini-jeu le plus joué."""
+    """Une ligne pour la carte image : mini-jeu le plus actif + précision sur le compteur."""
     tp = _top_mini_game_play(mini_scores or {})
     if not tp:
         return None
-    return f"Plus joué · {tp[0]} — {_fmt_number(tp[1])}"
+    k, v = tp
+    hint = _mycard_score_hint(k)
+    return f"Plus joué · {_mini_label(k)} — {_fmt_number(v)} · {hint}"
 
 
 def _mycard_image_line1(mini_scores: dict) -> Optional[str]:
@@ -358,7 +384,7 @@ def _mycard_image_line1(mini_scores: dict) -> Optional[str]:
     ms = mini_scores or {}
     q = int(ms.get("animequiz", 0) or 0) + int(ms.get("animequizmulti", 0) or 0)
     if q > 0:
-        return f"Quiz — {_fmt_number(q)}"
+        return f"Quiz — {_fmt_number(q)} bonnes réponses (solo + multi)"
     return _mycard_play_line(ms)
 
 
@@ -367,7 +393,7 @@ def _mycard_image_line2(mini_scores: dict) -> Optional[str]:
     ms = mini_scores or {}
     dev = _mycard_devinettes_total(ms)
     if dev > 0:
-        return f"Devinettes — {_fmt_number(dev)}"
+        return f"Devinettes — {_fmt_number(dev)} bonnes réponses (guess + H/L)"
     return _mycard_record_line(ms)
 
 
@@ -377,7 +403,7 @@ def _mycard_record_line(mini_scores: dict) -> Optional[str]:
         return None
     dv = int(mini_scores.get("duel_victory") or 0)
     if dv > 0:
-        return f"Victoires · {_mini_label('duel_victory')} — {_fmt_number(dv)}"
+        return f"Duels — {_fmt_number(dv)} {_mycard_score_hint('duel_victory')}"
     items: list[tuple[str, int]] = []
     for k, raw in mini_scores.items():
         if k in _ENGAGE_MINI_KEYS:
@@ -391,7 +417,7 @@ def _mycard_record_line(mini_scores: dict) -> Optional[str]:
     items.sort(key=lambda x: -x[1])
     if len(items) >= 2:
         k, v = items[1]
-        return f"2e activité · {_mini_label(k)} — {_fmt_number(v)}"
+        return f"2e activité · {_mini_label(k)} — {_fmt_number(v)} · {_mycard_score_hint(k)}"
     return None
 
 
@@ -588,10 +614,20 @@ def _embed_mycard_simple(
         e.add_field(name="⭐ Anime favori", value=fav_val, inline=False)
     tp = _top_mini_game_play(mini_scores or {})
     if tp:
-        e.add_field(name="🎮 Le plus joué", value=f"{tp[0]} · **{_fmt_number(tp[1])}**", inline=True)
+        k, v = tp
+        e.add_field(
+            name="🎮 Le plus actif",
+            value=f"**{_mini_label(k)}** · {_fmt_number(v)}\n_{_mycard_score_hint(k)}_",
+            inline=True,
+        )
     tw = _top_mini_game_wins(mini_scores or {})
     if tw:
-        e.add_field(name="🏆 Plus de victoires", value=f"{tw[0]} · **{_fmt_number(tw[1])}**", inline=True)
+        kw, vw = tw
+        e.add_field(
+            name="🏆 Duels",
+            value=f"**{_fmt_number(vw)}** — {_mycard_score_hint(kw)}",
+            inline=True,
+        )
     if bug_validated > 0:
         e.add_field(name="🐞 Bugs validés (staff)", value=f"**{bug_validated}**", inline=True)
     e.set_footer(text="/profile · /mybadges · /animefav")

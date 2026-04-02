@@ -381,7 +381,7 @@ def generate_mycard_image(
     if line_play:
         draw.text(
             (tx, y_stats),
-            _mycard_trunc(line_play, 72),
+            _mycard_trunc(line_play, 88),
             font=font_stat,
             fill=_MYCARD_COL_MUTED,
         )
@@ -389,7 +389,7 @@ def generate_mycard_image(
     if line_record:
         draw.text(
             (tx, y_stats),
-            _mycard_trunc(line_record, 72),
+            _mycard_trunc(line_record, 88),
             font=font_stat,
             fill=_MYCARD_COL_MUTED,
         )
