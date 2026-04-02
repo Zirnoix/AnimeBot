@@ -381,7 +381,8 @@ def _raid_config_panel_embed(guild: discord.Guild) -> discord.Embed:
     em.title = "⚙️ Raid boss — configuration"
     em.description = (
         "Choisis les options ci‑dessous — **chaque changement est enregistré** tout de suite.\n"
-        "**Salon** · **jour** · **heure** · **minutes** (pas de 5) · boutons **Auto** · **HH:MM** pour une minute précise."
+        "**Salon** · **jour** · **heure** · **minutes** (pas de 5) · boutons **Auto** · **HH:MM** pour une minute précise.\n"
+        "**Enregistrer** ferme le panneau avec une confirmation · **Fermer** ferme sans message."
     )
     return em
 
@@ -495,6 +496,36 @@ class RaidConfigPanelView(View):
     async def raid_hhmm_modal(self, interaction: discord.Interaction, button: Button) -> None:
         await interaction.response.send_modal(RaidTimeModal(self))
 
+    @discord.ui.button(label="💾 Enregistrer", style=discord.ButtonStyle.success, row=4)
+    async def raid_config_save(self, interaction: discord.Interaction, button: Button) -> None:
+        await interaction.response.defer()
+        try:
+            await interaction.message.delete()
+        except discord.HTTPException:
+            try:
+                await interaction.message.edit(
+                    content="✅ **Configuration enregistrée.**",
+                    embed=None,
+                    view=None,
+                )
+            except Exception:
+                pass
+        await interaction.followup.send(
+            "✅ La configuration du **raid boss** a bien été enregistrée.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.secondary, row=4)
+    async def raid_config_close(self, interaction: discord.Interaction, button: Button) -> None:
+        await interaction.response.defer()
+        try:
+            await interaction.message.delete()
+        except discord.HTTPException:
+            try:
+                await interaction.message.edit(content="\u200b", embed=None, view=None)
+            except Exception:
+                pass
+
 
 class _RaidChannelSelect(ChannelSelect):
     def __init__(self, panel: RaidConfigPanelView) -> None:
@@ -509,7 +540,9 @@ class _RaidChannelSelect(ChannelSelect):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         ch = self.values[0]
-        if not isinstance(ch, discord.TextChannel):
+        # NewsChannel (annonces) n’est pas un TextChannel — éviter isinstance(..., TextChannel) seul.
+        ch_type = getattr(ch, "type", None)
+        if ch_type not in (discord.ChannelType.text, discord.ChannelType.news):
             await interaction.response.send_message("❌ Choisis un salon **texte** (ou annonces).", ephemeral=True)
             return
         if ch.guild.id != self.panel.guild.id:
