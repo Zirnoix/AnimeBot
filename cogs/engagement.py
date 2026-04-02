@@ -264,7 +264,12 @@ class Engagement(commands.Cog):
 
         if ctx and ctx.channel:
             try:
-                await ctx.send(f"🎯 **Mission accomplie !** +{xp} XP")
+                msg = f"🎯 **Mission accomplie !** +{xp} XP"
+                itx = getattr(ctx, "interaction", None)
+                if itx:
+                    await itx.followup.send(msg, ephemeral=True)
+                else:
+                    await ctx.send(msg)
             except Exception as e:
                 LOG.debug("mission notify channel failed uid=%s: %s", uid, e)
         elif core.get_mission_dm_notify(uid):
@@ -321,7 +326,8 @@ class Engagement(commands.Cog):
             core.set_mission_dm_notify(ctx.author.id, True)
             msg = (
                 "✅ Tu recevras un **MP** quand une mission se termine **hors salon** "
-                "(quiz, duel, level up, etc.). Les missions validées par une commande restent annoncées dans le salon."
+                "(quiz, duel, level up, etc.). Avec une **slash** dans le salon, l’annonce de mission complétée est **éphémère** ; "
+                "en préfixe `!`, elle reste visible dans le salon."
             )
             if ctx.interaction:
                 if not ctx.interaction.response.is_done():
@@ -336,7 +342,7 @@ class Engagement(commands.Cog):
             core.set_mission_dm_notify(ctx.author.id, False)
             msg = (
                 "✅ **MP désactivés** pour les missions terminées hors salon. "
-                "Tu gardes l’XP ; les missions complétées par une commande s’affichent toujours dans le salon."
+                "Tu gardes l’XP ; avec **slash**, l’annonce de mission complétée est **éphémère** ; avec **préfixe**, elle reste dans le salon."
             )
             if ctx.interaction:
                 if not ctx.interaction.response.is_done():
@@ -348,7 +354,7 @@ class Engagement(commands.Cog):
             return
 
         if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(thinking=False)
+            await ctx.interaction.response.defer(ephemeral=True, thinking=False)
 
         uid = str(ctx.author.id)
         m = self._get_or_create_today_mission(uid)
@@ -373,8 +379,9 @@ class Engagement(commands.Cog):
                     f"♻️ Tu as **déjà utilisé** ton reroll cette semaine.\n"
                     f"🔒 Prochain reroll dispo **lundi {nxt.strftime('%d/%m')}** (dans **{wait_days}** jour{'s' if wait_days>1 else ''})."
                 )
-                send = ctx.send if not ctx.interaction else ctx.interaction.followup.send
-                return await send(msg)
+                if ctx.interaction:
+                    return await ctx.interaction.followup.send(msg, ephemeral=True)
+                return await ctx.send(msg)
 
             # autorisé → regénère (évite de retomber sur la même mission qu’avant le reroll)
             old_key = str(m.get("key") or "")
@@ -452,8 +459,10 @@ class Engagement(commands.Cog):
         if rr_line:
             foot.append(rr_line)
         embed.set_footer(text=" · ".join(foot) if foot else "Une mission différente chaque jour")
-        send = ctx.send if not ctx.interaction else ctx.interaction.followup.send
-        await send(embed=embed)
+        if ctx.interaction:
+            await ctx.interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await ctx.send(embed=embed)
 
     # ------------- listeners de progression -------------
     @commands.Cog.listener()

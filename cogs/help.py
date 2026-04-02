@@ -22,12 +22,12 @@ DESC_OVERRIDE: Dict[str, str] = {
     "monplanning": "Ton planning hebdomadaire (compte AniList lié).",
 
     # Minigames
-    "animequiz": "Quiz anime (solo) — à la fin : bouton **Ajouter à mon suivi** (/track) pour tous.",
-    "animequizmulti": "Quiz anime multi-joueurs.",
+    "animequiz": "Quiz solo : devine l’anime sur l’image (difficulté au choix) — XP et score quiz.",
+    "animequizmulti": "Enchaîne **5 à 20** quiz solo d’affilée (difficultés variées) — XP et combos.",
     "duel": "Duel de quiz entre 2 joueurs.",
     "guess": "Alias historique : utilise **`/guessyear`**, **`/guessepisodes`**, **`/guessgenre`**, **`/guesscharacter`** ou **`/minijeux`**.",
-    "guessop": "Devine l’opening (vocal) — catalogue global SQLite + récolte auto AnimeThemes.",
-    "guessopchain": "Chaîne de Guess OP : bonus de série, récap des totaux, nettoyage des messages entre manches.",
+    "guessop": "Devine l’opening (audio) — blind test sur de vrais génériques.",
+    "guessopchain": "Enchaîne plusieurs manches Guess OP avec bonus de série et récap des scores.",
     "guessyear": "Devine l’année de diffusion (image + réponse dans le salon).",
     "guessepisodes": "Devine le nombre d’épisodes (image + réponse dans le salon).",
     "guessgenre": "Trouve un des genres (image + réponse texte).",
@@ -84,7 +84,6 @@ DESC_OVERRIDE: Dict[str, str] = {
     "ping": "Latence du bot.",
     "recap": "Récap MP « Sorties du jour » (compte AniList lié). Boutons + saisie HH:MM ; précision avec /setalert.",
     "setalert": "Heure HH:MM du récap MP (fuseau du bot). Complète /recap pour une heure précise (ex. 08:30).",
-    "dailysummary": "(Obsolète) Renommé en /recap — affiche un rappel si tu l’utilises encore.",
     "source": "Lien vers le dépôt GitHub du bot.",
     "uptime": "Depuis combien de temps le bot tourne.",
 
@@ -119,8 +118,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "guesswho", "chainquiz",
         "guessop", "guessopchain",
         "higherlower", "minijeux",
-        "raid", "raid statut", "raidconfig",
-        "raidstart", "raidalerttest",
+        "raid", "raid statut",
     ]),
     ("🔗 Pages Link", [
         "linkanilist", "verifyanilist", "unlink"
@@ -132,13 +130,20 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "track", "track add", "track list", "track remove", "track clear"
     ]),
     ("🧰 Pages Utils", [
-        "setchannel", "setlevelupchannel", "clearlevelupchannel", "botinfo", "vote", "ping", "recap", "setalert", "dailysummary", "source", "uptime"
+        "botinfo", "vote", "ping", "recap", "setalert", "source", "uptime"
     ]),
-    ("🛠️ Pages Admin (guide)", [
-        "guide_admin",
+]
+
+# Aide réservée aux administrateurs du serveur : voir /help_admin
+ADMIN_HELP_SECTIONS: List[Tuple[str, List[str]]] = [
+    ("🛠️ Configuration & guide admin", [
+        "guide_admin", "setchannel", "setlevelupchannel", "clearlevelupchannel",
     ]),
-    ("🔐 Propriétaire du bot", [
-        "owner",
+    ("📺 Liste serveur (/airings)", [
+        "airings", "airings all", "airings add", "airings remove", "airings list", "airings clear",
+    ]),
+    ("⚔️ Raid (configuration)", [
+        "raidconfig", "raidstart", "raidalerttest",
     ]),
 ]
 
@@ -249,11 +254,19 @@ async def _ac_help_command(interaction: discord.Interaction, current: str) -> li
 
 # ===== Vues (navigation) =====
 class HelpNavigator(discord.ui.View):
-    def __init__(self, pages: List[discord.Embed], labels: List[str], *, timeout: float = 300.0):
+    def __init__(
+        self,
+        pages: List[discord.Embed],
+        labels: List[str],
+        *,
+        timeout: float = 300.0,
+        help_cmd: str = "help",
+    ):
         super().__init__(timeout=timeout)
         self.pages = pages
         self.labels = labels
         self.index = 0
+        self.help_cmd = help_cmd
         options = [discord.SelectOption(label=lbl, value=str(i)) for i, lbl in enumerate(self.labels[:25])]
         self.jump_select.options = options
         if len(self.pages) <= 1:
@@ -287,21 +300,22 @@ class HelpNavigator(discord.ui.View):
 
     def _with_footer(self, em: discord.Embed) -> discord.Embed:
         em = em.copy()
-        em.set_footer(text=f"Page {self.index+1}/{len(self.pages)} — /help <commande> pour le détail.")
+        em.set_footer(text=f"Page {self.index+1}/{len(self.pages)} — /{self.help_cmd} <commande> pour le détail.")
         return em
 
 class CoreHelpView(discord.ui.View):
-    def __init__(self, build_curated_pages_cb, *, ephemeral: bool):
+    def __init__(self, build_curated_pages_cb, *, ephemeral: bool, help_cmd: str = "help"):
         super().__init__(timeout=180.0)
         self.build_curated_pages_cb = build_curated_pages_cb
         self.ephemeral = ephemeral
+        self.help_cmd = help_cmd
 
     @discord.ui.button(label="Voir tout (MP)", style=discord.ButtonStyle.primary)
     async def show_all_dm(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         try:
             pages, labels = self.build_curated_pages_cb()
-            nav = HelpNavigator(pages, labels)
+            nav = HelpNavigator(pages, labels, help_cmd=self.help_cmd)
             first = nav._with_footer(pages[0])
             await interaction.user.send(embed=first, view=nav)
             await interaction.followup.send("📬 Aide complète envoyée en message privé.", ephemeral=True)
@@ -318,13 +332,17 @@ class CoreHelpView(discord.ui.View):
 
 # ===== Cog =====
 class Help(commands.Cog):
-    """Aide du bot : /help (Essentiel + MP curaté), /help <commande>. Owner : /owner."""
+    """Aide du bot : /help (Essentiel + MP curaté), /help_admin (admins), /help <commande>. Owner : /owner."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # --- pages curatées (ordre défini par CURATED_SECTIONS)
-    def _build_curated_pages(self) -> Tuple[List[discord.Embed], List[str]]:
+    def _build_pages_from_sections(
+        self,
+        sections: List[Tuple[str, List[str]]],
+        *,
+        help_cmd: str = "help",
+    ) -> Tuple[List[discord.Embed], List[str]]:
         slash_map = _all_slash_commands(self.bot)
         pages: List[discord.Embed] = []
         labels: List[str] = []
@@ -333,11 +351,10 @@ class Help(commands.Cog):
             k = key.lower()
             return k in slash_map
 
-        for section_title, keys in CURATED_SECTIONS:
+        for section_title, keys in sections:
             fields: List[Tuple[str, str]] = []
 
-            # Dans la section Tracker on choisit d’afficher explicitement les sous-commandes
-            show_children_individually = ("Tracker" in section_title)
+            show_children_individually = ("Tracker" in section_title) or ("Liste serveur" in section_title)
 
             for raw in keys:
                 disp = f"/{raw}"
@@ -378,7 +395,7 @@ class Help(commands.Cog):
             for idx, chunk in enumerate(chunks):
                 em = discord.Embed(
                     title=section_title,
-                    description="Tape `/help <commande>` pour une fiche détaillée.",
+                    description=f"Tape `/{help_cmd} <commande>` pour une fiche détaillée.",
                     color=discord.Color.blurple() if "Pages" in section_title else discord.Color.purple()
                 )
                 for n, v in chunk:
@@ -389,6 +406,12 @@ class Help(commands.Cog):
         if not pages:
             pages = [discord.Embed(title="Aide", description="Aucune commande slash détectée.", color=discord.Color.red())]
         return pages, [p.title or "Aide" for p in pages]
+
+    def _build_curated_pages(self) -> Tuple[List[discord.Embed], List[str]]:
+        return self._build_pages_from_sections(CURATED_SECTIONS, help_cmd="help")
+
+    def _build_admin_curated_pages(self) -> Tuple[List[discord.Embed], List[str]]:
+        return self._build_pages_from_sections(ADMIN_HELP_SECTIONS, help_cmd="help_admin")
 
     # --- pages owner/admin (slash only)
     def _build_owner_pages(self) -> Tuple[List[discord.Embed], List[str]]:
@@ -517,7 +540,8 @@ class Help(commands.Cog):
             description=(
                 "Commandes principales.\n"
                 "• **Slash** `/…` recommandé ; **`!`** marche aussi sur les commandes hybrid.\n"
-                "• `/help <commande>` : détail · bouton **Voir tout** : liste complète en MP (depuis un serveur)."
+                "• `/help <commande>` : détail · bouton **Voir tout** : liste complète en MP (depuis un serveur).\n"
+                "• **Administrateurs** : `/help_admin` (config serveur, liste /airings, raid)."
             ),
             color=discord.Color.blurple()
         )
@@ -548,7 +572,55 @@ class Help(commands.Cog):
             await ctx.send(embed=em)
             return
 
-        view = CoreHelpView(self._build_curated_pages, ephemeral=ephemeral_ok)
+        view = CoreHelpView(self._build_curated_pages, ephemeral=ephemeral_ok, help_cmd="help")
+        await self._send_embed_ctx_or_itx(target, embed=em, view=view, ephemeral=ephemeral_ok)
+
+    @commands.hybrid_command(
+        name="help_admin",
+        description="Aide administrateur : configuration serveur, /airings, raid (réservé aux admins).",
+    )
+    @commands.guild_only()
+    @commands.has_permissions(administrator=True)
+    @app_commands.describe(commande="Nom d'une commande slash pour l'aide détaillée (auto-complétion).")
+    @app_commands.autocomplete(commande=_ac_help_command)
+    async def help_admin(self, ctx: commands.Context, commande: Optional[str] = None):
+        is_slash = bool(getattr(ctx, "interaction", None))
+        target = ctx.interaction if is_slash else ctx
+        ephemeral_ok = is_slash and ctx.guild is not None
+
+        if commande:
+            await self._send_command_help(target, commande, ephemeral=ephemeral_ok)
+            return
+
+        em = discord.Embed(
+            title="🛠️ Aide — Administrateurs",
+            description=(
+                "Commandes réservées aux **administrateurs** du serveur.\n"
+                "• **Slash** `/…` recommandé ; **`!`** marche aussi sur les commandes hybrid.\n"
+                "• `/help_admin <commande>` : détail · bouton **Voir tout** : liste complète en MP."
+            ),
+            color=discord.Color.dark_gold(),
+        )
+        picks = [
+            ("/guide_admin", DESC_OVERRIDE["guide_admin"]),
+            ("/airings", DESC_OVERRIDE["airings"]),
+            ("/raidconfig", DESC_OVERRIDE["raidconfig"]),
+            ("/setchannel", DESC_OVERRIDE["setchannel"]),
+        ]
+        for name, desc in picks:
+            em.add_field(name=name, value=_compact_one_line(desc), inline=False)
+        em.set_footer(text="/help_admin <commande> · slash ou ! sur les hybrid")
+
+        if ctx.guild is None and not is_slash:
+            em.add_field(
+                name="ℹ️ MP",
+                value="Pour le bouton **Voir tout**, utilise `/help_admin` dans un serveur.",
+                inline=False,
+            )
+            await ctx.send(embed=em)
+            return
+
+        view = CoreHelpView(self._build_admin_curated_pages, ephemeral=ephemeral_ok, help_cmd="help_admin")
         await self._send_embed_ctx_or_itx(target, embed=em, view=view, ephemeral=ephemeral_ok)
 
 async def setup(bot: commands.Bot):
@@ -559,6 +631,10 @@ async def setup(bot: commands.Bot):
         pass
     try:
         bot.tree.remove_command("help")
+    except Exception:
+        pass
+    try:
+        bot.tree.remove_command("help_admin")
     except Exception:
         pass
 

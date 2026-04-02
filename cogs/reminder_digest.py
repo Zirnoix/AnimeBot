@@ -228,7 +228,7 @@ def _recap_view_for_user(uid: int) -> RecapSetupView:
 
 
 class ReminderDigest(commands.Cog):
-    """Récap MP « sorties du jour » + /setalert (ancien /dailysummary ; /reminder supprimé)."""
+    """Récap MP « sorties du jour » + /setalert."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -268,17 +268,6 @@ class ReminderDigest(commands.Cog):
                     await ctx.reply(f"❌ Erreur `/recap` : `{type(e).__name__}: {e}`")
             except Exception:
                 LOG.exception("recap: échec envoi message d’erreur")
-
-    @commands.hybrid_command(
-        name="dailysummary",
-        hidden=True,
-        description="(Obsolète) Utilise /recap à la place.",
-    )
-    async def dailysummary_deprecated(self, ctx: commands.Context) -> None:
-        await ctx.reply(
-            "ℹ️ La commande **`/dailysummary`** a été renommée en **`/recap`**. Utilise **`/recap`** pour le panneau.",
-            ephemeral=True,
-        )
 
     @commands.hybrid_command(
         name="setalert",
