@@ -273,27 +273,31 @@ def _mycard_iter_body_segments(body: str) -> list[tuple[str, bool]]:
     return parts
 
 
-def _mycard_draw_stat_bullet_triangle(
-    draw: ImageDraw.ImageDraw,
-    x: int,
-    y_top: int,
-    label_font: ImageFont.ImageFont,
-) -> int:
-    """Petit triangle vers la droite (dessiné, pas de glyphe Unicode manquant dans la police)."""
+_MYCARD_BULLET_W = 7
+_MYCARD_BULLET_H = 10
+_MYCARD_BULLET_GAP = 8  # espace triangle → début du texte (aligné sur le pseudo)
+
+
+def _mycard_line_center_y(draw: ImageDraw.ImageDraw, x: int, y: int, text: str, font: ImageFont.ImageFont) -> float:
+    """Centre vertical visuel d’une ligne de texte (pour aligner la puce)."""
+    if not text:
+        text = "."
     try:
-        bbox = draw.textbbox((0, 0), "Ay", font=label_font)
-        fh = float(bbox[3] - bbox[1])
+        bbox = draw.textbbox((x, y), text, font=font)
+        return (bbox[1] + bbox[3]) / 2.0
     except Exception:
-        fh = 22.0
-    y_mid = y_top + fh * 0.42
-    w, h = 7, 10
-    y0 = int(y_mid - h / 2)
-    x0 = x
-    pts = [(x0, y0), (x0, y0 + h), (x0 + w, int(y_mid))]
+        return float(y) + 11.0
+
+
+def _mycard_draw_stat_bullet_triangle(draw: ImageDraw.ImageDraw, x_left: int, y_center: float) -> None:
+    """Triangle vers la droite, centré sur y_center (aligné avec le texte)."""
+    w, h = _MYCARD_BULLET_W, _MYCARD_BULLET_H
+    y0 = int(y_center - h / 2)
+    y_mid = int(y_center)
+    pts = [(x_left, y0), (x_left, y0 + h), (x_left + w, y_mid)]
     sh = [(p[0] + 1, p[1] + 1) for p in pts]
     draw.polygon(sh, fill=_MYCARD_COL_STAT_SHADOW)
     draw.polygon(pts, fill=_MYCARD_COL_STAT_BULLET)
-    return x0 + w + 6
 
 
 def _mycard_parse_stat_line(line: str) -> tuple[str, str, str]:
@@ -312,12 +316,12 @@ def _mycard_parse_stat_line(line: str) -> tuple[str, str, str]:
 
 def _mycard_draw_stat_line(
     draw: ImageDraw.ImageDraw,
-    x: int,
+    x_text: int,
     y: int,
     line: str,
     max_chars: int,
 ) -> None:
-    """Puce (triangle dessiné) + libellé rosé, corps avec chiffres en gras, parenthèses en italique."""
+    """x_text = même abscisse que le pseudo ; triangle à gauche dans la marge. Libellé + corps + hint."""
     line = _mycard_trunc(line, max_chars)
     label, body, hint = _mycard_parse_stat_line(line)
     font_lb = _mycard_font(22, bold=True)
@@ -326,7 +330,11 @@ def _mycard_draw_stat_line(
     font_hi = _mycard_font_oblique(17)
     sep = " — "
 
-    cx = _mycard_draw_stat_bullet_triangle(draw, x, y, font_lb)
+    cy = _mycard_line_center_y(draw, x_text, y, label or "Quiz", font_lb)
+    tri_left = x_text - _MYCARD_BULLET_GAP - _MYCARD_BULLET_W
+    _mycard_draw_stat_bullet_triangle(draw, tri_left, cy)
+
+    cx = x_text
 
     for txt, font, fill in ((label, font_lb, _MYCARD_COL_STAT_LABEL),):
         if not txt:
@@ -343,7 +351,7 @@ def _mycard_draw_stat_line(
         for seg, is_num in _mycard_iter_body_segments(body):
             font = font_num if is_num else font_bd
             fill = _MYCARD_COL_STAT_NUM if is_num else _MYCARD_COL_TEXT
-            dy = -2 if is_num else 0
+            dy = 0
             draw.text((cx + 1, y + 1 + dy), seg, font=font, fill=_MYCARD_COL_STAT_SHADOW)
             draw.text((cx, y + dy), seg, font=font, fill=fill)
             cx += _mycard_text_width(draw, seg, font)
@@ -483,8 +491,11 @@ def generate_mycard_image(
         draw.text((tx, y), fav_txt, font=font_sub, fill=_MYCARD_COL_MUTED)
         y += 32
 
-    bar_y = y + 10
-    bar_w = W - tx - pad
+    bar_y = y + 14
+    lvl_txt = f"Niveau {int(level)}"
+    tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
+    lvl_gap = 12
+    bar_w = max(120, W - tx - pad - tw_lv - lvl_gap)
     bar_h = 24
     radius = 12
     ratio = 1.0 if next_xp <= 0 else max(0.0, min(1.0, float(xp) / float(next_xp)))
@@ -513,13 +524,19 @@ def generate_mycard_image(
     draw = ImageDraw.Draw(base)
     xp_txt = f"{_mycard_fmt_xp(xp)} / {_mycard_fmt_xp(next_xp)} XP"
     tw_xp = _mycard_text_width(draw, xp_txt, font_xp)
-    draw.text((tx + bar_w - tw_xp, bar_y - 30), xp_txt, font=font_xp, fill=_MYCARD_COL_MUTED)
+    draw.text((tx + bar_w - tw_xp, bar_y - 26), xp_txt, font=font_xp, fill=_MYCARD_COL_MUTED)
 
-    lvl_txt = f"Niveau {int(level)}"
-    tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
-    draw.text((tx + bar_w - tw_lv, bar_y + bar_h + 10), lvl_txt, font=font_lvl, fill=_MYCARD_COL_TEXT)
+    try:
+        bb_lv = draw.textbbox((0, 0), lvl_txt, font=font_lvl)
+        lh_lv = float(bb_lv[3] - bb_lv[1])
+    except Exception:
+        lh_lv = 34.0
+    lvl_x = tx + bar_w + lvl_gap
+    lvl_y = int(bar_y + (bar_h - lh_lv) / 2)
+    draw.text((lvl_x + 1, lvl_y + 1), lvl_txt, font=font_lvl, fill=(8, 6, 14))
+    draw.text((lvl_x, lvl_y), lvl_txt, font=font_lvl, fill=_MYCARD_COL_TEXT)
 
-    y_stats = bar_y + bar_h + 40
+    y_stats = bar_y + bar_h + 34
     if line_play:
         _mycard_draw_stat_line(draw, tx, y_stats, line_play, 90)
         y_stats += 32
