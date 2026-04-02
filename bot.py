@@ -42,6 +42,18 @@ if not _owner_raw.isdigit():
 OWNER_ID = int(_owner_raw)
 
 
+async def _slash_only_prefix(bot: commands.Bot, message: discord.Message) -> list[str]:
+    """
+    Slash uniquement : pas de `!` ni mention-commande pour les utilisateurs.
+    Exception : le propriétaire en **MP uniquement** garde le préfixe `!` pour `!setavatar` (image jointe).
+    """
+    if message.author.bot:
+        return []
+    if message.guild is None and int(message.author.id) == int(OWNER_ID):
+        return ["!"]
+    return []
+
+
 def _is_bot_owner_user(user_id: int) -> bool:
     """True si l’utilisateur est le propriétaire déclaré (OWNER_ID)."""
     return int(user_id) == OWNER_ID
@@ -91,11 +103,11 @@ intents.message_content = True  # nécessaire si tes jeux lisent les messages
 
 # ========= BOT =========
 class AnimeBot(commands.Bot):
-    """Bot principal (full slash + auto-sync par guilde, sans global auto)."""
+    """Bot principal (commandes en slash ; préfixe réservé au owner en MP pour outils techniques)."""
 
     def __init__(self) -> None:
         super().__init__(
-            command_prefix=commands.when_mentioned_or("!"),
+            command_prefix=_slash_only_prefix,
             intents=intents,
             application_id=int(APPLICATION_ID) if (APPLICATION_ID and APPLICATION_ID.isdigit()) else None,
             help_command=None,
@@ -439,11 +451,10 @@ class AnimeBot(commands.Bot):
 # ========= INSTANCE =========
 bot = AnimeBot()
 
-# ========= HYBRID : slash + préfixe (!) =========
+# ========= Slash (hybrid enregistré sur l’arbre ; préfixe désactivé sauf owner MP — voir _slash_only_prefix) =========
 @bot.check
 async def _block_prefix_invocation(ctx: commands.Context) -> bool:
-    # Slash : interaction présente. Préfixe : message utilisateur sans interaction.
-    # (Anciennement `return bool(ctx.interaction)` bloquait toutes les commandes `!`.)
+    # Slash : interaction présente. Préfixe : autorisé seulement si le message existe (owner MP, etc.).
     if ctx.interaction is not None:
         return True
     return getattr(ctx, "message", None) is not None
@@ -498,10 +509,10 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     await _slash_error_respond(interaction, "❌ Oups, erreur inattendue.")
 
 
-# ========= Erreurs commandes préfixe (!) =========
+# ========= Erreurs commandes préfixe (rare : owner MP, ex. !setavatar) =========
 @bot.event
 async def on_command_error(ctx: commands.Context, error: Exception) -> None:
-    """Réponses claires pour `!commande` — slash / hybrid (interaction) restent gérés par `@bot.tree.error`."""
+    """Réponses claires pour `!commande` — le slash reste géré par `@bot.tree.error`."""
     if isinstance(error, commands.CommandNotFound):
         return
     if getattr(ctx, "interaction", None) is not None:

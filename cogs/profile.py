@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, Iterable, Optional
+import re
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 import discord
 from discord import app_commands
@@ -19,6 +20,62 @@ from modules.emoji_utils import get_emoji
 _EMBED_OVERVIEW = discord.Color.from_rgb(88, 101, 242)
 _EMBED_MINIS = discord.Color.from_rgb(52, 58, 64)
 _EMBED_BADGES = discord.Color.from_rgb(155, 89, 182)
+
+_ANILIST_ANIME_URL_RE = re.compile(r"https?://(www\.)?anilist\.co/anime/(\d+)", re.I)
+_ANIME_FAV_CLEAR_WORDS = frozenset(
+    {"clear", "none", "retirer", "enlever", "supprimer", "-", "reset", "effacer"}
+)
+
+
+def _title_from_anilist_hit(m: dict) -> str:
+    t = m.get("title") or {}
+    return t.get("english") or t.get("romaji") or t.get("native") or str(m.get("id") or "")
+
+
+def _payload_from_search_hit(hit: dict) -> dict:
+    mid = int(hit["id"])
+    return {
+        "media_id": mid,
+        "title": _title_from_anilist_hit(hit),
+        "site_url": hit.get("siteUrl") or f"https://anilist.co/anime/{mid}",
+    }
+
+
+def _resolve_anime_favorite_input(raw: str) -> Tuple[str, Any]:
+    """
+    Retourne (kind, data) :
+    - ("help", None) entrée vide
+    - ("clear", None) retirer le favori
+    - ("set", dict) enregistrer
+    - ("error", str) message d’erreur
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ("help", None)
+    low = s.lower()
+    if low in _ANIME_FAV_CLEAR_WORDS:
+        return ("clear", None)
+
+    m = _ANILIST_ANIME_URL_RE.search(s)
+    if m:
+        mid = int(m.group(2))
+        info = core.get_anime_media_basic(mid)
+        if not info:
+            return ("error", f"Aucun anime trouvé pour l’ID **`{mid}`** (vérifie que c’est bien une fiche **anime** sur AniList).")
+        return ("set", info)
+
+    if s.isdigit():
+        mid = int(s)
+        info = core.get_anime_media_basic(mid)
+        if not info:
+            return ("error", f"Aucun anime trouvé pour l’ID **`{mid}`**.")
+        return ("set", info)
+
+    hits = core.search_media(s, limit=8)
+    if not hits:
+        return ("error", f"Aucun résultat pour **{s[:100]}**. Essaie un autre titre ou colle l’URL AniList.")
+    return ("set", _payload_from_search_hit(hits[0]))
+
 
 # Ordre d’affichage pour /animetop aperçu (clé mini_scores.json → libellé)
 _ANITOP_GAME_LABELS: list[tuple[str, str]] = [
@@ -408,7 +465,7 @@ class MyCardTabSelect(discord.ui.Select):
                 label="Aperçu",
                 value="overview",
                 emoji="📋",
-                description="Niveau, XP, quiz, streak, encart bugs si validés",
+                description="Niveau, XP, quiz, streak, anime favori, encart bugs si validés",
                 default=(act == "overview"),
             ),
             discord.SelectOption(
@@ -449,7 +506,17 @@ class MyCardTabSelect(discord.ui.Select):
 
 
 # ---------- BUILD DES EMBEDS ----------
-def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days, bug_validated: int = 0):
+def _embed_overview(
+    ctx,
+    level,
+    xp,
+    next_xp,
+    title,
+    quiz_score,
+    streak_days,
+    bug_validated: int = 0,
+    anime_fav: Optional[dict] = None,
+):
     bar = _xp_bar(xp, next_xp)
     e = discord.Embed(
         title=f"🎴 Profil de {ctx.author.display_name}",
@@ -460,6 +527,11 @@ def _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days, bug
     e.add_field(name="🏅 Titre", value=f"**{title}**", inline=True)
     e.add_field(name="🧬 Niveau", value=f"**{level}**", inline=True)
     e.add_field(name="🧪 XP", value=f"{_fmt_number(xp)} / {_fmt_number(next_xp)}", inline=True)
+    if anime_fav:
+        ft = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
+        su = (anime_fav.get("site_url") or "").strip()
+        fav_val = f"[{ft}]({su})" if su else f"**{ft}**"
+        e.add_field(name="⭐ Anime favori", value=fav_val, inline=False)
     e.add_field(name="📈 Progression", value=bar, inline=False)
     e.add_field(name="🏆 Score Quiz", value=str(_fmt_number(quiz_score)), inline=False)
 
@@ -847,13 +919,26 @@ class Profile(commands.Cog):
         except Exception:
             bug_validated = 0
 
+        anime_fav = core.get_anime_favorite(user_id)
+
         # Page 1 par défaut
-        embed = _embed_overview(ctx, level, xp, next_xp, title, quiz_score, streak_days, bug_validated)
+        embed = _embed_overview(
+            ctx, level, xp, next_xp, title, quiz_score, streak_days, bug_validated, anime_fav
+        )
         view = MyCardNavigator(
             ctx,
             ctx.author,
             {
-                "overview": (level, xp, next_xp, title, quiz_score, streak_days, bug_validated),
+                "overview": (
+                    level,
+                    xp,
+                    next_xp,
+                    title,
+                    quiz_score,
+                    streak_days,
+                    bug_validated,
+                    anime_fav,
+                ),
                 "minis": mini_scores,
                 "counts": counts,
             },
@@ -862,6 +947,85 @@ class Profile(commands.Cog):
         )
 
         await ctx.send(embed=embed, view=view)
+
+    @commands.hybrid_command(
+        name="animefav",
+        description="Définis ton anime préféré — affiché sur ta carte /mycard.",
+    )
+    @app_commands.describe(
+        anime="Titre (recherche), ID ou URL anilist.co/anime/… — « clear » pour retirer — vide = aide",
+    )
+    @commands.cooldown(2, 15, commands.BucketType.user)
+    async def animefav(self, ctx: commands.Context, anime: Optional[str] = None):
+        """Enregistre un animé favori pour l’aperçu /mycard (AniList)."""
+        is_slash = bool(getattr(ctx, "interaction", None))
+        uid = ctx.author.id
+
+        async def _send_help() -> None:
+            cur = core.get_anime_favorite(uid)
+            if cur:
+                desc = (
+                    f"⭐ Actuellement : **{cur['title']}**\n{cur['site_url']}\n\n"
+                    "Pour changer : indique un **titre**, un **ID** ou une **URL** AniList. "
+                    "**`clear`** pour retirer."
+                )
+            else:
+                desc = (
+                    "Indique un **nom** (recherche sur AniList), un **ID** ou une **URL** "
+                    "`https://anilist.co/anime/...`. "
+                    "Ce sera affiché sur **`/mycard`** (onglet Aperçu). "
+                    "Écris **`clear`** pour retirer un favori déjà enregistré."
+                )
+            em = discord.Embed(title="⭐ Anime favori", description=desc, color=_EMBED_OVERVIEW)
+            if is_slash and ctx.interaction:
+                ep = ctx.guild is not None
+                if not ctx.interaction.response.is_done():
+                    await ctx.interaction.response.send_message(embed=em, ephemeral=ep)
+                else:
+                    await ctx.interaction.followup.send(embed=em, ephemeral=ep)
+            else:
+                await ctx.reply(embed=em)
+
+        if anime is None or not str(anime).strip():
+            await _send_help()
+            return
+
+        await core.maybe_defer_hybrid(ctx, ephemeral=True)
+        kind, data = _resolve_anime_favorite_input(anime)
+        if kind == "help":
+            if is_slash and ctx.interaction:
+                await ctx.interaction.followup.send(
+                    "Indique un titre, un ID ou une URL — ou **`/animefav`** sans argument pour l’aide.",
+                    ephemeral=True,
+                )
+            else:
+                await ctx.reply(
+                    "Indique un titre, un ID ou une URL — ou **`/animefav`** sans argument pour l’aide."
+                )
+            return
+        if kind == "error":
+            err = str(data) if data else "Erreur."
+            if is_slash and ctx.interaction:
+                await ctx.interaction.followup.send(err, ephemeral=True)
+            else:
+                await ctx.reply(err)
+            return
+        if kind == "clear":
+            core.clear_anime_favorite(uid)
+            msg = "✅ Animé favori retiré — ta **`/mycard`** sera mise à jour."
+            if is_slash and ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.reply(msg)
+            return
+
+        assert kind == "set" and isinstance(data, dict)
+        core.set_anime_favorite(uid, data)
+        msg = f"✅ **{data['title']}** est enregistré comme favori — regarde **`/mycard`** (Aperçu)."
+        if is_slash and ctx.interaction:
+            await ctx.interaction.followup.send(msg, ephemeral=True)
+        else:
+            await ctx.reply(msg)
 
     @commands.hybrid_command(
         name="animetop",

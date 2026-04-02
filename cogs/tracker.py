@@ -1,8 +1,8 @@
 """
 Anime tracker (HYBRID) avec notification MP à la **sortie** de l’épisode (pas d’alerte « X min avant »).
 
-- Groupe hybrid /track (et !track)
-- Sous-commandes hybrid: list, add, remove, clear
+- Groupe hybrid /track (slash uniquement côté utilisateurs)
+- Sous-commandes : list, add, remove, clear
 - Prompts multi-choix: on répond dans le salon (slash ou prefix), puis on attend un message
 - En DM pour les confirmations / listes longues
 """

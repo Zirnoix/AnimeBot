@@ -1,4 +1,4 @@
-"""Réponses visibles uniquement par l’auteur (slash = éphémère ; préfixe = MP ou message effacé)."""
+"""Réponses visibles uniquement par l’auteur (slash = éphémère ; hors slash = MP ou message effacé)."""
 from __future__ import annotations
 
 import discord
@@ -12,7 +12,7 @@ async def send_ephemeral_or_private(
     delete_after: float = 15.0,
 ) -> None:
     """
-    Slash / hybride : followup ou response éphémère.
+    Slash : followup ou response éphémère.
     Préfixe : MP si possible, sinon réponse courte auto-supprimée (pas de spam salon).
     """
     itx = getattr(ctx, "interaction", None)

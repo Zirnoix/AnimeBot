@@ -326,8 +326,8 @@ class Engagement(commands.Cog):
             core.set_mission_dm_notify(ctx.author.id, True)
             msg = (
                 "✅ Tu recevras un **MP** quand une mission se termine **hors salon** "
-                "(quiz, duel, level up, etc.). Avec une **slash** dans le salon, l’annonce de mission complétée est **éphémère** ; "
-                "en préfixe `!`, elle reste visible dans le salon."
+                "(quiz, duel, level up, etc.). Quand tu complètes une mission via une **commande slash** dans le salon, "
+                "l’annonce **Mission accomplie** est **éphémère** (visible par toi seul)."
             )
             if ctx.interaction:
                 if not ctx.interaction.response.is_done():
@@ -342,7 +342,7 @@ class Engagement(commands.Cog):
             core.set_mission_dm_notify(ctx.author.id, False)
             msg = (
                 "✅ **MP désactivés** pour les missions terminées hors salon. "
-                "Tu gardes l’XP ; avec **slash**, l’annonce de mission complétée est **éphémère** ; avec **préfixe**, elle reste dans le salon."
+                "Tu gardes l’XP ; l’annonce **Mission accomplie** après une commande slash reste **éphémère** dans le salon."
             )
             if ctx.interaction:
                 if not ctx.interaction.response.is_done():

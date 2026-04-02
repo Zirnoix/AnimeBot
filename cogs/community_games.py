@@ -2,7 +2,7 @@
 Mini-jeux communautaires : raid boss (planning hebdo + alerte admin), chain quiz,
 « qui est-ce » (image floutée).
 
-Commandes en slash (hybrid désactivé pour le préfixe sur les groupes admin — utiliser /).
+Commandes en slash (le préfixe `!` n’est pas utilisé pour ce cog).
 """
 
 from __future__ import annotations

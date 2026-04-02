@@ -855,6 +855,31 @@ def search_media(query: str, limit: int = 10) -> List[dict]:
         })
     return out
 
+
+def get_anime_media_basic(media_id: int) -> dict | None:
+    """Retourne {media_id, title, site_url} pour un anime AniList, ou None si introuvable / pas un anime."""
+    q = """
+    query ($id:Int){
+      Media(id:$id, type:ANIME){
+        id
+        siteUrl
+        title{ romaji english native }
+      }
+    }"""
+    data = query_anilist(q, {"id": int(media_id)}) or {}
+    m = ((data.get("data") or {}).get("Media")) or None
+    if not m or not m.get("id"):
+        return None
+    t = m.get("title") or {}
+    title = t.get("english") or t.get("romaji") or t.get("native") or str(m.get("id"))
+    mid = int(m["id"])
+    return {
+        "media_id": mid,
+        "title": title,
+        "site_url": m.get("siteUrl") or f"https://anilist.co/anime/{mid}",
+    }
+
+
 def _ensure_guild_whitelist_table():
     conn = _db()
     conn.execute("""
@@ -2734,6 +2759,48 @@ def set_mission_dm_notify(user_id: int, enabled: bool) -> None:
     data.setdefault(uid, {})
     data[uid]["mission_dm_notify"] = bool(enabled)
     save_user_settings(data)
+
+
+def get_anime_favorite(user_id: int) -> dict | None:
+    """{media_id, title, site_url} ou None."""
+    st = (load_user_settings() or {}).get(str(user_id), {}) or {}
+    raw = st.get("anime_favorite")
+    if not raw or not isinstance(raw, dict):
+        return None
+    mid = raw.get("media_id")
+    if mid is None:
+        return None
+    try:
+        imid = int(mid)
+    except (TypeError, ValueError):
+        return None
+    return {
+        "media_id": imid,
+        "title": (raw.get("title") or "—")[:200],
+        "site_url": (raw.get("site_url") or "")[:500],
+    }
+
+
+def set_anime_favorite(user_id: int, info: dict) -> None:
+    data = load_user_settings() or {}
+    uid = str(user_id)
+    data.setdefault(uid, {})
+    data[uid]["anime_favorite"] = {
+        "media_id": int(info["media_id"]),
+        "title": str(info.get("title") or "")[:200],
+        "site_url": str(info.get("site_url") or "")[:500],
+    }
+    save_user_settings(data)
+
+
+def clear_anime_favorite(user_id: int) -> None:
+    data = load_user_settings() or {}
+    uid = str(user_id)
+    if uid not in data:
+        return
+    if "anime_favorite" in data[uid]:
+        del data[uid]["anime_favorite"]
+        save_user_settings(data)
 
 
 def load_tracker() -> dict:

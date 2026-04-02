@@ -56,7 +56,8 @@ DESC_OVERRIDE: Dict[str, str] = {
     "mission": "Ta mission du jour : récupère l’XP ou reroll (1/sem.).",
 
     # Stats
-    "mycard": "Carte profil : XP, quiz, streak, AniList ; encart **bugs validés** si tu en as (`/reportbug`).",
+    "mycard": "Carte profil : XP, quiz, streak, AniList, **anime favori** (`/animefav`) ; encart **bugs validés** si tu en as (`/reportbug`).",
+    "animefav": "Choisis ton anime préféré (titre, ID ou URL AniList) — affiché sur **`/mycard`** (Aperçu).",
     "reportbug": "Signale un bug en **MP** ; **XP** si le signalement est confirmé — compteur sur **`/mycard`**.",
     "mystats": "Stats AniList (vus, jours, score moyen, genre favori).",
     "mybadges": "Trophées par catégorie (rangs Initié → Mythe) et barres de progression.",
@@ -100,7 +101,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "airings clear": "Vider la liste du serveur (admin).",
 
     # Help
-    "help": "Aide du bot. /help [commande] pour le détail.",
+    "help": "Aide du bot (slash). /help [commande] pour le détail.",
     "guide": "(MP) Tutoriel joueur : XP, mini-jeux, AniList — pas la config serveur (voir /guide_admin).",
 
     # Owner (OWNER_ID)
@@ -124,7 +125,7 @@ CURATED_SECTIONS: List[Tuple[str, List[str]]] = [
         "linkanilist", "verifyanilist", "unlink"
     ]),
     ("📊 Pages Statistiques", [
-        "mycard", "reportbug", "mystats", "mybadges", "duelstats", "quiztop", "animetop", "quizlevels", "myrank", "stats"
+        "mycard", "animefav", "reportbug", "mystats", "mybadges", "duelstats", "quiztop", "animetop", "quizlevels", "myrank", "stats"
     ]),
     ("🧭 Pages Tracker", [
         "track", "track add", "track list", "track remove", "track clear"
@@ -516,8 +517,7 @@ class Help(commands.Cog):
         # Pas de slash correspondant
         return await self._send_embed_ctx_or_itx(
             ctx_or_itx,
-            content="❌ Commande slash introuvable. Vérifie l’orthographe ou tape `/help` pour la liste. "
-                    "Tu peux aussi utiliser le préfixe **!** si la commande existe en hybrid.",
+            content="❌ Commande slash introuvable. Vérifie l’orthographe ou tape `/help` pour la liste.",
             ephemeral=ephemeral
         )
 
@@ -538,8 +538,7 @@ class Help(commands.Cog):
         em = discord.Embed(
             title="📖 Aide — Essentiel",
             description=(
-                "Commandes principales.\n"
-                "• **Slash** `/…` recommandé ; **`!`** marche aussi sur les commandes hybrid.\n"
+                "Commandes principales — **slash** `/…` uniquement.\n"
                 "• `/help <commande>` : détail · bouton **Voir tout** : liste complète en MP (depuis un serveur).\n"
                 "• **Administrateurs** : `/help_admin` (config serveur, liste /airings, raid)."
             ),
@@ -550,6 +549,7 @@ class Help(commands.Cog):
             ("/next", DESC_OVERRIDE["next"]),
             ("/planning", DESC_OVERRIDE["planning"]),
             ("/mycard", DESC_OVERRIDE["mycard"]),
+            ("/animefav", DESC_OVERRIDE["animefav"]),
             ("/reportbug", DESC_OVERRIDE["reportbug"]),
             ("/mystats", DESC_OVERRIDE["mystats"]),
             ("/linkanilist", DESC_OVERRIDE["linkanilist"]),
@@ -560,9 +560,9 @@ class Help(commands.Cog):
         ]
         for name, desc in picks:
             em.add_field(name=name, value=_compact_one_line(desc), inline=False)
-        em.set_footer(text="/help <commande> · slash ou ! sur les hybrid")
+        em.set_footer(text="/help <commande> · commandes en slash")
 
-        # En MP avec préfixe, les vues (boutons) ont parfois un comportement capricieux selon le client.
+        # Hors slash (ex. owner en MP), les vues (boutons) ont parfois un comportement capricieux selon le client.
         if ctx.guild is None and not is_slash:
             em.add_field(
                 name="ℹ️ MP",
@@ -595,8 +595,7 @@ class Help(commands.Cog):
         em = discord.Embed(
             title="🛠️ Aide — Administrateurs",
             description=(
-                "Commandes réservées aux **administrateurs** du serveur.\n"
-                "• **Slash** `/…` recommandé ; **`!`** marche aussi sur les commandes hybrid.\n"
+                "Commandes réservées aux **administrateurs** du serveur — **slash** `/…` uniquement.\n"
                 "• `/help_admin <commande>` : détail · bouton **Voir tout** : liste complète en MP."
             ),
             color=discord.Color.dark_gold(),
@@ -609,7 +608,7 @@ class Help(commands.Cog):
         ]
         for name, desc in picks:
             em.add_field(name=name, value=_compact_one_line(desc), inline=False)
-        em.set_footer(text="/help_admin <commande> · slash ou ! sur les hybrid")
+        em.set_footer(text="/help_admin <commande> · commandes en slash")
 
         if ctx.guild is None and not is_slash:
             em.add_field(
