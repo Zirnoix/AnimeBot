@@ -273,6 +273,29 @@ def _mycard_iter_body_segments(body: str) -> list[tuple[str, bool]]:
     return parts
 
 
+def _mycard_draw_stat_bullet_triangle(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y_top: int,
+    label_font: ImageFont.ImageFont,
+) -> int:
+    """Petit triangle vers la droite (dessiné, pas de glyphe Unicode manquant dans la police)."""
+    try:
+        bbox = draw.textbbox((0, 0), "Ay", font=label_font)
+        fh = float(bbox[3] - bbox[1])
+    except Exception:
+        fh = 22.0
+    y_mid = y_top + fh * 0.42
+    w, h = 7, 10
+    y0 = int(y_mid - h / 2)
+    x0 = x
+    pts = [(x0, y0), (x0, y0 + h), (x0 + w, int(y_mid))]
+    sh = [(p[0] + 1, p[1] + 1) for p in pts]
+    draw.polygon(sh, fill=_MYCARD_COL_STAT_SHADOW)
+    draw.polygon(pts, fill=_MYCARD_COL_STAT_BULLET)
+    return x0 + w + 6
+
+
 def _mycard_parse_stat_line(line: str) -> tuple[str, str, str]:
     """Découpe label — corps … (hint optionnel en fin de ligne)."""
     line = line.strip()
@@ -294,23 +317,16 @@ def _mycard_draw_stat_line(
     line: str,
     max_chars: int,
 ) -> None:
-    """Puce ▸ + libellé rosé, corps avec chiffres en gras plus grands, parenthèses en italique."""
+    """Puce (triangle dessiné) + libellé rosé, corps avec chiffres en gras, parenthèses en italique."""
     line = _mycard_trunc(line, max_chars)
     label, body, hint = _mycard_parse_stat_line(line)
     font_lb = _mycard_font(22, bold=True)
     font_bd = _mycard_font(21, bold=False)
     font_num = _mycard_font(25, bold=True)
     font_hi = _mycard_font_oblique(17)
-    font_bullet = _mycard_font(19, bold=True)
     sep = " — "
-    bullet = "▸ "
 
-    cx = x
-    for txt, font, fill in ((bullet, font_bullet, _MYCARD_COL_STAT_BULLET),):
-        draw.text((cx + 1, y + 1), txt, font=font, fill=_MYCARD_COL_STAT_SHADOW)
-        draw.text((cx, y), txt, font=font, fill=fill)
-        cx += _mycard_text_width(draw, txt, font)
-    cx += 2
+    cx = _mycard_draw_stat_bullet_triangle(draw, x, y, font_lb)
 
     for txt, font, fill in ((label, font_lb, _MYCARD_COL_STAT_LABEL),):
         if not txt:
