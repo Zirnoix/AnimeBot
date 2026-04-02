@@ -496,10 +496,10 @@ def generate_mycard_image(
     lvl_txt = f"Niveau {int(level)}"
     tw_xp = _mycard_text_width(draw, xp_txt, font_xp)
     tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
-    gap_bar_xp = 10
-    gap_xp_lvl = 12
+    gap_bar_lvl = 14
+    gap_xp_bar = 8
     inner_w = W - tx - pad
-    bar_w = max(100, inner_w - tw_xp - tw_lv - gap_bar_xp - gap_xp_lvl)
+    bar_w = max(180, inner_w - gap_bar_lvl - tw_lv)
     bar_h = 24
     radius = 12
     ratio = 1.0 if next_xp <= 0 else max(0.0, min(1.0, float(xp) / float(next_xp)))
@@ -515,12 +515,14 @@ def generate_mycard_image(
         h_lv = float(bb_lv[3] - bb_lv[1])
     except Exception:
         h_lv = 34.0
-    content_h = int(max(bar_h, h_xp, h_lv))
-    bar_y = int(row_top + (content_h - bar_h) / 2)
-    xp_x = tx + bar_w + gap_bar_xp
-    xp_y = int(row_top + (content_h - h_xp) / 2)
-    lvl_x = xp_x + tw_xp + gap_xp_lvl
-    lvl_y = int(row_top + (content_h - h_lv) / 2)
+
+    # Écran 1 : XP au-dessus, aligné à droite sur la fin de la barre ; barre large ;
+    # niveau à droite de la barre, centré sur la même bande que la barre (pas avec les stats).
+    xp_x = int(tx + bar_w - tw_xp)
+    xp_y = int(row_top)
+    bar_y = int(row_top + h_xp + gap_xp_bar)
+    lvl_x = int(tx + bar_w + gap_bar_lvl)
+    lvl_y = int(bar_y + (bar_h - h_lv) / 2)
 
     draw.rounded_rectangle(
         (tx, bar_y, tx + bar_w, bar_y + bar_h),
@@ -548,7 +550,7 @@ def generate_mycard_image(
     draw.text((lvl_x + 1, lvl_y + 1), lvl_txt, font=font_lvl, fill=(8, 6, 14))
     draw.text((lvl_x, lvl_y), lvl_txt, font=font_lvl, fill=_MYCARD_COL_TEXT)
 
-    y_stats = row_top + content_h + 28
+    y_stats = int(bar_y + bar_h + 28)
     if line_play:
         _mycard_draw_stat_line(draw, tx, y_stats, line_play, 90)
         y_stats += 32
