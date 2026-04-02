@@ -302,10 +302,10 @@ def generate_mycard_image(
     Carte panoramique : avatar, pseudo, AniList / favori optionnels, barre XP (rose → bleu), mini-jeux.
     (Pas de titre global : les emojis Discord ne rendent pas dans Pillow.)
     """
-    W, H = 1280, 340
-    av_size = 132
+    W, H = 980, 360
+    av_size = 178
     stripe_w = 12
-    pad = 22
+    pad = 20
     base_rgb = _mycard_gradient_bg(W, H)
     _mycard_left_stripe(base_rgb, stripe_w)
     base = base_rgb.convert("RGBA")
@@ -320,31 +320,31 @@ def generate_mycard_image(
     base.paste(av, (ax, ay), av)
 
     draw = ImageDraw.Draw(base)
-    font_name = _mycard_font(34, bold=True)
-    font_sub = _mycard_font(20, bold=False)
-    font_al = _mycard_font(18, bold=False)
-    font_xp = _mycard_font(18, bold=False)
-    font_lvl = _mycard_font(26, bold=True)
-    font_stat = _mycard_font(17, bold=False)
+    font_name = _mycard_font(42, bold=True)
+    font_sub = _mycard_font(24, bold=False)
+    font_al = _mycard_font(22, bold=False)
+    font_xp = _mycard_font(22, bold=False)
+    font_lvl = _mycard_font(34, bold=True)
+    font_stat = _mycard_font(22, bold=False)
 
-    tx = ax + av_size + 24
-    name = _mycard_trunc(display_name or "?", 36)
-    y = 28
+    tx = ax + av_size + 22
+    name = _mycard_trunc(display_name or "?", 28)
+    y = 26
     draw.text((tx, y), name, font=font_name, fill=_MYCARD_COL_TEXT)
-    y += 42
+    y += 50
     if anilist_username:
-        al_txt = f"AniList · {_mycard_trunc(anilist_username, 52)}"
+        al_txt = f"AniList · {_mycard_trunc(anilist_username, 40)}"
         draw.text((tx, y), al_txt, font=font_al, fill=(167, 139, 250))
-        y += 28
+        y += 32
     if anime_fav:
-        fav_txt = f"Favori · {_mycard_trunc(anime_fav, 60)}"
+        fav_txt = f"Favori · {_mycard_trunc(anime_fav, 48)}"
         draw.text((tx, y), fav_txt, font=font_sub, fill=_MYCARD_COL_MUTED)
-        y += 28
+        y += 32
 
-    bar_y = y + 12
+    bar_y = y + 10
     bar_w = W - tx - pad
-    bar_h = 26
-    radius = 13
+    bar_h = 24
+    radius = 12
     ratio = 1.0 if next_xp <= 0 else max(0.0, min(1.0, float(xp) / float(next_xp)))
     fill_w = max(6, int(bar_w * ratio))
 
@@ -371,25 +371,25 @@ def generate_mycard_image(
     draw = ImageDraw.Draw(base)
     xp_txt = f"{_mycard_fmt_xp(xp)} / {_mycard_fmt_xp(next_xp)} XP"
     tw_xp = _mycard_text_width(draw, xp_txt, font_xp)
-    draw.text((tx + bar_w - tw_xp, bar_y - 26), xp_txt, font=font_xp, fill=_MYCARD_COL_MUTED)
+    draw.text((tx + bar_w - tw_xp, bar_y - 30), xp_txt, font=font_xp, fill=_MYCARD_COL_MUTED)
 
     lvl_txt = f"Niveau {int(level)}"
     tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
-    draw.text((tx + bar_w - tw_lv, bar_y + bar_h + 8), lvl_txt, font=font_lvl, fill=_MYCARD_COL_TEXT)
+    draw.text((tx + bar_w - tw_lv, bar_y + bar_h + 10), lvl_txt, font=font_lvl, fill=_MYCARD_COL_TEXT)
 
-    y_stats = bar_y + bar_h + 44
+    y_stats = bar_y + bar_h + 42
     if line_play:
         draw.text(
             (tx, y_stats),
-            _mycard_trunc(line_play, 92),
+            _mycard_trunc(line_play, 72),
             font=font_stat,
             fill=_MYCARD_COL_MUTED,
         )
-        y_stats += 24
+        y_stats += 30
     if line_record:
         draw.text(
             (tx, y_stats),
-            _mycard_trunc(line_record, 92),
+            _mycard_trunc(line_record, 72),
             font=font_stat,
             fill=_MYCARD_COL_MUTED,
         )

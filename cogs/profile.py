@@ -290,6 +290,29 @@ def _pct_bar_pretty(cur: int, total: int, width: int = 12) -> str:
 
 _ENGAGE_MINI_KEYS = frozenset({"mission_completed", "checkin", "mycard_visits"})
 
+# Agrégats pour la carte /mycard (image)
+_MYCARD_GUESS_KEYS = frozenset({
+    "guessyear",
+    "guessepisodes",
+    "guessgenre",
+    "guesscharacter",
+    "guesswho",
+    "guessop",
+    "guesspop",
+    "guesspo",
+    "guessspo",
+    "guessopener",
+})
+
+
+def _mycard_devinettes_total(mini_scores: dict) -> int:
+    """Somme des compteurs « devinettes » + Higher/Lower."""
+    ms = mini_scores or {}
+    s = int(ms.get("higherlower", 0) or 0)
+    for k in _MYCARD_GUESS_KEYS:
+        s += int(ms.get(k, 0) or 0)
+    return s
+
 
 def _top_mini_game_play(mini_scores: dict) -> tuple[str, int] | None:
     """Mini-jeu le plus « joué » (compteur max hors engagement)."""
@@ -328,6 +351,24 @@ def _mycard_play_line(mini_scores: dict) -> Optional[str]:
     if not tp:
         return None
     return f"Plus joué · {tp[0]} — {_fmt_number(tp[1])}"
+
+
+def _mycard_image_line1(mini_scores: dict) -> Optional[str]:
+    """Carte image : priorité au total Quiz (solo + multi), sinon ancien « plus joué »."""
+    ms = mini_scores or {}
+    q = int(ms.get("animequiz", 0) or 0) + int(ms.get("animequizmulti", 0) or 0)
+    if q > 0:
+        return f"Quiz — {_fmt_number(q)}"
+    return _mycard_play_line(ms)
+
+
+def _mycard_image_line2(mini_scores: dict) -> Optional[str]:
+    """Carte image : priorité au total devinettes, sinon victoires / 2e activité."""
+    ms = mini_scores or {}
+    dev = _mycard_devinettes_total(ms)
+    if dev > 0:
+        return f"Devinettes — {_fmt_number(dev)}"
+    return _mycard_record_line(ms)
 
 
 def _mycard_record_line(mini_scores: dict) -> Optional[str]:
@@ -916,8 +957,8 @@ class Profile(commands.Cog):
         xp = int(ud.get("xp", 0))
         level = int(ud.get("level", 0))
         next_xp = core.xp_for_next_level(level)
-        play_line = _mycard_play_line(mini_scores)
-        record_line = _mycard_record_line(mini_scores)
+        play_line = _mycard_image_line1(mini_scores)
+        record_line = _mycard_image_line2(mini_scores)
         fav_plain: Optional[str] = None
         if anime_fav:
             fav_plain = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
