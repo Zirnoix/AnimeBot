@@ -271,7 +271,7 @@ def _append_badge_section_header(lines: list[str], state: list[str | None], cate
 
 
 def _pct_bar(cur: int, total: int, width: int = 14) -> str:
-    """Barre texte compacte (cur/total)."""
+    """Barre compacte : █ = partie remplie, ░ = reste (meilleur contraste que les emojis carrés en embed)."""
     if total <= 0:
         return "░" * width
     p = max(0.0, min(1.0, cur / total))
@@ -279,48 +279,9 @@ def _pct_bar(cur: int, total: int, width: int = 14) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-# Barre embed : uniquement 🟪 (violet) → 🟦 (bleu), comme les bords de la bande /mycard.
-# Le « dégradé » est simulé par tramage de Bayer (évite les gros blocs d’une seule couleur
-# et les 🟥🟧🟨🟩 hors thème qu’imposait le plus proche RGB sur la palette Unicode).
-
-
-def _smoothstep01(x: float) -> float:
-    x = max(0.0, min(1.0, x))
-    return x * x * (3.0 - 2.0 * x)
-
-
-# Matrice 4×4 classique (0–15), ordre ligne-major pour une barre gauche → droite.
-_MYCARD_BAR_BAYER4: tuple[tuple[int, ...], ...] = (
-    (0, 8, 2, 10),
-    (12, 4, 14, 6),
-    (3, 11, 1, 9),
-    (15, 7, 13, 5),
-)
-
-
-def _gradient_square_at(i: int, n_filled: int) -> str:
-    """i-ième carré rempli : transition douce violet → bleu (tramage, pas de carrés arc-en-ciel)."""
-    if n_filled <= 0:
-        return "⬜"
-    if n_filled == 1:
-        return "🟪"
-    raw = i / (n_filled - 1)
-    t = _smoothstep01(raw)
-    row = (i // 4) % 4
-    col = i % 4
-    thr = _MYCARD_BAR_BAYER4[row][col]
-    return "🟦" if t * 16 > thr else "🟪"
-
-
 def _pct_bar_pretty(cur: int, total: int, width: int = 12) -> str:
-    """Barre badges (embed) : 🟪→🟦 façon /mycard, lissée par tramage."""
-    if total <= 0:
-        return "⬜" * width
-    p = max(0.0, min(1.0, cur / total))
-    filled = int(round(p * width))
-    if filled <= 0:
-        return "⬜" * width
-    return "".join(_gradient_square_at(i, filled) for i in range(filled)) + "⬜" * (width - filled)
+    """Barre embeds trophées — même rendu que `_pct_bar` (█ rempli, ░ reste, lisible en thème sombre)."""
+    return _pct_bar(cur, total, width)
 
 
 _ENGAGE_MINI_KEYS = frozenset({"mission_completed", "mission_hardcore", "checkin", "mycard_visits"})
@@ -902,7 +863,7 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
         chunks = _chunk_text_blocks(lines)
         e = discord.Embed(
             title=f"🎯 À débloquer — {ctx.author.display_name}",
-            description=f"**{len(lines)}** piste(s) en cours — barres **rose → bleu** (comme /mycard) = progression vers le palier.",
+            description=f"**{len(lines)}** piste(s) en cours — **█** = avancé, **░** = reste jusqu’au palier.",
             color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
