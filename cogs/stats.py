@@ -256,7 +256,7 @@ class Stats(commands.Cog):
     )
     async def stats_pseudo(self, ctx: commands.Context, pseudo: str, refresh: Optional[bool] = False) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(thinking=True)
+            await ctx.interaction.response.defer(thinking=True, ephemeral=True)
 
         brief = await self._fetch_user_brief(pseudo.strip(), queue_ctx=ctx)
         if not brief:
@@ -282,7 +282,7 @@ class Stats(commands.Cog):
             pass
 
         e = build_anilist_stats_embed(ctx, brief, target, profile, total_entries, completed, current)
-        await self._send(ctx, embed=e)
+        await self._send(ctx, embed=e, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

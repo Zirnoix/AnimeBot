@@ -270,25 +270,13 @@ def _append_badge_section_header(lines: list[str], state: list[str | None], cate
         state[0] = category
 
 
-def _badge_bar_filled_square(i: int, n_filled: int) -> str:
-    """Partie remplie : carrés 🟪 (gauche) / 🟦 (droite) — seuls gros carrés violet+bleu en Unicode."""
-    if n_filled <= 0:
-        return "⬜"
-    if n_filled == 1:
-        return "🟪"
-    t = i / (n_filled - 1)
-    return "🟦" if t >= 0.5 else "🟪"
-
-
 def _pct_bar_pretty(cur: int, total: int, width: int = 12) -> str:
-    """Barre badges : carrés 🟪 → 🟦 sur la partie remplie, ⬜ pour le reste."""
+    """Barre trophées : ▰ = partie remplie, ▱ = reste (parallélogrammes, lisibles en thème sombre)."""
     if total <= 0:
-        return "⬜" * width
+        return "▱" * width
     p = max(0.0, min(1.0, cur / total))
     filled = int(round(p * width))
-    if filled <= 0:
-        return "⬜" * width
-    return "".join(_badge_bar_filled_square(i, filled) for i in range(filled)) + "⬜" * (width - filled)
+    return "▰" * filled + "▱" * (width - filled)
 
 
 _ENGAGE_MINI_KEYS = frozenset({"mission_completed", "mission_hardcore", "checkin", "mycard_visits"})
@@ -713,7 +701,7 @@ def _embed_profile_full(
     pct = min(100, int(round(100 * un / vt))) if s["visible_total"] else 0
     badge_line = (
         f"{_pct_bar_pretty(un, vt, 10)} **{pct}%** — **{un}/{s['visible_total']}** séries\n"
-        f"_Rangs : Initié → Confirmé → Vétéran → Élite → Mythe · détail : `/mybadges`_"
+        f"_▰ progression · ▱ reste · Rangs : Initié → … → Mythe · `/mybadges`_"
     )
     e.add_field(name="🏅 Trophées (aperçu)", value=badge_line[:1024], inline=False)
 
@@ -822,8 +810,9 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
         e = discord.Embed(
             title=f"🏅 Trophées — {ctx.author.display_name}",
             description=(
-                f"{bar}  **{pct}%** complété\n"
-                f"**{un}** / **{s['visible_total']}** séries avec au moins un rang\n\n"
+                f"{bar}  **{pct}%** de la collection visible\n"
+                f"**{un}** / **{s['visible_total']}** séries avec au moins un palier\n"
+                f"_▰ = avancé · ▱ = reste_\n\n"
                 "**Rangs :** 🌱 Initié → **Confirmé** → **Vétéran** → **Élite** → **Mythe** ✨"
             ),
             color=col,
@@ -836,13 +825,13 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
                 inline=False,
             )
         else:
-            e.add_field(name="🎯 Prochains paliers", value="— Rien en attente.", inline=False)
+            e.add_field(name="🎯 Prochains paliers", value="— Tout est à jour ou rien à viser pour l’instant.", inline=False)
         if s["unlocked_lines"]:
             snap = "\n".join(f"• {x}" for x in s["unlocked_lines"][:6])
             if s["unlocked_extra"] > 0:
                 snap += f"\n_… **+{s['unlocked_extra']}** dans « Débloqués »_"
             e.add_field(name="✨ En poche (aperçu)", value=snap[:1024], inline=False)
-        e.set_footer(text="Menu : changer de section sans nouvelle commande")
+        e.set_footer(text="Menu déroulant : Résumé · Débloqués · À débloquer · Mystères")
         return e
 
     if section == "unlocked":
@@ -870,7 +859,7 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
         chunks = _chunk_text_blocks(lines)
         e = discord.Embed(
             title=f"🎯 À débloquer — {ctx.author.display_name}",
-            description=f"**{len(lines)}** piste(s) en cours — barre **🟪** puis **🟦** (carrés uniquement), **⬜** = reste.",
+            description=f"**{len(lines)}** trophée(s) à compléter · _▰ progression · ▱ reste jusqu’au palier_",
             color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
@@ -944,7 +933,7 @@ class MyBadgesSectionSelect(discord.ui.Select):
                 label="À débloquer",
                 value="locked",
                 emoji="🎯",
-                description="Pistes en cours avec barres",
+                description="Objectifs restants (barres ▰▱)",
                 default=(sec == "locked"),
             ),
             discord.SelectOption(
