@@ -4,7 +4,7 @@ Engagement features: daily check-in (streak) + daily missions (refonte).
 - /streak
 - /mission              -> affiche la mission du jour (menu action)
 - /mission reroll       -> 1 reroll par SEMAINE (lundi→dimanche)
-- /showmission          -> catalogue des missions + tes stats (éphémère en slash)
+- /showmission          -> catalogue par catégorie (menu) + tes stats (éphémère en slash)
 
 Missions : commandes du bot, combos « commandes distinctes », événements (duel gagné, quiz, level up).
 Récompenses adaptées à la difficulté (EASY / MEDIUM / HARD / HARDCORE).
@@ -114,6 +114,142 @@ def _record_mission_completion(uid: int, mkey: str, xp: int) -> None:
 def _roll_reward(difficulty: str) -> int:
     lo, hi = REWARD_TABLE.get(difficulty, (DEFAULT_REWARD_FALLBACK, DEFAULT_REWARD_FALLBACK))
     return random.randint(lo, hi)
+
+
+def _mission_block_lines(
+    defs: List[MissionDef],
+    by_key: Dict[str, int],
+    xp_by_key: Dict[str, int],
+) -> str:
+    lines: List[str] = []
+    for d in defs:
+        c = int(by_key.get(d.key, 0))
+        xcum = int(xp_by_key.get(d.key, 0))
+        lines.append(
+            f"• **{d.label}**\n"
+            f"  └ ×**{c}** · **+{_fmt(xcum)}** XP cumulés"
+        )
+    block = "\n".join(lines)
+    if len(block) > 1024:
+        block = block[:1021] + "…"
+    return block or "—"
+
+
+def _mission_catalog_embed(
+    cat: str,
+    *,
+    by_key: Dict[str, int],
+    xp_by_key: Dict[str, int],
+    total_xp: int,
+    groups: Dict[str, List[MissionDef]],
+) -> discord.Embed:
+    labels = {
+        "EASY": "🟢 Faciles",
+        "MEDIUM": "🟡 Moyens",
+        "HARD_HARDCORE": "🔴 Difficiles & 💀 Hardcore",
+    }
+    diff_titles = {
+        "EASY": "🟢 Facile",
+        "MEDIUM": "🟡 Moyen",
+        "HARD": "🔴 Difficile",
+        "HARDCORE": "💀 Hardcore",
+    }
+    embed = discord.Embed(
+        title="📚 Missions du bot",
+        description=(
+            f"**Catégorie :** {labels[cat]}\n"
+            f"**XP total (missions, cumul) :** `{_fmt(total_xp)} XP`\n"
+            f"Les récompenses du **jour** sont tirées dans la plage indiquée ; "
+            f"le cumul reflète ce que tu as **réellement** reçu."
+        ),
+        color=discord.Color.blurple(),
+    )
+    if cat == "HARD_HARDCORE":
+        any_field = False
+        for diff in ("HARD", "HARDCORE"):
+            defs = groups.get(diff) or []
+            if not defs:
+                continue
+            any_field = True
+            lo, hi = REWARD_TABLE.get(diff, (0, 0))
+            embed.add_field(
+                name=f"{diff_titles[diff]} — {lo}–{hi} XP / mission",
+                value=_mission_block_lines(defs, by_key, xp_by_key),
+                inline=False,
+            )
+        if not any_field:
+            embed.add_field(name="—", value="Aucune mission dans cette catégorie.", inline=False)
+    else:
+        defs = groups.get(cat) or []
+        lo, hi = REWARD_TABLE.get(cat, (0, 0))
+        embed.add_field(
+            name=f"{diff_titles[cat]} — {lo}–{hi} XP / mission",
+            value=_mission_block_lines(defs, by_key, xp_by_key),
+            inline=False,
+        )
+    return embed
+
+
+class MissionCatalogView(discord.ui.View):
+    """Menu déroulant : Faciles / Moyens / Difficiles + Hardcore."""
+
+    def __init__(
+        self,
+        *,
+        author_id: int,
+        by_key: Dict[str, int],
+        xp_by_key: Dict[str, int],
+        total_xp: int,
+        groups: Dict[str, List[MissionDef]],
+    ) -> None:
+        super().__init__(timeout=300)
+        self.author_id = author_id
+        self.by_key = by_key
+        self.xp_by_key = xp_by_key
+        self.total_xp = total_xp
+        self.groups = groups
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ Ce menu n’est pas pour toi.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.select(
+        placeholder="Choisir une catégorie…",
+        options=[
+            discord.SelectOption(
+                label="Faciles",
+                value="EASY",
+                emoji="🟢",
+                description="40–60 XP par mission (tirage du jour)",
+            ),
+            discord.SelectOption(
+                label="Moyens",
+                value="MEDIUM",
+                emoji="🟡",
+                description="100–175 XP par mission",
+            ),
+            discord.SelectOption(
+                label="Difficiles & Hardcore",
+                value="HARD_HARDCORE",
+                emoji="🔴",
+                description="Difficile 200–300 · Hardcore 400–600 XP",
+            ),
+        ],
+        min_values=1,
+        max_values=1,
+    )
+    async def select_category(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
+        cat = select.values[0]
+        embed = _mission_catalog_embed(
+            cat,
+            by_key=self.by_key,
+            xp_by_key=self.xp_by_key,
+            total_xp=self.total_xp,
+            groups=self.groups,
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
 
 
 # ----------------- Cog -----------------
@@ -326,11 +462,11 @@ class Engagement(commands.Cog):
 
     @commands.hybrid_command(
         name="showmission",
-        description="Catalogue des missions du bot et tes statistiques (éphémère en slash).",
+        description="Catalogue des missions (menu Facile / Moyen / Difficile+Hardcore) et tes stats (éphémère en slash).",
         aliases=["missionsliste", "cataloguemissions", "missionsbot"],
     )
     async def showmission(self, ctx: commands.Context) -> None:
-        """Toutes les missions (plages d’XP) + complétions / XP cumulés par mission pour toi."""
+        """Missions par catégorie (menu) + complétions / XP cumulés par mission pour toi."""
         if ctx.interaction:
             await ctx.interaction.response.defer(ephemeral=True)
         uid = ctx.author.id
@@ -345,50 +481,25 @@ class Engagement(commands.Cog):
         for d in MISSION_DEFINITIONS:
             groups.setdefault(d.difficulty, []).append(d)
 
-        diff_order = ("EASY", "MEDIUM", "HARD", "HARDCORE")
-        diff_titles = {
-            "EASY": "🟢 Facile",
-            "MEDIUM": "🟡 Moyen",
-            "HARD": "🔴 Difficile",
-            "HARDCORE": "💀 Hardcore",
-        }
-
-        embed = discord.Embed(
-            title="📚 Missions du bot",
-            description=(
-                f"**XP total (missions, cumul) :** `{_fmt(total_xp)} XP`\n"
-                f"Les récompenses du **jour** sont tirées dans la plage indiquée ; "
-                f"le cumul reflète ce que tu as **réellement** reçu."
-            ),
-            color=discord.Color.blurple(),
+        embed = _mission_catalog_embed(
+            "EASY",
+            by_key=by_key,
+            xp_by_key=xp_by_key,
+            total_xp=total_xp,
+            groups=groups,
+        )
+        view = MissionCatalogView(
+            author_id=uid,
+            by_key=by_key,
+            xp_by_key=xp_by_key,
+            total_xp=total_xp,
+            groups=groups,
         )
 
-        for diff in diff_order:
-            defs = groups.get(diff) or []
-            if not defs:
-                continue
-            lo, hi = REWARD_TABLE.get(diff, (0, 0))
-            lines: List[str] = []
-            for d in defs:
-                c = int(by_key.get(d.key, 0))
-                xcum = int(xp_by_key.get(d.key, 0))
-                lines.append(
-                    f"• **{d.label}**\n"
-                    f"  └ ×**{c}** · **+{_fmt(xcum)}** XP cumulés"
-                )
-            block = "\n".join(lines)
-            if len(block) > 1024:
-                block = block[:1024] + "…"
-            embed.add_field(
-                name=f"{diff_titles[diff]} — {lo}–{hi} XP / mission",
-                value=block or "—",
-                inline=False,
-            )
-
         if ctx.interaction:
-            await ctx.interaction.followup.send(embed=embed, ephemeral=True)
+            await ctx.interaction.followup.send(embed=embed, view=view, ephemeral=True)
         else:
-            await ctx.send(embed=embed)
+            await ctx.send(embed=embed, view=view)
 
     # ---- /mission avec menu déroulant d’action ----
     @commands.hybrid_command(name="mission", description="Ta mission du jour (afficher / reroll / MP).")
