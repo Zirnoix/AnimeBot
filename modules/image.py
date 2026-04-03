@@ -502,6 +502,8 @@ def generate_mycard_image(
     gap_bar_lvl = 6
     # Remonte le texte XP au-dessus de la zone barre (plus grand = plus haut).
     xp_lift = 50
+    # Descend le texte XP (px vers le bas).
+    xp_drop = 35
     # Descend uniquement la barre (espace entre fin du texte XP et haut de la barre).
     bar_drop = 50
     bar_h = 24
@@ -522,7 +524,7 @@ def generate_mycard_image(
 
     # Barre pleine largeur ; XP en haut à droite ; niveau en bas à droite.
     xp_x = int(inner_right - tw_xp)
-    xp_y = int(row_top - xp_lift)
+    xp_y = int(row_top - xp_lift + xp_drop)
     bar_y = int(xp_y + h_xp + gap_xp_bar + bar_drop)
     lvl_x = int(inner_right - tw_lv)
     lvl_y = int(bar_y + bar_h + gap_bar_lvl)
