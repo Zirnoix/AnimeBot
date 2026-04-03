@@ -500,7 +500,10 @@ def generate_mycard_image(
     tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
     gap_xp_bar = 8
     gap_bar_lvl = 6
-    xp_lift = 50
+    xp_lift = 12
+    # Décalage vertical de la barre (alignée comme quand xp_lift était à 50) : la barre
+    # remonte ; le texte XP est découplé et dessiné après (au-dessus à droite).
+    bar_row_lift = 50
     bar_h = 24
     radius = 12
     ratio = 1.0 if next_xp <= 0 else max(0.0, min(1.0, float(xp) / float(next_xp)))
@@ -517,11 +520,11 @@ def generate_mycard_image(
     except Exception:
         h_lv = 28.0
 
-    # Barre sur toute la ligne utile ; XP en haut à droite (au-dessus de la barre) ;
-    # niveau en bas à droite (sous la barre), même alignement à droite que la barre.
+    # Barre sur toute la ligne utile ; XP en haut à droite ; niveau en bas à droite.
+    # Ordre de dessin : barre puis textes (XP peut recouvrir le coin droit de la barre).
     xp_x = int(inner_right - tw_xp)
     xp_y = int(row_top - xp_lift)
-    bar_y = int(xp_y + h_xp + gap_xp_bar)
+    bar_y = int(row_top - bar_row_lift + h_xp + gap_xp_bar)
     lvl_x = int(inner_right - tw_lv)
     lvl_y = int(bar_y + bar_h + gap_bar_lvl)
 
