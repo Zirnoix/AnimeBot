@@ -498,16 +498,11 @@ def generate_mycard_image(
     lvl_txt = f"Niveau {int(level)}"
     tw_xp = _mycard_text_width(draw, xp_txt, font_xp)
     tw_lv = _mycard_text_width(draw, lvl_txt, font_lvl)
-    gap_xp_bar = 8
     gap_bar_lvl = 6
-    # Remonte le texte XP au-dessus de la zone barre (plus grand = plus haut).
-    xp_lift = 50
-    # Décale uniquement le libellé « … / … XP » (pas la barre ni le niveau).
-    xp_drop = 35
-    # Descend uniquement la barre (espace entre fin du texte XP et haut de la barre).
-    bar_drop = 50
-    # Remonte barre + niveau + stats (sans toucher au libellé « … / … XP »).
-    block_lift = 35
+    # Espace sous « Niveau » avant la 1re ligne de stats (réduire = barre plus basse).
+    gap_lvl_stats = 10
+    # 1re ligne Quiz / Devinettes : ancrée au bas de carte (ne bouge pas si on touche XP / barre).
+    stats_first_y = H - 127
     bar_h = 24
     radius = 12
     ratio = 1.0 if next_xp <= 0 else max(0.0, min(1.0, float(xp) / float(next_xp)))
@@ -524,13 +519,21 @@ def generate_mycard_image(
     except Exception:
         h_lv = 28.0
 
-    # Barre pleine largeur ; libellé XP en haut à droite ; niveau en bas à droite.
+    has_stats = bool(line_play or line_record)
+    if has_stats:
+        # Stats ancrées en bas : Quiz / Devinettes ne bougent plus quand on règle XP / barre.
+        y_stats = int(stats_first_y)
+        lvl_y = int(y_stats - gap_lvl_stats - h_lv)
+        bar_y = int(lvl_y - gap_bar_lvl - bar_h)
+    else:
+        gap_xp_bar = 8
+        bar_y = int(row_top + h_xp + gap_xp_bar + 36)
+        lvl_y = int(bar_y + bar_h + gap_bar_lvl)
+        y_stats = int(lvl_y + h_lv + 24)
+
+    # Libellé « … / … XP » seul (plus petit y = plus haut), indépendant de la barre.
     xp_x = int(inner_right - tw_xp)
-    xp_y = int(row_top - xp_lift + xp_drop)
-    # Barre : pas liée à xp_drop ; block_lift remonte tout le bloc sous le libellé XP.
-    bar_y = int(row_top - xp_lift + h_xp + gap_xp_bar + bar_drop - block_lift)
-    lvl_x = int(inner_right - tw_lv)
-    lvl_y = int(bar_y + bar_h + gap_bar_lvl)
+    xp_y = int(row_top - 14)
 
     draw.rounded_rectangle(
         (tx, bar_y, tx + bar_w, bar_y + bar_h),
@@ -555,10 +558,10 @@ def generate_mycard_image(
     draw = ImageDraw.Draw(base)
     draw.text((xp_x + 1, xp_y + 1), xp_txt, font=font_xp, fill=(8, 6, 14))
     draw.text((xp_x, xp_y), xp_txt, font=font_xp, fill=_MYCARD_COL_MUTED)
+    lvl_x = int(inner_right - tw_lv)
     draw.text((lvl_x + 1, lvl_y + 1), lvl_txt, font=font_lvl, fill=(8, 6, 14))
     draw.text((lvl_x, lvl_y), lvl_txt, font=font_lvl, fill=_MYCARD_COL_TEXT)
 
-    y_stats = int(lvl_y + h_lv + 24)
     if line_play:
         _mycard_draw_stat_line(draw, tx, y_stats, line_play, 90)
         y_stats += 32
