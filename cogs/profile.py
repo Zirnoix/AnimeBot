@@ -279,13 +279,61 @@ def _pct_bar(cur: int, total: int, width: int = 14) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+# Même extrémités que la bande gauche de /mycard (modules/image.py : _MYCARD_COL_STRIPE_TOP / _STRIPE_BOT).
+_MYCARD_BAR_PINK = (244, 114, 182)
+_MYCARD_BAR_BLUE = (96, 165, 250)
+
+# Carrés colorés Unicode — RGB approx. (Discord) pour coller au dégradé calculé.
+_MYCARD_BAR_SQUARE_PALETTE: list[tuple[str, tuple[int, int, int]]] = [
+    ("🟥", (235, 51, 35)),
+    ("🟧", (255, 128, 0)),
+    ("🟨", (255, 214, 0)),
+    ("🟩", (60, 180, 75)),
+    ("🟦", (59, 130, 246)),
+    ("🟪", (168, 85, 247)),
+]
+
+
+def _nearest_square_emoji(rgb: tuple[int, int, int]) -> str:
+    r, g, b = rgb
+    best_ch = "🟪"
+    best_d = float("inf")
+    for ch, (er, eg, eb) in _MYCARD_BAR_SQUARE_PALETTE:
+        d = (r - er) ** 2 + (g - eg) ** 2 + (b - eb) ** 2
+        if d < best_d:
+            best_d = d
+            best_ch = ch
+    return best_ch
+
+
+def _gradient_square_at(i: int, n_filled: int) -> str:
+    """i-ième carré rempli (0..n_filled-1), rose → bleu comme la bande /mycard."""
+    if n_filled <= 0:
+        return "⬜"
+    if n_filled == 1:
+        t = 0.5
+    else:
+        t = i / (n_filled - 1)
+    t = max(0.0, min(1.0, t))
+    r0, g0, b0 = _MYCARD_BAR_PINK
+    r1, g1, b1 = _MYCARD_BAR_BLUE
+    rgb = (
+        int(r0 + (r1 - r0) * t),
+        int(g0 + (g1 - g0) * t),
+        int(b0 + (b1 - b0) * t),
+    )
+    return _nearest_square_emoji(rgb)
+
+
 def _pct_bar_pretty(cur: int, total: int, width: int = 12) -> str:
-    """Barre visuelle (badges / progression) — carrés violets + gris."""
+    """Barre badges (embed) : dégradé rose→bleu façon /mycard (emojis au plus proche)."""
     if total <= 0:
         return "⬜" * width
     p = max(0.0, min(1.0, cur / total))
     filled = int(round(p * width))
-    return "🟪" * filled + "⬜" * (width - filled)
+    if filled <= 0:
+        return "⬜" * width
+    return "".join(_gradient_square_at(i, filled) for i in range(filled)) + "⬜" * (width - filled)
 
 
 _ENGAGE_MINI_KEYS = frozenset({"mission_completed", "mission_hardcore", "checkin", "mycard_visits"})
@@ -867,7 +915,7 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
         chunks = _chunk_text_blocks(lines)
         e = discord.Embed(
             title=f"🎯 À débloquer — {ctx.author.display_name}",
-            description=f"**{len(lines)}** piste(s) en cours — barres **🟪** = progression vers le palier.",
+            description=f"**{len(lines)}** piste(s) en cours — barres **rose → bleu** (comme /mycard) = progression vers le palier.",
             color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
