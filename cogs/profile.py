@@ -270,18 +270,50 @@ def _append_badge_section_header(lines: list[str], state: list[str | None], cate
         state[0] = category
 
 
-def _pct_bar(cur: int, total: int, width: int = 14) -> str:
-    """Barre compacte : █ = partie remplie, ░ = reste (meilleur contraste que les emojis carrés en embed)."""
-    if total <= 0:
-        return "░" * width
-    p = max(0.0, min(1.0, cur / total))
-    filled = int(round(p * width))
-    return "█" * filled + "░" * (width - filled)
+def _smoothstep01(x: float) -> float:
+    x = max(0.0, min(1.0, x))
+    return x * x * (3.0 - 2.0 * x)
+
+
+# Bayer 8×8 (0–63) : tramage fin, uniquement 🟪 / 🟦 (pas de 🟥🟧🟨🟩).
+_BAYER8: tuple[tuple[int, ...], ...] = (
+    (0, 32, 8, 40, 2, 34, 10, 42),
+    (48, 16, 56, 24, 50, 18, 58, 26),
+    (12, 44, 4, 36, 14, 46, 6, 38),
+    (60, 28, 52, 20, 62, 30, 54, 22),
+    (3, 35, 11, 43, 1, 33, 9, 41),
+    (51, 19, 59, 27, 49, 17, 57, 25),
+    (15, 47, 7, 39, 13, 45, 5, 37),
+    (63, 31, 55, 23, 61, 29, 53, 21),
+)
+
+
+def _badge_bar_filled_square(i: int, n_filled: int) -> str:
+    """
+    Carré i sur la partie remplie : transition gauche (rose/violet) → droite (bleu),
+    homogène (deux teintes + tramage, pas d’arc-en-ciel Unicode).
+    """
+    if n_filled <= 0:
+        return "⬜"
+    if n_filled == 1:
+        return "🟪"
+    raw = i / (n_filled - 1)
+    t = _smoothstep01(raw)
+    row = (i // 8) % 8
+    col = i % 8
+    thr = _BAYER8[row][col]
+    return "🟦" if t * 64 >= thr + 0.5 else "🟪"
 
 
 def _pct_bar_pretty(cur: int, total: int, width: int = 12) -> str:
-    """Barre embeds trophées — même rendu que `_pct_bar` (█ rempli, ░ reste, lisible en thème sombre)."""
-    return _pct_bar(cur, total, width)
+    """Barre badges : carrés emoji, dégradé rose → bleu (🟪→🟦), reste en ⬜."""
+    if total <= 0:
+        return "⬜" * width
+    p = max(0.0, min(1.0, cur / total))
+    filled = int(round(p * width))
+    if filled <= 0:
+        return "⬜" * width
+    return "".join(_badge_bar_filled_square(i, filled) for i in range(filled)) + "⬜" * (width - filled)
 
 
 _ENGAGE_MINI_KEYS = frozenset({"mission_completed", "mission_hardcore", "checkin", "mycard_visits"})
@@ -863,7 +895,7 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
         chunks = _chunk_text_blocks(lines)
         e = discord.Embed(
             title=f"🎯 À débloquer — {ctx.author.display_name}",
-            description=f"**{len(lines)}** piste(s) en cours — **█** = avancé, **░** = reste jusqu’au palier.",
+            description=f"**{len(lines)}** piste(s) en cours — carrés **🟪→🟦** (rose → bleu) = progression, **⬜** = reste.",
             color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
