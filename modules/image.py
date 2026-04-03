@@ -502,10 +502,12 @@ def generate_mycard_image(
     gap_bar_lvl = 6
     # Remonte le texte XP au-dessus de la zone barre (plus grand = plus haut).
     xp_lift = 50
-    # Descend le texte XP (px vers le bas).
+    # Décale uniquement le libellé « … / … XP » (pas la barre ni le niveau).
     xp_drop = 35
     # Descend uniquement la barre (espace entre fin du texte XP et haut de la barre).
     bar_drop = 50
+    # Remonte barre + niveau + stats (sans toucher au libellé « … / … XP »).
+    block_lift = 35
     bar_h = 24
     radius = 12
     ratio = 1.0 if next_xp <= 0 else max(0.0, min(1.0, float(xp) / float(next_xp)))
@@ -522,10 +524,11 @@ def generate_mycard_image(
     except Exception:
         h_lv = 28.0
 
-    # Barre pleine largeur ; XP en haut à droite ; niveau en bas à droite.
+    # Barre pleine largeur ; libellé XP en haut à droite ; niveau en bas à droite.
     xp_x = int(inner_right - tw_xp)
     xp_y = int(row_top - xp_lift + xp_drop)
-    bar_y = int(xp_y + h_xp + gap_xp_bar + bar_drop)
+    # Barre : pas liée à xp_drop ; block_lift remonte tout le bloc sous le libellé XP.
+    bar_y = int(row_top - xp_lift + h_xp + gap_xp_bar + bar_drop - block_lift)
     lvl_x = int(inner_right - tw_lv)
     lvl_y = int(bar_y + bar_h + gap_bar_lvl)
 
