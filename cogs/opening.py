@@ -516,6 +516,12 @@ class Openings(commands.Cog):
             if chain_streaks.get(uid, 0) >= 10:
                 _mission_guessop_chain_streak_10(self.bot, uid)
 
+        for uid, mxs in max_streak_ever.items():
+            try:
+                core.upsert_mini_score_max(uid, "guessopchain_streak", int(mxs))
+            except Exception:
+                pass
+
         award_lines: list[str] = []
         streak_lines: list[str] = []
 

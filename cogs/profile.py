@@ -88,9 +88,11 @@ _ANITOP_GAME_LABELS: list[tuple[str, str]] = [
     ("guessgenre", "Guess genre"),
     ("higherlower", "Higher / Lower"),
     ("chainquiz", "Chain quiz"),
-    ("bossraid", "Boss raid (coups)"),
+    ("bossraid", "Boss raid (dégâts)"),
     ("duel", "Duel"),
     ("guessop", "Guess OP"),
+    ("guessopchain_streak", "Guess OP chaîne (série max)"),
+    ("mission_hardcore", "Missions Hardcore"),
 ]
 
 
@@ -204,14 +206,12 @@ def _get_user_counts(user_id: int) -> dict:
 
     if username:
         stats: Dict[str, Any] = {}
-        for fn_name in ("get_anilist_stats", "fetch_anilist_stats"):
-            fn = getattr(core, fn_name, None)
-            if callable(fn):
-                try:
-                    stats = fn(username) or {}
-                    break
-                except Exception:
-                    pass
+        fn = getattr(core, "fetch_anilist_list_stats", None)
+        if callable(fn):
+            try:
+                stats = fn(username) or {}
+            except Exception:
+                stats = {}
         if not stats:
             try:
                 query = """
@@ -225,18 +225,18 @@ def _get_user_counts(user_id: int) -> dict:
                 lists = (data or {}).get("data", {}).get("MediaListCollection", {}).get("lists", []) or []
                 total_entries = sum(len(l.get("entries", [])) for l in lists)
                 completed = sum(
-                    1 for l in lists for e in l.get("entries", []) if str(e.get("status","")).upper()=="COMPLETED"
+                    1 for l in lists for e in l.get("entries", []) if str(e.get("status", "")).upper() == "COMPLETED"
                 )
                 watching = sum(
-                    1 for l in lists for e in l.get("entries", []) if str(e.get("status","")).upper()=="CURRENT"
+                    1 for l in lists for e in l.get("entries", []) if str(e.get("status", "")).upper() == "CURRENT"
                 )
                 stats = {"total_entries": total_entries, "completed": completed, "current": watching}
             except Exception:
                 stats = {}
 
         counts["anilist_completed"] = int(stats.get("completed", 0))
-        counts["anilist_entries"]   = int(stats.get("total_entries", 0))
-        counts["anilist_current"]   = int(stats.get("current", 0))
+        counts["anilist_entries"] = int(stats.get("total_entries", 0))
+        counts["anilist_current"] = int(stats.get("current", 0))
 
     # --- TIME WINDOWS (facultatif)
     try:
@@ -288,7 +288,7 @@ def _pct_bar_pretty(cur: int, total: int, width: int = 12) -> str:
     return "🟪" * filled + "⬜" * (width - filled)
 
 
-_ENGAGE_MINI_KEYS = frozenset({"mission_completed", "checkin", "mycard_visits"})
+_ENGAGE_MINI_KEYS = frozenset({"mission_completed", "mission_hardcore", "checkin", "mycard_visits"})
 
 # Agrégats pour la carte /mycard (image)
 _MYCARD_GUESS_KEYS = frozenset({
@@ -320,7 +320,11 @@ def _mycard_score_hint(key: str) -> str:
     Phrase courte pour carte / embed.
     """
     if key == "bossraid":
-        return "coups au raid boss"
+        return "dégâts cumulés au raid boss"
+    if key == "guessopchain_streak":
+        return "meilleure série de bonnes réponses d’affilée (chaîne)"
+    if key == "mission_hardcore":
+        return "missions quotidiennes Hardcore terminées"
     if key == "duel":
         return "manches où tu marques le point (duel)"
     if key == "duel_victory":
@@ -453,6 +457,8 @@ _MINI_LABELS: Dict[str, str] = {
     "chainquiz": "Chain quiz",
     "bossraid": "Raid boss",
     "guessop": "Guess OP",
+    "guessopchain_streak": "Guess OP chaîne (série max)",
+    "mission_hardcore": "Missions Hardcore",
     "duel": "Duel lancés",
     "duel_victory": "Duels gagnés",
     "guesspop": "GuessPop",
@@ -483,12 +489,13 @@ def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str
         return []
 
     groups: list[tuple[str, str, frozenset[str]]] = [
-        ("📅", "Engagement", frozenset({"mission_completed", "checkin", "mycard_visits"})),
+        ("📅", "Engagement", frozenset({"mission_completed", "mission_hardcore", "checkin", "mycard_visits"})),
         ("🎯", "Quiz", frozenset({"animequiz", "animequizmulti"})),
         ("🎭", "Devinettes", frozenset({
             "guessyear", "guessepisodes", "guessgenre", "guesscharacter", "guesswho",
             "guessop",
             "guesspop", "guesspo", "guessspo", "guessopener",
+            "guessopchain_streak",
         })),
         ("🐉", "Communauté", frozenset({"chainquiz", "bossraid"})),
         ("⚔️", "Duels", frozenset({"duel", "duel_victory"})),

@@ -73,6 +73,14 @@ BADGES: Dict[str, Dict] = {
         "source": "mini:mission_completed",
         "category": "profil",
     },
+    "mission_hardcore": {
+        "name": "Au sommet",
+        "desc": "Missions quotidiennes **Hardcore** terminées (ex. série Guess OP chaîne).",
+        "thresholds": [1, 5, 10, 25],
+        "icons": ["💀", "☠️", "🔥", "👑"],
+        "source": "mini:mission_hardcore",
+        "category": "profil",
+    },
     "carte": {
         "name": "Carte de membre",
         "desc": "Fois où tu as ouvert ta /mycard.",
@@ -173,6 +181,14 @@ BADGES: Dict[str, Dict] = {
         "source": "mini:guessop",
         "category": "guess",
     },
+    "guessopchain_streak": {
+        "name": "Chaîne sans faute",
+        "desc": "Meilleure série de **bonnes réponses d’affilée** en `/guessopchain` (max enregistré).",
+        "thresholds": [5, 10, 15, 20, 25],
+        "icons": ["🔗", "⛓️", "🎵", "🎶", "🎙️"],
+        "source": "mini:guessopchain_streak",
+        "category": "guess",
+    },
     "guess_silhouette": {
         "name": "Silhouette",
         "desc": "Victoires au Guess qui est-ce (image floutée).",
@@ -185,8 +201,8 @@ BADGES: Dict[str, Dict] = {
     # --- Communauté (raid, chaînes) ---
     "boss_raid": {
         "name": "Lame de raid",
-        "desc": "Dégâts infligés au boss lors des Boss Raid (tous combats confondus).",
-        "thresholds": [50, 250, 800, 2500],
+        "desc": "Dégâts infligés au boss lors des Boss Raid (cumul sur toutes les manches).",
+        "thresholds": [10000, 40000, 120000, 300000],
         "icons": ["🗡️", "⚔️", "🛡️", "🏰"],
         "source": "mini:bossraid",
         "category": "communaute",

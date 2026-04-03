@@ -2328,6 +2328,22 @@ def add_mini_score(user_id: int, game: str, amount: int = 1) -> None:
         data[uid][game] = data[uid].get(game, 0) + amount
         save_mini_scores(data)
 
+
+def upsert_mini_score_max(user_id: int, game: str, value: int) -> None:
+    """Garde le maximum (ex. meilleure série Guess OP chaîne sur toutes les parties)."""
+    v = int(value)
+    if v <= 0:
+        return
+    with DATA_JSON_LOCK:
+        data = load_mini_scores()
+        uid = str(user_id)
+        data.setdefault(uid, {})
+        cur = int(data[uid].get(game, 0) or 0)
+        if v > cur:
+            data[uid][game] = v
+            save_mini_scores(data)
+
+
 def get_mini_scores(user_id: int) -> dict:
     data = load_mini_scores()
     return data.get(str(user_id), {})

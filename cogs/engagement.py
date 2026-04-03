@@ -417,6 +417,11 @@ class Engagement(commands.Cog):
         m["completed"] = True
         xp = int(m.get("reward_xp", DEFAULT_REWARD_FALLBACK))
         _record_mission_completion(uid, str(m.get("key", "")), xp)
+        if str(m.get("difficulty", "")).upper() == "HARDCORE":
+            try:
+                core.add_mini_score(uid, "mission_hardcore", 1)
+            except Exception:
+                pass
         try:
             core.add_mini_score(uid, "mission_completed", 1)
         except Exception:
