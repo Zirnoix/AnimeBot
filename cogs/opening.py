@@ -24,6 +24,21 @@ from modules import guessop_catalog as gopc
 
 LOG = logging.getLogger(__name__)
 
+
+def _mission_guessop_correct(bot: commands.Bot, user_id: int) -> None:
+    try:
+        bot.dispatch("mission_progress", user_id, "_custom:guessop_correct")
+    except Exception:
+        pass
+
+
+def _mission_guessop_chain_streak_10(bot: commands.Bot, user_id: int) -> None:
+    try:
+        bot.dispatch("mission_progress", user_id, "_custom:guessop_chain_streak_10")
+    except Exception:
+        pass
+
+
 # Cooldown après la fin d’une partie Guess OP (lanceur uniquement)
 GUESSOP_COOLDOWN_AFTER_SEC = 15.0
 _last_guessop_end_by_user: dict[int, float] = {}
@@ -428,6 +443,7 @@ class Openings(commands.Cog):
                 core.add_mini_score(user.id, "guessop", 1)
             except Exception:
                 pass
+            _mission_guessop_correct(self.bot, user.id)
         for user in view.others_correct:
             award_lines.append(f"• {user.mention} — +{others_xp} XP")
             try:
@@ -438,6 +454,7 @@ class Openings(commands.Cog):
                 core.add_mini_score(user.id, "guessop", 1)
             except Exception:
                 pass
+            _mission_guessop_correct(self.bot, user.id)
         fast_line = f"⚡ Plus rapide : {view.winners_order[0].mention}" if view.winners_order else None
         title_res = (
             f"🏁 Résultats — Guess OP · Manche {round_manche}"
@@ -493,6 +510,11 @@ class Openings(commands.Cog):
                 max_streak_ever[uid] = max(max_streak_ever.get(uid, 0), ns)
             else:
                 chain_streaks[uid] = 0
+
+        for uid in correct_ids:
+            _mission_guessop_correct(self.bot, uid)
+            if chain_streaks.get(uid, 0) >= 10:
+                _mission_guessop_chain_streak_10(self.bot, uid)
 
         award_lines: list[str] = []
         streak_lines: list[str] = []

@@ -14,7 +14,7 @@ class MissionDef:
     label: str
     commands: FrozenSet[str]
     goal: int
-    difficulty: str  # EASY | MEDIUM | HARD
+    difficulty: str  # EASY | MEDIUM | HARD | HARDCORE
     distinct: bool
     hint: str
 
@@ -151,42 +151,6 @@ MISSION_DEFINITIONS: List[MissionDef] = [
         "Joue une manche de **`/higherlower`** jusqu’à la fin.",
     ),
     MissionDef(
-        "use_help",
-        "Consulte la `/help` du bot",
-        _fs("help"),
-        1,
-        "EASY",
-        False,
-        "Affiche l’aide avec **`/help`**.",
-    ),
-    MissionDef(
-        "use_myrank",
-        "Affiche ton `/myrank`",
-        _fs("myrank"),
-        1,
-        "EASY",
-        False,
-        "Consulte ton classement avec **`/myrank`**.",
-    ),
-    MissionDef(
-        "use_quiztop",
-        "Consulte le `/quiztop`",
-        _fs("quiztop"),
-        1,
-        "EASY",
-        False,
-        "Ouvre le classement mensuel avec **`/quiztop`**.",
-    ),
-    MissionDef(
-        "use_reminder",
-        "Utilise `/recap` ou `/setalert`",
-        _fs("recap", "setalert"),
-        1,
-        "EASY",
-        False,
-        "Configure ton récap MP avec **`/recap`** ou **`/setalert`**.",
-    ),
-    MissionDef(
         "use_track",
         "Utilise `/track list` ou `/track add`",
         _fs("track list", "track add"),
@@ -196,22 +160,13 @@ MISSION_DEFINITIONS: List[MissionDef] = [
         "Utilise **`/track list`** ou **`/track add`** (suivi d’animes).",
     ),
     MissionDef(
-        "use_minijeux",
-        "Ouvre le menu `/minijeux`",
-        _fs("minijeux"),
+        "guessop_correct",
+        "A une bonne réponse au Guess OP (`/guessop` ou une manche de `/guessopchain`)",
+        _fs("_custom:guessop_correct"),
         1,
-        "EASY",
+        "HARD",
         False,
-        "Ouvre le hub **`/minijeux`**.",
-    ),
-    MissionDef(
-        "use_guessop",
-        "Lance une partie de `/guessop`",
-        _fs("guessop"),
-        1,
-        "MEDIUM",
-        False,
-        "Lance une partie de **`/guessop`** (opening).",
+        "Réponds **correctement** à une manche Guess OP (partie classique ou manche dans la chaîne vocale).",
     ),
     MissionDef(
         "use_stats",
@@ -231,6 +186,33 @@ MISSION_DEFINITIONS: List[MissionDef] = [
         True,
         "Joue à **2** mini-jeux **différents** parmi Guess année / épisodes / genre / perso.",
     ),
+    MissionDef(
+        "guess_win",
+        "Gagne **une** devinette Guess (année, épisodes, genre ou perso)",
+        _fs("_custom:guess_win"),
+        1,
+        "HARD",
+        False,
+        "Réponds **correctement** à une devinette **Guess** (année / épisodes / genre / perso) aujourd’hui.",
+    ),
+    MissionDef(
+        "guess_three_kinds",
+        "Joue à **3** devinettes **différentes** (`/guessyear`, `/guessepisodes`, `/guessgenre`, `/guesscharacter`)",
+        _fs("guessyear", "guessepisodes", "guessgenre", "guesscharacter"),
+        3,
+        "HARD",
+        True,
+        "Enchaîne **3** mini-jeux **différents** parmi Guess année / épisodes / genre / perso (sans répéter).",
+    ),
+    MissionDef(
+        "guessop_chain_streak_10",
+        "Enchaîne **10** bonnes réponses d’affilée en `/guessopchain`",
+        _fs("_custom:guessop_chain_streak_10"),
+        1,
+        "HARDCORE",
+        False,
+        "Pendant une **guessopchain**, enchaîne **10** manches **d’affilée** avec une bonne réponse (la série repart à 0 si tu rates une manche).",
+    ),
 ]
 
 MISSION_BY_KEY: Dict[str, MissionDef] = {d.key: d for d in MISSION_DEFINITIONS}
@@ -242,12 +224,17 @@ DEFAULT_MISSION_HINT = (
 
 
 def pick_weighted_random_mission() -> MissionDef:
-    """Pondération : EASY ×3, MEDIUM ×2, HARD ×1."""
+    """Pondération : EASY ×3, MEDIUM ×2, HARD ×1, HARDCORE ×1."""
     import random
 
     pool: List[MissionDef] = []
     for d in MISSION_DEFINITIONS:
-        w = 1 if d.difficulty == "HARD" else 2 if d.difficulty == "MEDIUM" else 3
+        if d.difficulty == "EASY":
+            w = 3
+        elif d.difficulty == "MEDIUM":
+            w = 2
+        else:
+            w = 1  # HARD, HARDCORE
         pool.extend([d] * w)
     return random.choice(pool)
 

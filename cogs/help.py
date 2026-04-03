@@ -54,6 +54,7 @@ DESC_OVERRIDE: Dict[str, str] = {
     "checkin": "Fais ton check-in quotidien (streak) et gagne de l’XP.",
     "streak": "Affiche ta série quotidienne (streak) et ton record.",
     "mission": "Ta mission du jour : récupère l’XP ou reroll (1/sem.).",
+    "showmission": "Catalogue de **toutes** les missions + tes complétions et XP cumulés (éphémère en slash). Alias : `missionsliste`.",
 
     # Stats
     "mycard": "Image panoramique (niveau, XP, AniList, favori, mini-jeux) — sans embed ; détail : **`/profile`**.",

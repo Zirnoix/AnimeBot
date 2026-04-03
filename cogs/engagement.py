@@ -4,9 +4,10 @@ Engagement features: daily check-in (streak) + daily missions (refonte).
 - /streak
 - /mission              -> affiche la mission du jour (menu action)
 - /mission reroll       -> 1 reroll par SEMAINE (lundi→dimanche)
+- /showmission          -> catalogue des missions + tes stats (éphémère en slash)
 
 Missions : commandes du bot, combos « commandes distinctes », événements (duel gagné, quiz, level up).
-Récompenses adaptées à la difficulté (EASY/MEDIUM/HARD).
+Récompenses adaptées à la difficulté (EASY / MEDIUM / HARD / HARDCORE).
 """
 
 from __future__ import annotations
@@ -23,7 +24,9 @@ from discord import app_commands
 from modules import core
 from modules.mission_definitions import (
     DEFAULT_MISSION_HINT,
+    MISSION_DEFINITIONS,
     MISSION_HINTS,
+    MissionDef,
     mission_state_from_def,
     pick_weighted_random_mission,
 )
@@ -33,6 +36,7 @@ LOG = logging.getLogger(__name__)
 
 STREAK_PATH   = "data/streaks.json"
 MISSIONS_PATH = "data/missions.json"
+MISSION_STATS_PATH = "data/mission_stats.json"
 
 # ----------------- helpers -----------------
 def _bar(current: int, goal: int, width: int = 20) -> str:
@@ -80,11 +84,31 @@ def _next_mission_reset_unix() -> int:
 
 # Barème de récompenses selon difficulté (min, max)
 REWARD_TABLE = {
-    "EASY":   (20, 35),
-    "MEDIUM": (45, 65),
-    "HARD":   (80, 120),
+    "EASY":      (40, 60),
+    "MEDIUM":    (100, 175),
+    "HARD":      (200, 300),
+    "HARDCORE":  (400, 600),
 }
-DEFAULT_REWARD_FALLBACK = 20
+DEFAULT_REWARD_FALLBACK = 40
+
+
+def _record_mission_completion(uid: int, mkey: str, xp: int) -> None:
+    """Incrémente les stats perso (complétions + XP cumulé par clé de mission)."""
+    if not mkey:
+        return
+    with core.DATA_JSON_LOCK:
+        data = core.load_json(MISSION_STATS_PATH, {})
+        uid_s = str(uid)
+        u = data.setdefault(uid_s, {})
+        u.setdefault("by_key", {})
+        u.setdefault("xp_by_key", {})
+        bk = u["by_key"]
+        xk = u["xp_by_key"]
+        bk[mkey] = int(bk.get(mkey, 0)) + 1
+        xk[mkey] = int(xk.get(mkey, 0)) + xp
+        u["total_xp"] = int(u.get("total_xp", 0)) + xp
+        data[uid_s] = u
+        core.save_json(MISSION_STATS_PATH, data)
 
 
 def _roll_reward(difficulty: str) -> int:
@@ -256,6 +280,7 @@ class Engagement(commands.Cog):
 
         m["completed"] = True
         xp = int(m.get("reward_xp", DEFAULT_REWARD_FALLBACK))
+        _record_mission_completion(uid, str(m.get("key", "")), xp)
         try:
             core.add_mini_score(uid, "mission_completed", 1)
         except Exception:
@@ -298,6 +323,72 @@ class Engagement(commands.Cog):
         if not mission_apply_progress(m, cmd):
             return
         await self._after_mission_progress(ctx.author.id, m, ctx=ctx)
+
+    @commands.hybrid_command(
+        name="showmission",
+        description="Catalogue des missions du bot et tes statistiques (éphémère en slash).",
+        aliases=["missionsliste", "cataloguemissions", "missionsbot"],
+    )
+    async def showmission(self, ctx: commands.Context) -> None:
+        """Toutes les missions (plages d’XP) + complétions / XP cumulés par mission pour toi."""
+        if ctx.interaction:
+            await ctx.interaction.response.defer(ephemeral=True)
+        uid = ctx.author.id
+        with core.DATA_JSON_LOCK:
+            raw = core.load_json(MISSION_STATS_PATH, {})
+        st: Dict[str, Any] = raw.get(str(uid), {}) or {}
+        by_key: Dict[str, int] = st.get("by_key") or {}
+        xp_by_key: Dict[str, int] = st.get("xp_by_key") or {}
+        total_xp = int(st.get("total_xp", 0))
+
+        groups: Dict[str, List[MissionDef]] = {"EASY": [], "MEDIUM": [], "HARD": [], "HARDCORE": []}
+        for d in MISSION_DEFINITIONS:
+            groups.setdefault(d.difficulty, []).append(d)
+
+        diff_order = ("EASY", "MEDIUM", "HARD", "HARDCORE")
+        diff_titles = {
+            "EASY": "🟢 Facile",
+            "MEDIUM": "🟡 Moyen",
+            "HARD": "🔴 Difficile",
+            "HARDCORE": "💀 Hardcore",
+        }
+
+        embed = discord.Embed(
+            title="📚 Missions du bot",
+            description=(
+                f"**XP total (missions, cumul) :** `{_fmt(total_xp)} XP`\n"
+                f"Les récompenses du **jour** sont tirées dans la plage indiquée ; "
+                f"le cumul reflète ce que tu as **réellement** reçu."
+            ),
+            color=discord.Color.blurple(),
+        )
+
+        for diff in diff_order:
+            defs = groups.get(diff) or []
+            if not defs:
+                continue
+            lo, hi = REWARD_TABLE.get(diff, (0, 0))
+            lines: List[str] = []
+            for d in defs:
+                c = int(by_key.get(d.key, 0))
+                xcum = int(xp_by_key.get(d.key, 0))
+                lines.append(
+                    f"• **{d.label}**\n"
+                    f"  └ ×**{c}** · **+{_fmt(xcum)}** XP cumulés"
+                )
+            block = "\n".join(lines)
+            if len(block) > 1024:
+                block = block[:1024] + "…"
+            embed.add_field(
+                name=f"{diff_titles[diff]} — {lo}–{hi} XP / mission",
+                value=block or "—",
+                inline=False,
+            )
+
+        if ctx.interaction:
+            await ctx.interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await ctx.send(embed=embed)
 
     # ---- /mission avec menu déroulant d’action ----
     @commands.hybrid_command(name="mission", description="Ta mission du jour (afficher / reroll / MP).")
@@ -403,10 +494,18 @@ class Engagement(commands.Cog):
         status   = "✅ **Terminée**" if m.get("completed") else "⏳ En cours"
         diff     = m.get("difficulty", "EASY")
         xp       = int(m.get("reward_xp", DEFAULT_REWARD_FALLBACK))
-        diff_badge = {"EASY":"🟢 Facile", "MEDIUM":"🟡 Moyen", "HARD":"🔴 Difficile"}.get(diff, diff)
-        color = {"EASY": discord.Color.green(), "MEDIUM": discord.Color.gold(), "HARD": discord.Color.red()}.get(
-            diff, discord.Color.blurple()
-        )
+        diff_badge = {
+            "EASY": "🟢 Facile",
+            "MEDIUM": "🟡 Moyen",
+            "HARD": "🔴 Difficile",
+            "HARDCORE": "💀 Hardcore",
+        }.get(diff, diff)
+        color = {
+            "EASY": discord.Color.green(),
+            "MEDIUM": discord.Color.gold(),
+            "HARD": discord.Color.red(),
+            "HARDCORE": discord.Color.dark_purple(),
+        }.get(diff, discord.Color.blurple())
         mkey = str(m.get("key", ""))
         hint = MISSION_HINTS.get(mkey, DEFAULT_MISSION_HINT)
 

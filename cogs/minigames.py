@@ -24,6 +24,14 @@ from modules import minigame_lock
 LOG = logging.getLogger(__name__)
 
 
+def _mission_guess_win(bot: commands.Bot, user_id: int) -> None:
+    """Progression mission HARD « guess_win » (défini dans mission_definitions)."""
+    try:
+        bot.dispatch("mission_progress", user_id, "_custom:guess_win")
+    except Exception:
+        pass
+
+
 class _FakeAuthor:
     __slots__ = ("id",)
 
@@ -606,6 +614,7 @@ class MiniGames(commands.Cog):
                         await ctx.send(f"✅ Bravo ! L'année était bien **{year}** (tu as répondu {guessed_year}). Tu gagnes 8 XP !")
                         await core.add_xp(self.bot, ctx.channel, ctx.author.id, 8)
                         core.add_mini_score(ctx.author.id, "guessyear", 1)
+                        _mission_guess_win(self.bot, ctx.author.id)
                     else:
                         await ctx.send(f"❌ Raté. L'année était **{year}** (tu as répondu {guessed_year}).")
                 except ValueError:
@@ -706,6 +715,7 @@ class MiniGames(commands.Cog):
                         await ctx.send(f"✅ Bravo ! **{title}** compte {episodes} épisodes (tu as répondu {guessed}). Tu gagnes 8 XP !")
                         await core.add_xp(self.bot, ctx.channel, ctx.author.id, 8)
                         core.add_mini_score(ctx.author.id, "guessepisodes", 1)
+                        _mission_guess_win(self.bot, ctx.author.id)
                     else:
                         await ctx.send(f"❌ Raté. **{title}** compte {episodes} épisodes (tu as répondu {guessed}).")
                 except ValueError:
@@ -908,6 +918,7 @@ class MiniGames(commands.Cog):
                             )
                             await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
                             core.add_mini_score(ctx.author.id, "guessgenre", 1)
+                            _mission_guess_win(self.bot, ctx.author.id)
                     else:
                         _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
                         _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
@@ -916,6 +927,7 @@ class MiniGames(commands.Cog):
                         )
                         await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
                         core.add_mini_score(ctx.author.id, "guessgenre", 1)
+                        _mission_guess_win(self.bot, ctx.author.id)
                 else:
                     _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
                     _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
@@ -1053,6 +1065,7 @@ class MiniGames(commands.Cog):
                         pass
                     try:
                         core.add_mini_score(inter.user.id, "guesscharacter", 1)
+                        _mission_guess_win(self.bot, inter.user.id)
                     except Exception:
                         pass
                 else:
