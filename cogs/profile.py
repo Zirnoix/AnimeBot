@@ -279,54 +279,41 @@ def _pct_bar(cur: int, total: int, width: int = 14) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-# Même extrémités que la bande gauche de /mycard (modules/image.py : _MYCARD_COL_STRIPE_TOP / _STRIPE_BOT).
-_MYCARD_BAR_PINK = (244, 114, 182)
-_MYCARD_BAR_BLUE = (96, 165, 250)
-
-# Carrés colorés Unicode — RGB approx. (Discord) pour coller au dégradé calculé.
-_MYCARD_BAR_SQUARE_PALETTE: list[tuple[str, tuple[int, int, int]]] = [
-    ("🟥", (235, 51, 35)),
-    ("🟧", (255, 128, 0)),
-    ("🟨", (255, 214, 0)),
-    ("🟩", (60, 180, 75)),
-    ("🟦", (59, 130, 246)),
-    ("🟪", (168, 85, 247)),
-]
+# Barre embed : uniquement 🟪 (violet) → 🟦 (bleu), comme les bords de la bande /mycard.
+# Le « dégradé » est simulé par tramage de Bayer (évite les gros blocs d’une seule couleur
+# et les 🟥🟧🟨🟩 hors thème qu’imposait le plus proche RGB sur la palette Unicode).
 
 
-def _nearest_square_emoji(rgb: tuple[int, int, int]) -> str:
-    r, g, b = rgb
-    best_ch = "🟪"
-    best_d = float("inf")
-    for ch, (er, eg, eb) in _MYCARD_BAR_SQUARE_PALETTE:
-        d = (r - er) ** 2 + (g - eg) ** 2 + (b - eb) ** 2
-        if d < best_d:
-            best_d = d
-            best_ch = ch
-    return best_ch
+def _smoothstep01(x: float) -> float:
+    x = max(0.0, min(1.0, x))
+    return x * x * (3.0 - 2.0 * x)
+
+
+# Matrice 4×4 classique (0–15), ordre ligne-major pour une barre gauche → droite.
+_MYCARD_BAR_BAYER4: tuple[tuple[int, ...], ...] = (
+    (0, 8, 2, 10),
+    (12, 4, 14, 6),
+    (3, 11, 1, 9),
+    (15, 7, 13, 5),
+)
 
 
 def _gradient_square_at(i: int, n_filled: int) -> str:
-    """i-ième carré rempli (0..n_filled-1), rose → bleu comme la bande /mycard."""
+    """i-ième carré rempli : transition douce violet → bleu (tramage, pas de carrés arc-en-ciel)."""
     if n_filled <= 0:
         return "⬜"
     if n_filled == 1:
-        t = 0.5
-    else:
-        t = i / (n_filled - 1)
-    t = max(0.0, min(1.0, t))
-    r0, g0, b0 = _MYCARD_BAR_PINK
-    r1, g1, b1 = _MYCARD_BAR_BLUE
-    rgb = (
-        int(r0 + (r1 - r0) * t),
-        int(g0 + (g1 - g0) * t),
-        int(b0 + (b1 - b0) * t),
-    )
-    return _nearest_square_emoji(rgb)
+        return "🟪"
+    raw = i / (n_filled - 1)
+    t = _smoothstep01(raw)
+    row = (i // 4) % 4
+    col = i % 4
+    thr = _MYCARD_BAR_BAYER4[row][col]
+    return "🟦" if t * 16 > thr else "🟪"
 
 
 def _pct_bar_pretty(cur: int, total: int, width: int = 12) -> str:
-    """Barre badges (embed) : dégradé rose→bleu façon /mycard (emojis au plus proche)."""
+    """Barre badges (embed) : 🟪→🟦 façon /mycard, lissée par tramage."""
     if total <= 0:
         return "⬜" * width
     p = max(0.0, min(1.0, cur / total))
