@@ -21,6 +21,7 @@ from modules import core
 from modules import voice              # ensure_connected + make_source précis/robuste
 from modules import animethemes        # provider AnimeThemes + filtres AniList
 from modules import guessop_catalog as gopc
+from modules.text_bars import pct_bar_blocks
 
 LOG = logging.getLogger(__name__)
 
@@ -188,9 +189,6 @@ async def _fetch_to_temp(url: str, timeout_total: float = 45.0, retries: int = 2
     except Exception: pass
     raise last_err
 
-def _bar(remaining: int, total: int, width: int = 10) -> str:
-    filled = int(width * (total - remaining) / max(1, total))
-    return "█" * filled + "░" * (width - filled)
 
 def _build_question_embed(
     choices: List[str],
@@ -203,7 +201,7 @@ def _build_question_embed(
     em = discord.Embed(
         title=title,
         description=(
-            f"{_bar(remaining_sec, ANSWER_TIMEOUT)}  **{remaining_sec}s** restantes.\n"
+            f"{pct_bar_blocks(ANSWER_TIMEOUT - remaining_sec, ANSWER_TIMEOUT, 10)}  **{remaining_sec}s** restantes.\n"
             "Clique sur **1–4** pour répondre *(même salon vocal que le bot)*."
         ),
         color=discord.Color.purple()

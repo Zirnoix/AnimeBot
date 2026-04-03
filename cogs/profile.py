@@ -16,6 +16,7 @@ from modules.image import generate_mycard_image
 from modules.badges import BADGES, BADGE_SECTION_TITLE_FR, evaluate_tier, iter_badges_sorted, tier_name_fr
 from modules.badge_helpers import badge_count_for_spec
 from modules.emoji_utils import get_emoji
+from modules.text_bars import pct_bar_parallelogram
 
 # Couleurs cohérentes (proche blurple Discord + or trophées)
 _EMBED_OVERVIEW = discord.Color.from_rgb(88, 101, 242)
@@ -254,10 +255,8 @@ def _get_user_counts(user_id: int) -> dict:
 
 # ---------- HELPERS D'AFFICHAGE ----------
 def _xp_bar(xp: int, next_xp: int, seg: int = 20) -> str:
-    if next_xp <= 0:
-        return "⬛" * seg
-    progress = max(0, min(seg, int((xp / next_xp) * seg)))
-    return "🟦" * progress + "⬛" * (seg - progress)
+    """Même style ▰▱ que le reste du profil / ``get_xp_bar``."""
+    return pct_bar_parallelogram(xp, max(1, int(next_xp)), seg)
 
 
 def _append_badge_section_header(lines: list[str], state: list[str | None], category: str) -> None:
@@ -271,12 +270,8 @@ def _append_badge_section_header(lines: list[str], state: list[str | None], cate
 
 
 def _pct_bar_pretty(cur: int, total: int, width: int = 12) -> str:
-    """Barre trophées : ▰ = partie remplie, ▱ = reste (parallélogrammes, lisibles en thème sombre)."""
-    if total <= 0:
-        return "▱" * width
-    p = max(0.0, min(1.0, cur / total))
-    filled = int(round(p * width))
-    return "▰" * filled + "▱" * (width - filled)
+    """Barre trophées / profil — délègue à `modules.text_bars.pct_bar_parallelogram`."""
+    return pct_bar_parallelogram(cur, total, width)
 
 
 _ENGAGE_MINI_KEYS = frozenset({"mission_completed", "mission_hardcore", "checkin", "mycard_visits"})
@@ -464,11 +459,8 @@ def _mini_label(key: str) -> str:
 
 
 def _mini_bar_line(val: int, max_val: int, width: int = 8) -> str:
-    if max_val <= 0:
-        return "░" * width
-    p = max(0.0, min(1.0, val / max_val))
-    filled = int(round(p * width))
-    return "█" * filled + "░" * (width - filled)
+    """Même style ▰▱ que les trophées et les stats AniList."""
+    return pct_bar_parallelogram(val, max_val, width)
 
 
 def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str, int]]]]:

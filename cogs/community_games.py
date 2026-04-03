@@ -31,6 +31,7 @@ from modules import anilist_gate
 from modules import core
 from modules import higherlower_combine
 from modules import minigame_lock
+from modules.text_bars import pct_bar_blocks
 from modules.core import normalize
 
 LOG = logging.getLogger(__name__)
@@ -722,11 +723,7 @@ class RaidStartConfirmView(View):
 
 
 def _raid_hp_bar(hp: int, max_hp: int, width: int = 18) -> str:
-    if max_hp <= 0:
-        return "░" * width
-    filled = int(round(width * hp / max_hp))
-    filled = max(0, min(width, filled))
-    return "█" * filled + "░" * (width - filled)
+    return pct_bar_blocks(hp, max_hp, width)
 
 
 def _raid_hp_pct(hp: int, max_hp: int) -> int:

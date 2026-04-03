@@ -7,6 +7,7 @@ from discord.ext import commands
 from discord import app_commands
 
 from modules import core
+from modules.text_bars import pct_bar_parallelogram
 
 # ---------- Helpers affichage ----------
 def fmt_int(n: int) -> str:
@@ -29,12 +30,6 @@ def human_minutes_compact(m: int) -> str:
     if d == 1:
         return f"1 j {h} h"
     return f"{h} h"
-
-def bar_txt(current: int, total: int, width: int = 18) -> str:
-    total = max(1, int(total or 1))
-    cur = max(0, min(int(current or 0), total))
-    filled = int(round(width * cur / total))
-    return "▰" * filled + "▱" * (width - filled)
 
 def score_to_color(mean: float) -> int:
     """0 -> rouge, 100 -> vert."""
@@ -127,7 +122,7 @@ def build_anilist_stats_embed(
 
     e.add_field(
         name="📈 Complétion (terminés / entrées)",
-        value=f"{bar_txt(completed, total)} **{done_pct}%**",
+        value=f"{pct_bar_parallelogram(completed, total, 18)} **{done_pct}%**",
         inline=False,
     )
 

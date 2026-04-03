@@ -38,6 +38,8 @@ from PIL import Image, ImageDraw, ImageFont
 import io
 from io import BytesIO  # utilisé par generate_profile_card
 
+from modules.text_bars import pct_bar_parallelogram
+
 
 def _load_bot_version() -> str:
     """Lecture de `VERSION` à la racine du projet, sinon env `BOT_VERSION`, sinon `dev`."""
@@ -3169,10 +3171,8 @@ def genre_emoji(genres: List[str]) -> str:
     return "🎬"
 
 def get_xp_bar(xp: int, next_xp: int, length: int = 20) -> str:
-    next_xp = max(1, int(next_xp))
-    filled = int((xp / next_xp) * length)
-    filled = max(0, min(length, filled))
-    return "▰" * filled + "▱" * (length - filled)
+    """Barre XP texte — déléguée à ``modules.text_bars`` (▰/▱)."""
+    return pct_bar_parallelogram(xp, max(1, int(next_xp)), length)
 
 # --- ANTI-DUPLICATE POSTING ---
 def _db():

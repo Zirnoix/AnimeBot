@@ -22,6 +22,7 @@ from discord.ext import commands
 from discord import app_commands
 
 from modules import core
+from modules.text_bars import pct_bar_parallelogram
 from modules.mission_definitions import (
     DEFAULT_MISSION_HINT,
     MISSION_DEFINITIONS,
@@ -40,10 +41,7 @@ MISSION_STATS_PATH = "data/mission_stats.json"
 
 # ----------------- helpers -----------------
 def _bar(current: int, goal: int, width: int = 20) -> str:
-    goal = max(1, int(goal or 1))
-    cur  = max(0, min(int(current or 0), goal))
-    fill = int(round(width * cur / goal))
-    return "▰" * fill + "▱" * (width - fill)
+    return pct_bar_parallelogram(current, max(1, int(goal or 1)), width)
 
 def _today_str() -> str:
     return datetime.now(tz=core.TIMEZONE).strftime("%Y-%m-%d")
