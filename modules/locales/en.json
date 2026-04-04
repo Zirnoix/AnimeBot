@@ -1,0 +1,548 @@
+{
+  "language": {
+    "cmd_description": "Set the bot language for this server (messages, embeds).",
+    "param_description": "Language used for the whole server",
+    "success": "Server language set to **{label}**.",
+    "lang_name_fr": "French",
+    "lang_name_en": "English",
+    "need_manage_guild": "You need **Manage Server** to change the language.",
+    "need_guild": "This command must be used in a server."
+  },
+  "welcome": {
+    "title": "Thanks for adding AnimeBot",
+    "description": "AnimeBot helps you track anime releases, play minigames (quiz, guessing games, raid boss), link AniList and earn XP.",
+    "field_what": "What the bot does",
+    "field_what_value": "• Episode alerts and schedules (`/next`, `/planning`)\n• Minigames: quiz, duel, Guess OP, chain quiz, raid boss…\n• Profile, trophies, XP and daily missions\n• AniList link for your personal stats",
+    "field_help": "Help and setup",
+    "field_help_value": "• `{prefix}guide` — **player** tutorial (DM)\n• `{prefix}guide_admin` — **staff** setup (DM, admins)\n• `{prefix}help` — command list",
+    "footer": "Pick the server language below (*Manage Server* only).",
+    "select_placeholder": "Server language…",
+    "select_fr": "Français",
+    "select_en": "English",
+    "already_fr": "The server is already in **French** (default language).",
+    "already_en": "The server is already in **English**.",
+    "set_fr_confirm": "Server language: **French**. Upcoming bot messages will be in French.",
+    "set_en_confirm": "Server language: **English**. Upcoming bot messages will be in English.",
+    "select_need_perm": "Only members with **Manage Server** can pick the language."
+  },
+  "guide": {
+    "send_dm": "📬 Sending the guide to your **DMs**.",
+    "sent_ok": "✅ Guide sent above.",
+    "err_dm_blocked": "❌ Could not send a DM (privacy settings).",
+    "err_generic": "❌ Error: {err}"
+  },
+  "guide_admin": {
+    "send_dm": "📬 **Admin** guide sent to your **DMs**.",
+    "need_guild": "❌ Use this command in a server.",
+    "err_dm_blocked": "❌ DMs closed — open your private messages to receive the admin guide.",
+    "err_dm_blocked_short": "❌ DMs closed — open your private messages."
+  },
+  "discovery": {
+    "unknown_title": "Unknown title",
+    "embed_title": "🔎 Discover: {title}",
+    "field_genres": "Genres",
+    "field_infos": "Info",
+    "footer_source": "Source: AniList",
+    "footer_pick": "Pick: {sort}",
+    "footer_auto_tr": "Auto-translated",
+    "footer_track": "/track add → DM alerts when an episode airs",
+    "sort_POPULARITY": "Popularity",
+    "sort_TRENDING": "Trending",
+    "sort_SCORE": "Score",
+    "status_FINISHED": "Finished",
+    "status_RELEASING": "Airing",
+    "status_NOT_YET_RELEASED": "Not yet aired",
+    "status_CANCELLED": "Cancelled",
+    "status_HIATUS": "Hiatus",
+    "err_fetch": "❌ Could not fetch a recommendation.",
+    "btn_again": "🔁 Another",
+    "btn_track": "➕ Add to watchlist",
+    "not_for_you": "❌ This action isn't for you.",
+    "err_refresh": "❌ Error while refreshing.",
+    "no_result": "❌ No new result.",
+    "track_ok": "✅ **{title}** added to your watchlist.",
+    "track_dup": "⚠️ Already on your watchlist.",
+    "track_err": "❌ Could not add to watchlist.",
+    "no_title": "❌ Title not found.",
+    "lbl_episodes": "Episodes",
+    "lbl_format": "Format",
+    "lbl_season": "Season",
+    "lbl_score": "Mean score",
+    "lbl_status": "Status"
+  },
+  "common": {
+    "slash_only": "This command is **slash-only** — use `/{name}` in the command bar.",
+    "weekdays": [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+      "Sunday"
+    ],
+    "abuse_rate_limit": "⏳ Too many commands — try again in **{seconds}s**."
+  },
+  "xp": {
+    "titles_global": [
+      [
+        0,
+        "👶 Novice"
+      ],
+      [
+        3,
+        "🌱 Initiate"
+      ],
+      [
+        6,
+        "📗 Beginner"
+      ],
+      [
+        9,
+        "🔧 Practitioner"
+      ],
+      [
+        12,
+        "🧭 Explorer"
+      ],
+      [
+        15,
+        "🎯 Approved"
+      ],
+      [
+        20,
+        "⚔️ Aspirant"
+      ],
+      [
+        25,
+        "🏹 Disciple"
+      ],
+      [
+        30,
+        "🛡️ Knight"
+      ],
+      [
+        37,
+        "🧠 Strategist"
+      ],
+      [
+        44,
+        "🔥 Master"
+      ],
+      [
+        51,
+        "🌪️ Virtuoso"
+      ],
+      [
+        58,
+        "💎 Elite"
+      ],
+      [
+        65,
+        "🌟 Heroic"
+      ],
+      [
+        72,
+        "🐉 Archon"
+      ],
+      [
+        79,
+        "⚡ Dominant"
+      ],
+      [
+        86,
+        "🌌 Mythic"
+      ],
+      [
+        93,
+        "🏆 Paragon"
+      ],
+      [
+        100,
+        "👑 Sovereign"
+      ],
+      [
+        107,
+        "🗼 Eminence"
+      ],
+      [
+        114,
+        "🜲 Arcanist"
+      ],
+      [
+        121,
+        "🪽 Seraph"
+      ],
+      [
+        128,
+        "☄️ Sidereal"
+      ],
+      [
+        135,
+        "🜚 Transcendent"
+      ],
+      [
+        142,
+        "🛐 Divine"
+      ],
+      [
+        150,
+        "♾️ Apotheosis"
+      ]
+    ],
+    "titles_quiz": [
+      [
+        0,
+        "👶 Newcomer"
+      ],
+      [
+        5,
+        "🌱 Apprentice"
+      ],
+      [
+        10,
+        "📘 Amateur"
+      ],
+      [
+        15,
+        "📚 Confirmed Otaku"
+      ],
+      [
+        20,
+        "🎯 Expert"
+      ],
+      [
+        25,
+        "🔥 Otaku Master"
+      ],
+      [
+        30,
+        "🧠 Sensei"
+      ],
+      [
+        35,
+        "🧩 Strategist"
+      ],
+      [
+        40,
+        "🏆 Champion"
+      ],
+      [
+        45,
+        "🌟 Local Legend"
+      ],
+      [
+        50,
+        "💎 National Legend"
+      ],
+      [
+        55,
+        "🗿 Anime Icon"
+      ],
+      [
+        60,
+        "🐉 Myth"
+      ],
+      [
+        65,
+        "🛐 Otaku God"
+      ],
+      [
+        70,
+        "☄️ Universal Divinity"
+      ],
+      [
+        75,
+        "🔮 Omniscient Otaku"
+      ],
+      [
+        80,
+        "⚡ Master of Lightning"
+      ],
+      [
+        85,
+        "🌌 Galactic Traveler"
+      ],
+      [
+        90,
+        "🏮 Anime Guardian"
+      ],
+      [
+        95,
+        "🎭 Master of Illusions"
+      ],
+      [
+        100,
+        "👑 King of Otakus"
+      ]
+    ],
+    "announce_new_title": "🎉 **<@{user_id}>** unlocked a **new title**: **{title}** _(level **{level}**)_!",
+    "announce_quiz_title": "📚 **<@{user_id}>** unlocked a **new quiz title**: **{title}** _(score **{score}** pts)_!"
+  },
+  "utils": {
+    "ping": "🏓 Pong! Latency: **{latency} ms**",
+    "uptime": "⏳ Uptime: **{days}d {hours}h {minutes}m {seconds}s**",
+    "source": "📦 Bot source code: https://github.com/Zirnoix/AnimeBot",
+    "need_guild": "❌ This command must be used in a server.",
+    "setchannel_ok": "✅ This channel will receive **episode release cards** for **this server**.\n• Tracked anime list: **`/airings`** (e.g. **`/airings all`** for admins).\n• **Independent** from the **raid boss** channel (`/raidconfig`).\n• If you get **no** alerts while the list is filled: check **bot permissions** here, and that the AniList API responds (alerts use the post-air window).",
+    "setlevelup_ok": "✅ This channel will receive the following **announcements** (instead of the channel where play happens):\n• **New global title** (XP `/profile`, `/myrank`) — one announcement per **title tier**, not every level.\n• **New quiz title** (solo quiz score `/animequiz`, `/animequizmulti`) — same tiers as on the card.\n• To reset default behaviour: **`/clearlevelupchannel`**.",
+    "clearlevelup_ok": "✅ Level-up announcements will again be posted **in the channel where the game happened** (or not announced if XP was granted without a channel).",
+    "config_err": "❌ An error occurred while saving settings.",
+    "clearlevelup_err": "❌ An error occurred."
+  },
+  "botinfo": {
+    "embed_title": "AnimeBot — Info",
+    "embed_desc": "Thanks for using AnimeBot 💙",
+    "field_version": "Version",
+    "field_latency": "Latency",
+    "field_uptime": "Uptime",
+    "field_guilds": "Servers",
+    "field_members": "Members (approx.)",
+    "field_python": "Python",
+    "field_anilist_ok": "reachable",
+    "field_anilist_bad": "degraded / offline",
+    "field_anilist": "AniList API",
+    "field_slash": "Slash commands",
+    "field_slash_val": "Slash commands can take **1–2 min** to show after inviting the bot.",
+    "field_vote": "⭐ Support AnimeBot",
+    "field_vote_val": "**`/vote`** — free vote on **Top.gg** (visibility + bonus **XP** on your card). Drop by from time to time; optional DM reminder in the command.",
+    "field_bug": "🐞 Report a bug",
+    "field_bug_val": "**`/reportbug`** — report a bug in **DMs**; if you help fix a real issue, you can earn **XP** (see **`/mycard`** if you already have validated reports).",
+    "field_al_linked": "Your AniList account",
+    "field_al_val_linked": "Linked: **`{name}`**",
+    "field_al_val_unlinked": "Not linked — **`/linkanilist`** then **`/verifyanilist`** for stats, DM recaps, quick `/mystats`…",
+    "footer": "/help · /vote · /reportbug · /airings · /linkanilist"
+  },
+  "alerts": {
+    "release_header": "📺 **Out** — the episode is available!",
+    "fallback_line": "{header}\n**{title}** — Episode **{ep}** • {when}"
+  },
+  "admin_anilist": {
+    "sync_none": "No linked AniList accounts found.",
+    "sync_done": "Sync done: **{ok}/{total}** accounts refreshed.",
+    "no_user": "No linked/valid AniList username to sync.",
+    "embed_title": "AniList Sync",
+    "field_user": "User",
+    "f_completed": "✅ Completed (MLC)",
+    "f_current": "📺 Current (MLC)",
+    "f_total": "📚 Total entries (MLC)",
+    "f_prof": "🎬 Watched (profile)",
+    "f_mean": "⭐ Mean score",
+    "f_genre": "🎭 Favorite genre",
+    "footer_force": "Force refresh",
+    "footer_ttl": "TTL {ttl}h"
+  },
+  "emoji_status": {
+    "denied": "⛔ Access denied.",
+    "no_guild": "❌ Assets server not found.",
+    "empty": "No emojis.",
+    "cmd_desc": "List synced emojis.",
+    "whoami_desc": "Debug: authorization info."
+  },
+  "presence": {
+    "scenes": [
+      "/help — guide & news",
+      "Always improving — ideas welcome",
+      "Quiz · AniList · releases · minigames",
+      "Raid boss, guessing games, duels… see /help",
+      "Questions? Start with /help",
+      "Regular updates — stay tuned",
+      "AniList link, reminders, stats: /help",
+      "/reportbug — bonus XP (real bugs)",
+      "Found a bug? /reportbug"
+    ],
+    "version_suffix": "v{v} · AnimeBot"
+  },
+  "owner": {
+    "denied": "❌ Owner only.",
+    "unknown_action": "❌ Unknown action.",
+    "err": "❌ Error: `{err}`",
+    "panel_denied": "❌ **Owner** only (`OWNER_ID` on the host).",
+    "panel_title": "🔧 Owner panel",
+    "panel_desc": "Pick an action below. Everything is **ephemeral** (only you see it).\n\n",
+    "panel_footer": "Owner tools — Guess OP, stats, DM help, etc.",
+    "select_placeholder": "Choose an action…",
+    "setavatar_need": "❌ Send the image **in the same message** as **`!setavatar`**.",
+    "setavatar_ok": "✅ Bot avatar updated.",
+    "cmd_desc": "Owner panel: debug, stats, tests (OWNER_ID only)."
+  },
+  "vote": {
+    "cmd_desc": "⭐ Support the bot on Top.gg (bonus XP) — link, cooldown, DM reminder.",
+    "not_for_you": "❌ This panel isn’t for you.",
+    "rem_on": "✅ DM reminder **enabled** — you’ll get a message when the Top.gg cooldown is over.",
+    "rem_off": "✅ DM reminder **disabled**.",
+    "dm_reminder": "🗳️ You can **vote again** for **AnimeBot** on Top.gg — it helps visibility!\n{url}\n\n_(Disable reminder via `/vote` → button.)_",
+    "status_none": "No vote recorded yet by the bot (after your **first** Top.gg vote, the cooldown will show here).",
+    "eta_cooldown": "Top.gg cooldown: **{remaining}** after each vote.",
+    "status_ready": "✅ You **can vote** (cooldown over).",
+    "status_wait": "⏳ Next vote in **{remaining}**.",
+    "last_vote": "Last recorded vote: <t:{ts}:R>.",
+    "hook_warn": "\n\n⚠️ Auto rewards need `TOPGG_WEBHOOK_SECRET` + webhook URL on Top.gg (see project docs / `.env.example`).",
+    "reward_line": "🎁 **XP:** **{xp}** base + **streak** + **loyalty** bonuses · weekend multiplier possible.",
+    "stats_line": "📊 **Your votes:** **{total}** recorded · streak **{streak}** d · best **{best}** _(updated after each vote received by the bot)._",
+    "intro": "**Free**, no special signup: the **button below** opens Top.gg. It helps the bot rank and get discovered.",
+    "rem_state": "🔔 DM reminder when you can vote again: **{state}** (buttons).",
+    "rem_on_state": "on",
+    "rem_off_state": "off",
+    "embed_title": "⭐ Support AnimeBot (Top.gg)",
+    "embed_footer": "Visit /vote from time to time — thanks 💙 · Cooldown & timezone configurable",
+    "btn_vote": "🗳️ Vote on Top.gg",
+    "btn_rem_on": "🔔 Enable DM reminder",
+    "btn_rem_off": "🔕 Disable reminder",
+    "recap_title": "🎉 Your last vote recap (only you see this)",
+    "recap_body": "**+{xp} XP** added to your card.\n{base} base + {sb} streak + {lb} loyalty = **{sub}** XP before multi.{wk}\nStreak **{st}** d · best **{bst}** · **{tv}** votes total.",
+    "recap_weekend": "\n_Weekend bonus applied to the total._",
+    "fmt_now": "now",
+    "fmt_soon": "soon"
+  },
+  "raid": {
+    "mode": {
+      "guesscharacter": "Character (4 choices)",
+      "guessyear": "Air year",
+      "guessepisodes": "Episode count",
+      "guessgenre": "Genre",
+      "higherlower": "More popular (2 anime)",
+      "animequiz": "Anime — screenshot",
+      "guesswho": "Guess who? (blur + name)"
+    },
+    "tier": {
+      "easy": "Easy",
+      "medium": "Medium",
+      "hard": "Hard"
+    },
+    "mode_tier": {
+      "guesscharacter": "easy",
+      "guessyear": "medium",
+      "guessepisodes": "medium",
+      "guessgenre": "easy",
+      "higherlower": "medium",
+      "animequiz": "hard",
+      "guesswho": "hard"
+    },
+    "mode_desc": "~{lo}–{hi} dmg · finisher +{fin} XP",
+    "select_placeholder": "🎯 Minigame type for this raid…"
+  },
+  "help": {
+    "desc": {
+      "next": "Next episode — **server** mode = your server list (`/airings`); **global** mode = all releases.",
+      "planning": "Weekly schedule — **server** mode = server list; **global** = all releases.",
+      "decouverte": "Random anime (AniList) — **slash** replies are **ephemeral**; Again / Track buttons.",
+      "monnext": "Your next episode (linked AniList account required).",
+      "monplanning": "Your weekly schedule (linked AniList account).",
+      "animequiz": "Solo quiz: guess the anime from the image (difficulty choice) — XP and quiz score.",
+      "animequizmulti": "Chain **5–20** solo quizzes in a row (mixed difficulties) — XP and combos.",
+      "duel": "Quiz duel between 2 players.",
+      "guess": "Legacy alias: use **`/guessyear`**, **`/guessepisodes`**, **`/guessgenre`**, **`/guesscharacter`** or **`/minijeux`**.",
+      "guessop": "Guess the opening (audio) — blind test on real themes.",
+      "guessopchain": "Chain several Guess OP rounds with streak bonus and score recap.",
+      "guessyear": "Guess the air year (image + answer in channel).",
+      "guessepisodes": "Guess the episode count (image + answer in channel).",
+      "guessgenre": "Guess one of the genres (image + text answer).",
+      "guesscharacter": "Pick the right character (4 buttons).",
+      "guesswho": "Guess the character on a blurred image — Easy / Normal / Hard (blur + XP).",
+      "chainquiz": "Chain solo quizzes: difficulty rises with each correct answer.",
+      "raid": "Group: raid status (everyone).",
+      "raid_statut": "Channel, schedule, auto or not, next slot (bot timezone).",
+      "raidconfig": "Admins: interactive panel (channel, auto ON/OFF, day, hour, minutes, precise HH:MM).",
+      "raidstart": "Start a raid boss (admin): confirmation + max 1× per week / server.",
+      "raidalerttest": "Send a test “raid in 1 h” style message (admin).",
+      "minijeux": "Two menus: **Guessing games** and **Other** — pick to start a game (duel → `/duel @member`).",
+      "higherlower": "Higher/Lower game, anime edition.",
+      "year": "Guess: year.",
+      "character": "Guess: character.",
+      "episodes": "Guess: episode count.",
+      "genre": "Guess: genre.",
+      "op": "Guess: opening.",
+      "linkanilist": "Step 1: link AniList with a code in your bio, then `/verifyanilist`.",
+      "verifyanilist": "Step 2: confirm the link after pasting the code in About on AniList.",
+      "unlink": "Unlink your AniList account.",
+      "checkin": "Daily check-in (streak) and earn XP.",
+      "streak": "Show your daily streak and record.",
+      "mission": "Today’s mission: claim XP or reroll (1/week).",
+      "showmission": "Mission catalogue by **category** (dropdown) + your stats (ephemeral in slash). Alias: `missionsliste`.",
+      "mycard": "Panoramic image (level, XP, AniList, favourite, minigames) — no embed; details: **`/profile`**.",
+      "profile": "Detailed profile: XP, streak, minigame counters, Guess genre penalties, trophy preview.",
+      "animefav": "Set your favourite anime (title, ID or AniList URL) — shown on **`/mycard`**.",
+      "reportbug": "Report a bug in **DMs**; **XP** if confirmed — counter on **`/mycard`**.",
+      "mystats": "AniList stats (watched, days, mean score, favourite genre).",
+      "mybadges": "Trophies by category (Initiate → Myth tiers) and progress bars.",
+      "duelstats": "AniList engagement duel: completed, airing, episodes, time (+ rating if both rate).",
+      "quiztop": "Quiz leaderboard + last month’s podium and rewards.",
+      "animetop": "Minigame leaderboard with dropdown (total, preview or one game) — podium + table; names via Discord if off-server.",
+      "quizlevels": "Quiz tiers (monthly score) and XP ranks: **one menu** to choose what to show.",
+      "myrank": "Your rank, XP and title.",
+      "stats": "AniList stats for a specified user.",
+      "track": "Watchlist management (add/remove/list/clear).",
+      "add": "Add an anime to your watchlist.",
+      "remove": "Remove an anime from your watchlist.",
+      "list": "List tracked anime.",
+      "clear": "Clear your watchlist.",
+      "setchannel": "Channel for episode release cards (/airings list). Independent from raid channel (`/raidconfig`).",
+      "setlevelupchannel": "Channel for announcements: new global title (XP) and new quiz title (else: channel where play happened).",
+      "clearlevelupchannel": "Remove dedicated level-up channel (default behaviour).",
+      "guide_admin": "(DM, admins) Server setup: airings, setchannel, XP levels, raid.",
+      "botinfo": "Bot info (versions, creator, etc.).",
+      "vote": "⭐ Support the bot on Top.gg: link, bonus XP, cooldown; DM reminder (buttons).",
+      "ping": "Bot latency.",
+      "recap": "DM recap “Releases today” (linked AniList). Buttons + HH:MM input; precision with `/setalert`.",
+      "setalert": "HH:MM time for DM recap (bot timezone). Complements `/recap` for a precise time (e.g. 08:30).",
+      "source": "Link to the bot’s GitHub repo.",
+      "uptime": "How long the bot has been running.",
+      "airings": "Server list: pick anime tracked for /next and /planning (admin).",
+      "all": "Browse AniList releases and fill the server list (admin).",
+      "airings_list": "View the server list (admin).",
+      "airings_search": "Search an anime on AniList (admin).",
+      "airings_add": "Add to the server list (admin).",
+      "airings_remove": "Remove from the server list (admin).",
+      "airings_clear": "Clear the server list (admin).",
+      "help": "Bot help (slash). `/help [command]` for details.",
+      "guide": "(DM) Player tutorial: XP, minigames, AniList — not server setup (see `/guide_admin`).",
+      "owner": "Owner panel: debug, sync, stats, tests, Guess OP, raid test — dropdown."
+    },
+    "section": {
+      "episodes": "📺 Episodes",
+      "minigames": "🎯 Minigames",
+      "link": "🔗 Link",
+      "stats": "📊 Statistics",
+      "tracker": "🧭 Tracker",
+      "utils": "🧰 Utilities"
+    },
+    "section_admin": {
+      "admin_config": "🛠️ Configuration & admin guide",
+      "airings_list": "📺 Server list (/airings)",
+      "raid_config": "⚔️ Raid (configuration)"
+    },
+    "ui": {
+      "footer_page": "Page {cur}/{total} — /{cmd} <command> for details.",
+      "placeholder_jump": "Go to…",
+      "btn_close": "Close",
+      "btn_all_dm": "View all (DM)",
+      "dm_sent_ok": "📬 Full help sent to your DMs.",
+      "dm_forbidden": "❌ Could not send a DM (check your privacy settings).",
+      "dm_error": "❌ DM not sent (unknown error).",
+      "unknown_command": "Unknown command.",
+      "slash_not_found": "❌ Slash command not found. Check spelling or use `/help` for the list.",
+      "embed_params": "Parameters",
+      "embed_example": "Example",
+      "page_detail_hint": "Use `/{help_cmd} <command>` for a detailed card.",
+      "not_slash_suffix": " *(not available as slash)*",
+      "no_slash": "No slash commands detected.",
+      "brief_help_title": "Help",
+      "essential_title": "📖 Help — Essentials",
+      "essential_desc": "Main commands — **slash** `/…` only.\n• `/help <command>`: details · **View all** button: full list in DMs (from a server).\n• **Administrators**: `/help_admin` (server config, /airings list, raid).",
+      "essential_footer": "/help <command> · slash commands",
+      "mp_hint_title": "ℹ️ DMs",
+      "mp_hint_help": "For the **View all** button, use `/help` in a server.",
+      "mp_hint_admin": "For the **View all** button, use `/help_admin` in a server.",
+      "admin_title": "🛠️ Help — Administrators",
+      "admin_desc": "Commands for **server administrators** only — **slash** `/…` only.\n• `/help_admin <command>`: details · **View all** button: full list in DMs.",
+      "admin_footer": "/help_admin <command> · slash commands",
+      "owner_title": "🔐 Help — Owner/Admin",
+      "owner_empty": "No restricted commands detected.",
+      "owner_desc": "Commands reserved for the bot owner or administrators (slash).",
+      "cmd_help_title": "🛈 Help — {cmd}",
+      "subcommands_label": "Subcommands:",
+      "label_owner_page": "Owner"
+    }
+  }
+}

@@ -5,6 +5,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
+from modules import i18n
+
 SUPPORT_DISCORD = "@zirnoix"
 SUPPORT_ID = "180389173985804288"
 
@@ -100,12 +102,19 @@ class Onboarding(commands.Cog):
     )
     async def guide(self, interaction: discord.Interaction):
         try:
+            lg = i18n.guild_lang(interaction.guild)
             # Si lancé depuis un serveur, prévenir en ephemeral puis envoyer en MP
             if interaction.guild:
                 if not interaction.response.is_done():
-                    await interaction.response.send_message("📬 Je t’envoie le guide en **MP**.", ephemeral=True)
+                    await interaction.response.send_message(
+                        i18n.t("guide.send_dm", lg),
+                        ephemeral=True,
+                    )
                 else:
-                    await interaction.followup.send("📬 Je t’envoie le guide en **MP**.", ephemeral=True)
+                    await interaction.followup.send(
+                        i18n.t("guide.send_dm", lg),
+                        ephemeral=True,
+                    )
             else:
                 # En MP, les réponses « éphémères » ne sont pas supportées comme en salon.
                 await interaction.response.defer(ephemeral=False)
@@ -184,24 +193,30 @@ class Onboarding(commands.Cog):
             await user.send(embeds=[e_xp, e_mini, e_anilist, e_reminders, e_misc, e_support])
 
             if not interaction.guild:
-                await interaction.followup.send("✅ Guide envoyé ci-dessus.", ephemeral=False)
+                await interaction.followup.send(
+                    i18n.t("guide.sent_ok", lg),
+                    ephemeral=False,
+                )
 
         except discord.Forbidden:
+            lg = i18n.guild_lang(interaction.guild)
             if interaction.response.is_done():
                 await interaction.followup.send(
-                    "❌ Impossible d’envoyer un MP (paramètres privés).",
+                    i18n.t("guide.err_dm_blocked", lg),
                     ephemeral=bool(interaction.guild),
                 )
             else:
                 await interaction.response.send_message(
-                    "❌ Impossible d’envoyer un MP (paramètres privés).",
+                    i18n.t("guide.err_dm_blocked", lg),
                     ephemeral=bool(interaction.guild),
                 )
         except Exception as e:
+            lg = i18n.guild_lang(interaction.guild)
+            err = i18n.t("guide.err_generic", lg, err=type(e).__name__)
             if interaction.response.is_done():
-                await interaction.followup.send(f"❌ Erreur: {type(e).__name__}", ephemeral=bool(interaction.guild))
+                await interaction.followup.send(err, ephemeral=bool(interaction.guild))
             else:
-                await interaction.response.send_message(f"❌ Erreur: {type(e).__name__}", ephemeral=bool(interaction.guild))
+                await interaction.response.send_message(err, ephemeral=bool(interaction.guild))
 
     @app_commands.command(
         name="guide_admin",
@@ -209,15 +224,16 @@ class Onboarding(commands.Cog):
     )
     @app_commands.default_permissions(administrator=True)
     async def guide_admin(self, interaction: discord.Interaction) -> None:
+        lg = i18n.guild_lang(interaction.guild)
         if not interaction.guild:
             await interaction.response.send_message(
-                "❌ Utilise cette commande dans un serveur.",
+                i18n.t("guide_admin.need_guild", lg),
                 ephemeral=True,
             )
             return
         try:
             await interaction.response.send_message(
-                "📬 Guide **admin** envoyé en **MP**.",
+                i18n.t("guide_admin.send_dm", lg),
                 ephemeral=True,
             )
             user = interaction.user
@@ -252,21 +268,24 @@ class Onboarding(commands.Cog):
             )
             await user.send(embeds=[e_srv, e_note, e_sup])
         except discord.Forbidden:
+            lg = i18n.guild_lang(interaction.guild)
             if interaction.response.is_done():
                 await interaction.followup.send(
-                    "❌ MP fermés — ouvre tes messages privés pour recevoir le guide admin.",
+                    i18n.t("guide_admin.err_dm_blocked", lg),
                     ephemeral=True,
                 )
             else:
                 await interaction.response.send_message(
-                    "❌ MP fermés — ouvre tes messages privés.",
+                    i18n.t("guide_admin.err_dm_blocked_short", lg),
                     ephemeral=True,
                 )
         except Exception as e:
+            lg = i18n.guild_lang(interaction.guild)
+            err = i18n.t("guide.err_generic", lg, err=type(e).__name__)
             if interaction.response.is_done():
-                await interaction.followup.send(f"❌ Erreur: {type(e).__name__}", ephemeral=True)
+                await interaction.followup.send(err, ephemeral=True)
             else:
-                await interaction.response.send_message(f"❌ Erreur: {type(e).__name__}", ephemeral=True)
+                await interaction.response.send_message(err, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

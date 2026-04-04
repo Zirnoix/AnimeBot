@@ -29,6 +29,7 @@ from PIL import Image, ImageFilter
 from modules import abuse
 from modules import anilist_gate
 from modules import core
+from modules import i18n
 from modules import higherlower_combine
 from modules import minigame_lock
 from modules.text_bars import pct_bar_blocks
@@ -48,15 +49,28 @@ def _raid_guesswho_name_match(guess: str, correct_name: str, qz: Any) -> bool:
     tc = tuple(sorted(normalize(correct_name).split()))
     return bool(tg) and tg == tc
 
-SLASH_ONLY_MSG = "Cette commande est réservée au **slash** : utilise `/{}` dans la barre de commandes."
-
-
 async def _require_slash(ctx: commands.Context, name: str) -> bool:
     """True si on peut continuer (invocation slash)."""
     if ctx.interaction is None:
-        await ctx.send(SLASH_ONLY_MSG.format(name))
+        lg = i18n.ctx_lang(ctx)
+        await ctx.send(i18n.t("common.slash_only", lg, name=name))
         return False
     return True
+
+
+def _raid_mode_tier_key(mode: str, lang: str) -> str:
+    mt = i18n.value("raid.mode_tier", lang) or i18n.value("raid.mode_tier", "fr") or {}
+    if isinstance(mt, dict) and mode in mt:
+        return str(mt[mode])
+    return "easy"
+
+
+def _raid_tier_label(mode: str, lang: str) -> str:
+    return i18n.t(f"raid.tier.{_raid_mode_tier_key(mode, lang)}", lang)
+
+
+def _raid_mode_label(mode: str, lang: str) -> str:
+    return i18n.t(f"raid.mode.{mode}", lang)
 
 
 RAID_DATA_PATH = os.path.join("data", "boss_raid.json")
@@ -115,26 +129,6 @@ RAID_XP_FINISHER_BY_MODE: dict[str, int] = {
     "animequiz": 38,
     "guesswho": 40,
 }
-RAID_MODE_LABEL_FR: dict[str, str] = {
-    "guesscharacter": "Personnage (4 choix)",
-    "guessyear": "Année de diffusion",
-    "guessepisodes": "Nombre d’épisodes",
-    "guessgenre": "Genre",
-    "higherlower": "Plus populaire (2 animés)",
-    "animequiz": "Anime — affiche",
-    "guesswho": "Qui est-ce ? (flou + nom)",
-}
-# Ajustement gameplay : facile = plus de pistes / logique simple ; difficile = guesswho / affiche
-RAID_MODE_DIFFICULTY_FR: dict[str, str] = {
-    "guesscharacter": "Facile",
-    "guessyear": "Moyen",
-    "guessepisodes": "Moyen",
-    "guessgenre": "Facile",
-    "higherlower": "Moyen",
-    "animequiz": "Difficile",
-    "guesswho": "Difficile",
-}
-
 # Ordre du menu d’inscription : facile → moyen → difficile (pas l’ordre arbitraire du dict).
 RAID_MODE_SELECT_ORDER: tuple[str, ...] = (
     "guesscharacter",
@@ -310,7 +304,8 @@ def _raid_status_embed(guild: discord.Guild) -> discord.Embed:
     # Même logique que `raid_scheduler` (pas seulement _next_raid_moment).
     nxt = _resolve_scheduled_raid_for_loop(now, wd, h, mi)
     tzname = getattr(core.TIMEZONE, "zone", None) or str(core.TIMEZONE)
-    jname = core.JOURS_SEMAINE_FR[wd % 7]
+    _lg = i18n.guild_lang(guild)
+    jname = i18n.weekday_name(_lg, wd % 7)
     auto = _raid_cfg_enabled(cfg)
     cur_w = _week_key(now)
     rs_w = str(cfg.get("raidstart_week_key") or "")
@@ -552,9 +547,10 @@ class _RaidWeekdaySelect(Select):
     def __init__(self, panel: RaidConfigPanelView) -> None:
         cfg = _load_raid_cfg().get(str(panel.guild.id), {})
         cur_wd = int(cfg.get("weekday", 5)) % 7
+        _lg = i18n.guild_lang(panel.guild)
         opts = [
             discord.SelectOption(
-                label=core.JOURS_SEMAINE_FR[i],
+                label=i18n.weekday_name(_lg, i),
                 value=str(i),
                 default=(i == cur_wd),
             )
@@ -761,19 +757,20 @@ class RaidModeSelect(Select):
 
     def __init__(self, host: "RaidModeSelectView") -> None:
         self.host = host
+        lang = host.lang
         opts = []
         for k in RAID_MODE_SELECT_ORDER:
             if k not in RAID_DAMAGE_BY_MODE:
                 continue
-            tier = RAID_MODE_DIFFICULTY_FR.get(k, "")
-            lbl = RAID_MODE_LABEL_FR.get(k, k)
+            tier = _raid_tier_label(k, lang)
+            lbl = _raid_mode_label(k, lang)
             label = f"{tier} · {lbl}"[:100]
             lo, hi = RAID_DAMAGE_BY_MODE[k]
             fin = RAID_XP_FINISHER_BY_MODE.get(k, 0)
-            desc = f"~{lo}–{hi} dmg · coup final +{fin} XP"[:100]
+            desc = i18n.t("raid.mode_desc", lang, lo=lo, hi=hi, fin=fin)[:100]
             opts.append(discord.SelectOption(label=label, value=k, description=desc))
         super().__init__(
-            placeholder="🎯 Type de mini-jeu pour ce raid…",
+            placeholder=i18n.t("raid.select_placeholder", lang)[:150],
             min_values=1,
             max_values=1,
             options=opts,
@@ -791,8 +788,8 @@ class RaidModeSelect(Select):
             return
         mode = (self.values[0] if self.values else RAID_MODE_DEFAULT) or RAID_MODE_DEFAULT
         self.host.join_view.mode_by_user[self.host.picker_id] = mode
-        label = RAID_MODE_LABEL_FR.get(mode, mode)
-        tier = RAID_MODE_DIFFICULTY_FR.get(mode, "")
+        label = _raid_mode_label(mode, self.host.lang)
+        tier = _raid_tier_label(mode, self.host.lang)
         lo, hi = RAID_DAMAGE_BY_MODE.get(mode, (400, 720))
         fin = RAID_XP_FINISHER_BY_MODE.get(mode, 12)
         await interaction.response.edit_message(
@@ -808,10 +805,11 @@ class RaidModeSelect(Select):
 
 
 class RaidModeSelectView(View):
-    def __init__(self, join_view: "RaidJoinView", picker_id: int) -> None:
+    def __init__(self, join_view: "RaidJoinView", picker_id: int, lang: str) -> None:
         super().__init__(timeout=RAID_JOIN_SECONDS)
         self.join_view = join_view
         self.picker_id = picker_id
+        self.lang = lang
         self.add_item(RaidModeSelect(self))
 
 
@@ -864,14 +862,16 @@ class RaidJoinView(View):
                 "**Difficile** = **affiche** (tu tapes le titre dans le salon, comme **`/animequiz`**) et **qui est-ce** flou.\n"
                 "• Modes plus durs → **dégâts** et **bonus coup final** plus élevés.\n"
                 "• _Sans choix avant la fin du timer d’inscription → mode **"
-                + RAID_MODE_LABEL_FR.get(RAID_MODE_DEFAULT, "Personnage")
+                + _raid_mode_label(RAID_MODE_DEFAULT, i18n.guild_lang(interaction.guild))
                 + "**._"
             ),
             color=discord.Color.dark_red(),
         )
+        g = self.cog.bot.get_guild(self.guild_id)
+        _lang = i18n.guild_lang(g) if g else "fr"
         await interaction.followup.send(
             embed=em,
-            view=RaidModeSelectView(self, uid),
+            view=RaidModeSelectView(self, uid, _lang),
             ephemeral=True,
         )
 
@@ -1096,7 +1096,7 @@ class PersonalRaidChallengeView(View):
             async with self.state.lock:
                 self.state.wrong_by_user[self.user_id] = self.state.wrong_by_user.get(self.user_id, 0) + 1
                 disp = getattr(interaction.user, "display_name", None) or str(interaction.user)
-                ml = RAID_MODE_LABEL_FR.get(self.raid_mode, self.raid_mode)
+                ml = _raid_mode_label(self.raid_mode, i18n.guild_lang(interaction.guild))
                 self.state.log_lines = self.state.log_lines[-14:] + [
                     f"📛 **{disp}** — erreur ({ml}) #{self.wrong_clicks}"
                 ]
@@ -1156,7 +1156,9 @@ class PersonalRaidChallengeView(View):
         async with self.state.lock:
             self.state.open_challenge_users.discard(self.user_id)
             self.state.round_finished_users.add(self.user_id)
-            ml = RAID_MODE_LABEL_FR.get(self.raid_mode, self.raid_mode)
+            g = self.cog.bot.get_guild(self.state.guild_id)
+            _lg = i18n.guild_lang(g) if g else "fr"
+            ml = _raid_mode_label(self.raid_mode, _lg)
             self.state.log_lines = self.state.log_lines[-14:] + [f"⏰ **{nm}** — temps écoulé ({ml})"]
         if isinstance(ch, discord.TextChannel):
             await self.cog._raid_refresh_hub(self.state)
@@ -1817,7 +1819,10 @@ class CommunityGames(commands.Cog):
                     )
             except Exception:
                 pass
-            mode_lbl = RAID_MODE_LABEL_FR.get(state.final_blow[1], state.final_blow[1])
+            mode_lbl = _raid_mode_label(
+                state.final_blow[1],
+                i18n.guild_lang(ch.guild) if ch and ch.guild else "fr",
+            )
             fin_xp = RAID_XP_FINISHER_BY_MODE.get(state.final_blow[1], 0)
             await self._raid_conclude_victory(
                 ch,

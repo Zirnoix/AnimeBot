@@ -10,14 +10,15 @@ from discord.ext import commands
 from discord.ext import tasks
 from discord.ui import Button, View
 
-from modules import topgg_vote
+from modules import i18n, topgg_vote
 
 LOG = logging.getLogger(__name__)
+_VOTE_CMD_DESC = i18n.t("vote.cmd_desc", "fr")
 
 
-def _fmt_remaining(seconds: int) -> str:
+def _fmt_remaining(seconds: int, lg: str) -> str:
     if seconds <= 0:
-        return "maintenant"
+        return i18n.t("vote.fmt_now", lg)
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
     parts = []
@@ -27,47 +28,63 @@ def _fmt_remaining(seconds: int) -> str:
         parts.append(f"{m}min")
     if not parts and s:
         parts.append(f"{s}s")
-    return " ".join(parts) if parts else "bientôt"
+    return " ".join(parts) if parts else i18n.t("vote.fmt_soon", lg)
 
 
-VOTE_EMBED_COLOR = 0xFEE75C  # jaune « appel à l’action », bien visible dans le fil
+VOTE_EMBED_COLOR = 0xFEE75C
 
 
 class VoteReminderView(View):
     """Bouton lien Top.gg + rappels MP."""
 
-    def __init__(self, user_id: int, vote_url: str) -> None:
+    def __init__(self, user_id: int, vote_url: str, lang: str) -> None:
         super().__init__(timeout=180)
         self.user_id = user_id
+        self.lang = lang
         self.add_item(
             discord.ui.Button(
-                label="🗳️ Voter sur Top.gg",
+                label=i18n.t("vote.btn_vote", lang)[:80],
                 style=discord.ButtonStyle.link,
                 url=vote_url,
                 row=0,
             )
         )
+        b_on = Button(
+            label=i18n.t("vote.btn_rem_on", lang)[:80],
+            style=discord.ButtonStyle.success,
+            row=1,
+        )
+        b_on.callback = self._enable_reminder  # type: ignore[method-assign]
+        self.add_item(b_on)
+        b_off = Button(
+            label=i18n.t("vote.btn_rem_off", lang)[:80],
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        b_off.callback = self._disable_reminder  # type: ignore[method-assign]
+        self.add_item(b_off)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(
+                i18n.t("vote.not_for_you", self.lang),
+                ephemeral=True,
+            )
             return False
         return True
 
-    @discord.ui.button(label="🔔 Activer rappel MP", style=discord.ButtonStyle.success, row=1)
-    async def enable_reminder(self, interaction: discord.Interaction, button: Button) -> None:
+    async def _enable_reminder(self, interaction: discord.Interaction) -> None:
         topgg_vote.set_reminder(interaction.user.id, True)
         await interaction.response.edit_message(
-            content="✅ Rappel MP **activé** — tu recevras un message quand le cooldown Top.gg sera passé.",
+            content=i18n.t("vote.rem_on", self.lang),
             embed=None,
             view=None,
         )
 
-    @discord.ui.button(label="🔕 Désactiver le rappel", style=discord.ButtonStyle.secondary, row=1)
-    async def disable_reminder(self, interaction: discord.Interaction, button: Button) -> None:
+    async def _disable_reminder(self, interaction: discord.Interaction) -> None:
         topgg_vote.set_reminder(interaction.user.id, False)
         await interaction.response.edit_message(
-            content="✅ Rappel MP **désactivé**.",
+            content=i18n.t("vote.rem_off", self.lang),
             embed=None,
             view=None,
         )
@@ -98,9 +115,7 @@ class Vote(commands.Cog):
             try:
                 u = await self.bot.fetch_user(uid)
                 await u.send(
-                    "🗳️ Tu peux **revoter** pour **AnimeBot** sur Top.gg — "
-                    f"ça aide le bot à être visible !\n{url}\n\n"
-                    "_(Rappel désactivable avec `/vote` → bouton.)_"
+                    i18n.t("vote.dm_reminder", "fr", url=url),
                 )
                 topgg_vote.mark_reminder_sent(uid, eligible_ts)
             except discord.Forbidden:
@@ -115,11 +130,9 @@ class Vote(commands.Cog):
 
     @app_commands.command(
         name="vote",
-        description="⭐ Soutenir le bot sur Top.gg (XP bonus) — lien, cooldown, rappel MP.",
+        description=_VOTE_CMD_DESC,
     )
     async def vote_cmd(self, interaction: discord.Interaction) -> None:
-        # Éphémère = pertinent en serveur uniquement ; en MP le salon est déjà privé.
-        # 10062 = interaction expirée si > ~3s avant defer (latence hébergeur, etc.).
         ephemeral = interaction.guild is not None
         try:
             await interaction.response.defer(ephemeral=ephemeral)
@@ -132,6 +145,7 @@ class Vote(commands.Cog):
                 return
             raise
 
+        lg = i18n.guild_lang(interaction.guild)
         uid = interaction.user.id
         url = topgg_vote.vote_page_url(self.bot.user.id)
         cd = topgg_vote.cooldown_seconds()
@@ -147,43 +161,47 @@ class Vote(commands.Cog):
         total_v = stats["vote_count"]
 
         if lv <= 0:
-            status = "Tu n’as pas encore de vote enregistré par le bot (après ton **premier** vote sur Top.gg, le cooldown s’affichera ici)."
-            eta_txt = f"Cooldown Top.gg : **{_fmt_remaining(cd)}** après chaque vote."
+            status = i18n.t("vote.status_none", lg)
+            eta_txt = i18n.t("vote.eta_cooldown", lg, remaining=_fmt_remaining(cd, lg))
         else:
             if now >= next_ts:
-                status = "✅ Tu **peux voter** (cooldown écoulé)."
+                status = i18n.t("vote.status_ready", lg)
             else:
                 wait = next_ts - now
-                status = f"⏳ Prochain vote possible dans **{_fmt_remaining(wait)}**."
-            eta_txt = f"Dernier vote enregistré : <t:{lv}:R>."
+                status = i18n.t(
+                    "vote.status_wait",
+                    lg,
+                    remaining=_fmt_remaining(wait, lg),
+                )
+            eta_txt = i18n.t("vote.last_vote", lg, ts=lv)
 
         secret_ok = bool(topgg_vote.webhook_secret())
         hook_hint = ""
         if not secret_ok:
-            hook_hint = (
-                "\n\n⚠️ Les récompenses automatiques nécessitent `TOPGG_WEBHOOK_SECRET` + URL webhook sur Top.gg "
-                "(voir doc projet / `.env.example`)."
-            )
+            hook_hint = i18n.t("vote.hook_warn", lg)
 
-        reward_hint = (
-            f"🎁 **XP :** **{xp_amt}** de base + bonus **série** + **fidélité** "
-            f"· multiplicateur week-end possible."
-        )
-        stats_line = (
-            f"📊 **Tes votes :** **{total_v}** enregistré(s) · série **{streak}** j · record **{best}** "
-            f"_(mis à jour après chaque vote reçu par le bot)._"
+        reward_hint = i18n.t("vote.reward_line", lg, xp=xp_amt)
+        stats_line = i18n.t(
+            "vote.stats_line",
+            lg,
+            total=total_v,
+            streak=streak,
+            best=best,
         )
 
-        intro = (
-            "**Gratuit**, sans inscription spéciale : le bouton **ci-dessous** ouvre Top.gg. "
-            "Ça aide le bot à être **mieux classé** et découvert."
+        intro = i18n.t("vote.intro", lg)
+        rem_state = i18n.t(
+            "vote.rem_state",
+            lg,
+            state=i18n.t("vote.rem_on_state", lg)
+            if rem
+            else i18n.t("vote.rem_off_state", lg),
         )
-        rem_line = f"🔔 Rappel MP quand tu peux revoter : **{'activé' if rem else 'désactivé'}** (boutons)."
-        desc_parts = [intro, "", reward_hint, "", stats_line, "", f"**Statut**\n{status}\n{eta_txt}", "", rem_line]
+        desc_parts = [intro, "", reward_hint, "", stats_line, "", f"**Statut**\n{status}\n{eta_txt}", "", rem_state]
         if hook_hint:
             desc_parts.extend(["", hook_hint.strip()])
         em = discord.Embed(
-            title="⭐ Soutiens AnimeBot (Top.gg)",
+            title=i18n.t("vote.embed_title", lg),
             description="\n".join(desc_parts).strip(),
             color=discord.Color(VOTE_EMBED_COLOR),
             url=url,
@@ -194,7 +212,7 @@ class Vote(commands.Cog):
                 em.set_thumbnail(url=u.display_avatar.url)
         except Exception:
             pass
-        em.set_footer(text="Pense à /vote de temps en temps — merci 💙 · Cooldown & fuseau configurables")
+        em.set_footer(text=i18n.t("vote.embed_footer", lg))
 
         recap = topgg_vote.pop_pending_vote_recap(uid)
         if recap:
@@ -209,21 +227,33 @@ class Vote(commands.Cog):
                 tv_r = int(recap.get("total_votes", 0))
                 wk_txt = ""
                 if recap.get("weekend"):
-                    wk_txt = "\n_Bonus week-end appliqué sur le total._"
-                recap_val = (
-                    f"**+{xp_r} XP** ajoutés sur ta carte.\n"
-                    f"{base_r} base + {sb_r} série + {lb_r} fidélité = **{sub_r}** XP avant multi.{wk_txt}\n"
-                    f"Série **{st_r}** j · record **{bst_r}** · **{tv_r}** votes au total."
+                    wk_txt = i18n.t("vote.recap_weekend", lg)
+                recap_val = i18n.t(
+                    "vote.recap_body",
+                    lg,
+                    xp=xp_r,
+                    base=base_r,
+                    sb=sb_r,
+                    lb=lb_r,
+                    sub=sub_r,
+                    wk=wk_txt,
+                    st=st_r,
+                    bst=bst_r,
+                    tv=tv_r,
                 )
                 em.add_field(
-                    name="🎉 Récap de ton dernier vote (toi seul·e le vois ici)",
+                    name=i18n.t("vote.recap_title", lg),
                     value=recap_val,
                     inline=False,
                 )
             except Exception as e:
                 LOG.warning("vote recap embed: %s", e)
 
-        await interaction.followup.send(embed=em, view=VoteReminderView(uid, url), ephemeral=ephemeral)
+        await interaction.followup.send(
+            embed=em,
+            view=VoteReminderView(uid, url, lg),
+            ephemeral=ephemeral,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

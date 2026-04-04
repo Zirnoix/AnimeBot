@@ -30,7 +30,7 @@ from discord.ext import commands
 from discord import app_commands
 
 from modules import anilist_gate
-from modules import core
+from modules import core, i18n
 from modules import user_reply
 from modules import minigame_lock
 from modules.core import normalize
@@ -1113,7 +1113,8 @@ class Quiz(commands.Cog):
                 color=discord.Color.purple()
             )
             progress = core.get_xp_bar(xp, next_xp)
-            title = core.get_title_for_global_level(level)
+            lg = i18n.ctx_lang(ctx)
+            title = core.get_title_for_global_level(level, lg)
 
             embed.add_field(
                 name="📊 Progression",
@@ -1126,7 +1127,7 @@ class Quiz(commands.Cog):
             )
 
             if quiz_score > 0:
-                quiz_title = core.get_title_for_quiz_score(quiz_score)
+                quiz_title = core.get_title_for_quiz_score(quiz_score, lg)
                 sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
                 position = next((i for i, (uid, _) in enumerate(sorted_scores, 1) if uid == str(ctx.author.id)), None)
                 if position is not None:

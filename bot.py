@@ -74,8 +74,15 @@ async def _global_tree_interaction_check(self, interaction: discord.Interaction)
         return True
     try:
         if not interaction.response.is_done():
+            from modules import i18n as _i18n
+
+            _lg = _i18n.guild_lang(interaction.guild)
             await interaction.response.send_message(
-                f"⏳ Trop de commandes en peu de temps — réessaie dans **{max(1, int(retry_after) + 1)}s**.",
+                _i18n.t(
+                    "common.abuse_rate_limit",
+                    _lg,
+                    seconds=max(1, int(retry_after) + 1),
+                ),
                 ephemeral=True,
             )
     except Exception:

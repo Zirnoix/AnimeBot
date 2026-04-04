@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from modules import core
+from modules import core, i18n
 from modules import bug_report as bug_report_store
 from modules.image import generate_mycard_image
 from modules.badges import BADGES, BADGE_SECTION_TITLE_FR, evaluate_tier, iter_badges_sorted, tier_name_fr
@@ -1035,7 +1035,7 @@ class Profile(commands.Cog):
         xp = int(user_data.get("xp", 0))
         level = int(user_data.get("level", 0))
         next_xp = core.xp_for_next_level(level)
-        title = core.get_title_for_global_level(level)
+        title = core.get_title_for_global_level(level, i18n.guild_lang(ctx.guild))
 
         scores = core.load_scores()
         quiz_score = int(scores.get(user_id_str, 0))

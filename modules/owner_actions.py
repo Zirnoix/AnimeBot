@@ -355,10 +355,13 @@ async def run_help_dm(bot: commands.Bot, interaction: discord.Interaction) -> No
         await interaction.followup.send("❌ Module d’aide indisponible.", ephemeral=True)
         return
     try:
-        pages, labels = cog._build_owner_pages()  # type: ignore[attr-defined]
+        from modules import i18n  # noqa: PLC0415
+
+        lang = i18n.interaction_lang(interaction)
+        pages, labels = cog._build_owner_pages(lang)  # type: ignore[attr-defined]
         from cogs.help import HelpNavigator  # noqa: PLC0415
 
-        nav = HelpNavigator(pages, labels)
+        nav = HelpNavigator(pages, labels, help_cmd="help", lang=lang)
         first = nav._with_footer(pages[0])
         await interaction.user.send(embed=first, view=nav)
         await interaction.followup.send("📬 Aide owner/admin envoyée en **message privé**.", ephemeral=True)

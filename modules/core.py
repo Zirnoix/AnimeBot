@@ -283,7 +283,14 @@ async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True)
         data = levels.get(key, {"xp": 0, "level": 0})
 
         old_level = int(data.get("level", 0))
-        old_title = get_title_for_global_level(old_level)
+        _lg = "fr"
+        if channel is not None:
+            g0 = getattr(channel, "guild", None)
+            if g0 is not None:
+                from modules import i18n as _i18n
+
+                _lg = _i18n.guild_lang(g0)
+        old_title = get_title_for_global_level(old_level, _lg)
 
         data["xp"] = int(data.get("xp", 0)) + int(amount)
 
@@ -300,7 +307,7 @@ async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True)
         save_levels(levels)
 
         new_level = int(data["level"])
-        new_title = get_title_for_global_level(new_level)
+        new_title = get_title_for_global_level(new_level, _lg)
 
     # 🔔 annonce : salon dédié serveur si configuré, sinon salon où l’XP a été gagnée
     announce_ch = channel
@@ -314,8 +321,17 @@ async def add_xp(bot, channel, user_id: int, amount: int, announce: bool = True)
                     announce_ch = alt
     if announce and announce_ch is not None and new_title != old_title:
         try:
+            from modules import i18n as _i18n
+
+            _lg2 = _i18n.guild_lang(getattr(announce_ch, "guild", None))
             await announce_ch.send(
-                f"🎉 **<@{user_id}>** débloque un **nouveau titre** : **{new_title}** _(niveau **{new_level}**)_ !"
+                _i18n.t(
+                    "xp.announce_new_title",
+                    _lg2,
+                    user_id=user_id,
+                    title=new_title,
+                    level=new_level,
+                )
             )
         except Exception:
             pass
@@ -352,8 +368,15 @@ async def announce_quiz_title_if_changed(
     new_score = int(new_score)
     if new_score <= old_score:
         return
-    old_t = get_title_for_quiz_score(old_score)
-    new_t = get_title_for_quiz_score(new_score)
+    _lg = "fr"
+    if channel is not None:
+        g0 = getattr(channel, "guild", None)
+        if g0 is not None:
+            from modules import i18n as _i18n
+
+            _lg = _i18n.guild_lang(g0)
+    old_t = get_title_for_quiz_score(old_score, _lg)
+    new_t = get_title_for_quiz_score(new_score, _lg)
     if old_t == new_t:
         return
     announce_ch = channel
@@ -368,26 +391,46 @@ async def announce_quiz_title_if_changed(
     if announce_ch is None:
         return
     try:
+        from modules import i18n as _i18n
+
+        _lg2 = _i18n.guild_lang(getattr(announce_ch, "guild", None))
         await announce_ch.send(
-            f"📚 **<@{user_id}>** débloque un **nouveau titre quiz** : **{new_t}** _(score **{new_score}** pts)_ !"
+            _i18n.t(
+                "xp.announce_quiz_title",
+                _lg2,
+                user_id=user_id,
+                title=new_t,
+                score=new_score,
+            )
         )
     except Exception:
         pass
 
 
-def get_title_for_global_level(level: int) -> str:
+def get_title_for_global_level(level: int, lang: str | None = None) -> str:
+    from modules import i18n
+
+    lg = lang if lang in ("fr", "en") else "fr"
+    if i18n.value("xp.titles_global", lg) is not None:
+        return i18n.title_for_global_level(int(level), lg)
     current_title = LEVEL_TITLES_GLOBAL[0][1]
     for req_level, title in LEVEL_TITLES_GLOBAL:
-        if level >= req_level:
+        if int(level) >= int(req_level):
             current_title = title
         else:
             break
     return current_title
 
-def get_title_for_quiz_score(score: int) -> str:
+
+def get_title_for_quiz_score(score: int, lang: str | None = None) -> str:
+    from modules import i18n
+
+    lg = lang if lang in ("fr", "en") else "fr"
+    if i18n.value("xp.titles_quiz", lg) is not None:
+        return i18n.title_for_quiz_score(int(score), lg)
     current_title = LEVEL_TITLES_QUIZ[0][1]
     for req_score, title in LEVEL_TITLES_QUIZ:
-        if score >= req_score:
+        if int(score) >= int(req_score):
             current_title = title
         else:
             break
@@ -2749,8 +2792,8 @@ def get_stats_cache(user_id: int) -> dict | None:
         "updated_at": row[6],
     }
 
-def get_user_stats(user_id: int):
-    return get_game_stats(user_id)
+def get_user_stats(user_id: int, lang: str = "fr"):
+    return get_game_stats(user_id, lang)
 
 def load_preferences() -> dict:
     return load_json(FileConfig.PREFERENCES, {})
@@ -3394,13 +3437,14 @@ def should_notify(ep: dict) -> bool:
     return abs(ep["airingAt"] - now) <= delay
 
 # ================= GAME STATS (PROFILE) =================
-def get_game_stats(user_id: int) -> dict:
+def get_game_stats(user_id: int, lang: str = "fr") -> dict:
     levels = load_levels()
     scores = load_scores()
     mini_scores = get_mini_scores(user_id)
 
     user_data = levels.get(str(user_id), {"xp": 0, "level": 0})
     quiz_score = scores.get(str(user_id), 0)
+    lg = lang if lang in ("fr", "en") else "fr"
 
     return {
         "xp": user_data["xp"],
@@ -3408,8 +3452,8 @@ def get_game_stats(user_id: int) -> dict:
         "next_xp": (user_data["level"] + 1) * 100,
         "quiz_score": quiz_score,
         "mini_scores": mini_scores,
-        "title": get_title_for_global_level(user_data["level"]),
-        "quiz_title": get_title_for_quiz_score(quiz_score),
+        "title": get_title_for_global_level(user_data["level"], lg),
+        "quiz_title": get_title_for_quiz_score(quiz_score, lg),
     }
 
 def format_mini_game_name(game: str) -> str:

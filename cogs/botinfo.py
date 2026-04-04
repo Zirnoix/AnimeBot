@@ -7,7 +7,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from modules import core
+from modules import core, i18n
+
 
 def _format_uptime(delta_seconds: float) -> str:
     s = int(delta_seconds)
@@ -15,26 +16,30 @@ def _format_uptime(delta_seconds: float) -> str:
     h, s = divmod(s, 3600)
     m, s = divmod(s, 60)
     parts = []
-    if d: parts.append(f"{d}j")
-    if h: parts.append(f"{h}h")
-    if m: parts.append(f"{m}m")
+    if d:
+        parts.append(f"{d}j")
+    if h:
+        parts.append(f"{h}h")
+    if m:
+        parts.append(f"{m}m")
     parts.append(f"{s}s")
     return " ".join(parts)
 
+
 class BotInfo(commands.Cog):
     """Commande /botinfo avec version, latence, serveurs, uptime, etc."""
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     @commands.Cog.listener()
     async def on_ready(self):
-        # timestamp de lancement pour l’uptime
         if not hasattr(self.bot, "_launch_time"):
             self.bot._launch_time = datetime.now(timezone.utc)
 
     @app_commands.command(name="botinfo", description="Infos sur le bot : version, serveurs, latence, uptime, etc.")
     async def botinfo(self, interaction: discord.Interaction):
-        # — Version (ordre de priorité : env > modules.core.__version__ > 'dev')
+        lg = i18n.guild_lang(interaction.guild)
         version = os.getenv("BOT_VERSION")
         if not version:
             version = getattr(core, "__version__", None)
@@ -47,43 +52,42 @@ class BotInfo(commands.Cog):
         uptime = _format_uptime((datetime.now(timezone.utc) - launch).total_seconds())
 
         embed = discord.Embed(
-            title="AnimeBot — Informations",
-            description="Merci d’utiliser AnimeBot 💙",
+            title=i18n.t("botinfo.embed_title", lg),
+            description=i18n.t("botinfo.embed_desc", lg),
             color=discord.Color.blurple(),
         )
-        embed.add_field(name="Version", value=f"`v{version}`", inline=True)
-        embed.add_field(name="Latence", value=f"`{ping_ms} ms`", inline=True)
-        embed.add_field(name="Uptime", value=f"`{uptime}`", inline=True)
+        embed.add_field(name=i18n.t("botinfo.field_version", lg), value=f"`v{version}`", inline=True)
+        embed.add_field(name=i18n.t("botinfo.field_latency", lg), value=f"`{ping_ms} ms`", inline=True)
+        embed.add_field(name=i18n.t("botinfo.field_uptime", lg), value=f"`{uptime}`", inline=True)
 
-        embed.add_field(name="Serveurs", value=f"`{guilds}`", inline=True)
-        embed.add_field(name="Membres (approx.)", value=f"`{members}`", inline=True)
-        embed.add_field(name="Python", value=f"`{platform.python_version()}`", inline=True)
+        embed.add_field(name=i18n.t("botinfo.field_guilds", lg), value=f"`{guilds}`", inline=True)
+        embed.add_field(name=i18n.t("botinfo.field_members", lg), value=f"`{members}`", inline=True)
+        embed.add_field(name=i18n.t("botinfo.field_python", lg), value=f"`{platform.python_version()}`", inline=True)
 
         anilist_ok = getattr(self.bot, "anilist_online", None)
         if anilist_ok is not None:
+            av = i18n.t("botinfo.field_anilist_ok", lg) if anilist_ok else i18n.t("botinfo.field_anilist_bad", lg)
             embed.add_field(
-                name="API AniList",
-                value="`joignable`" if anilist_ok else "`dégradée / hors ligne`",
+                name=i18n.t("botinfo.field_anilist", lg),
+                value=f"`{av}`",
                 inline=True,
             )
 
         embed.add_field(
-            name="Commandes /",
-            value="Les slash peuvent mettre **1–2 min** à apparaître après l’invitation du bot.",
+            name=i18n.t("botinfo.field_slash", lg),
+            value=i18n.t("botinfo.field_slash_val", lg),
             inline=False,
         )
 
         embed.add_field(
-            name="⭐ Soutenir AnimeBot",
-            value="**`/vote`** — vote gratuit sur **Top.gg** (visibilité + **XP** bonus sur ta carte). "
-            "Pense à y passer de temps en temps ; rappel MP optionnel dans la commande.",
+            name=i18n.t("botinfo.field_vote", lg),
+            value=i18n.t("botinfo.field_vote_val", lg),
             inline=False,
         )
 
         embed.add_field(
-            name="🐞 Signaler un bug",
-            value="**`/reportbug`** — signale un bug en **MP** ; si tu aides à corriger un vrai problème, "
-            "tu peux gagner de l’**XP** (voir aussi **`/mycard`** si tu as déjà des bugs validés).",
+            name=i18n.t("botinfo.field_bug", lg),
+            value=i18n.t("botinfo.field_bug_val", lg),
             inline=False,
         )
 
@@ -92,20 +96,20 @@ class BotInfo(commands.Cog):
             linked = core.get_linked_username(uid)
             if linked:
                 embed.add_field(
-                    name="Ton compte AniList",
-                    value=f"Lié : **`{linked}`**",
+                    name=i18n.t("botinfo.field_al_linked", lg),
+                    value=i18n.t("botinfo.field_al_val_linked", lg, name=linked),
                     inline=False,
                 )
             else:
                 embed.add_field(
-                    name="Ton compte AniList",
-                    value="Non lié — **`/linkanilist`** puis **`/verifyanilist`** pour stats, récaps MP, `/mystats` rapide…",
+                    name=i18n.t("botinfo.field_al_linked", lg),
+                    value=i18n.t("botinfo.field_al_val_unlinked", lg),
                     inline=False,
                 )
         except Exception:
             pass
 
-        embed.set_footer(text="/help · /vote · /reportbug · /airings · /linkanilist")
+        embed.set_footer(text=i18n.t("botinfo.footer", lg))
         try:
             if self.bot.user and self.bot.user.display_avatar:
                 embed.set_thumbnail(url=self.bot.user.display_avatar.url)
@@ -113,6 +117,7 @@ class BotInfo(commands.Cog):
             pass
 
         await interaction.response.send_message(embed=embed)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(BotInfo(bot))

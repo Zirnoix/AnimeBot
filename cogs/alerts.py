@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 import discord
 from discord.ext import commands, tasks
 
-from modules import core
+from modules import core, i18n
 from modules.image import generate_next_card
 
 LOG = logging.getLogger(__name__)
@@ -98,7 +98,6 @@ class Alerts(commands.Cog):
                 tempfile.gettempdir(),
                 f"alert_{media_id}_{episode_key}_{ch.id}.png",
             )
-            # generate_next_card fait du HTTP + Pillow : ne pas bloquer l’event loop.
             img_path = await asyncio.to_thread(
                 generate_next_card,
                 anime,
@@ -106,8 +105,6 @@ class Alerts(commands.Cog):
                 scale=1.2,
                 padding=40,
             )
-            # Comme /next : texte + PNG uniquement (pas d’embed). Un embed + url AniList déclenchait
-            # une preview Discord imbriquée avec vignette grise ; l’image suffit (carte déjà complète).
             fn = f"sortie_{media_id}_{episode_key}.png"
             await ch.send(
                 content=header,
@@ -117,10 +114,20 @@ class Alerts(commands.Cog):
                 core.mark_posted(media_id, episode_key, ch.id, ALERT_KIND)
         except Exception as e:
             LOG.exception("Image alert failed, fallback texte: %s", e)
+            lg = i18n.guild_lang(ch.guild)
             title = anime.get("title_romaji") or anime.get("title_english") or anime.get("title_native") or "Anime"
             ep = core.format_episode_line_part(anime.get("episode"), anime)
             when = _fmt_when(anime)
-            await ch.send(f"{header}\n**{title}** — Épisode **{ep}** • {when}")
+            await ch.send(
+                i18n.t(
+                    "alerts.fallback_line",
+                    lg,
+                    header=header,
+                    title=title,
+                    ep=ep,
+                    when=when,
+                )
+            )
             if media_id:
                 core.mark_posted(media_id, episode_key, ch.id, ALERT_KIND)
 
@@ -130,9 +137,9 @@ class Alerts(commands.Cog):
             self._migrate_legacy_channel_map()
             self._legacy_migrated = True
 
-        header = "📺 **Sortie** — l’épisode est disponible !"
-
         for guild in self.bot.guilds:
+            lg = i18n.guild_lang(guild)
+            header = i18n.t("alerts.release_header", lg)
             ch = await self._get_guild_alert_channel(guild)
             if not ch:
                 continue
@@ -143,7 +150,6 @@ class Alerts(commands.Cog):
                 continue
 
             try:
-                # get_recent_airings_for_guild → query_anilist (requests + time.sleep en retry) : hors event loop.
                 items = await asyncio.to_thread(
                     core.get_recent_airings_for_guild,
                     guild.id,

@@ -4,7 +4,8 @@ import asyncio
 import discord
 from discord.ext import commands
 
-from modules import core
+from modules import core, i18n
+
 
 def _resolve_username(member: discord.Member | None) -> str | None:
     if member is None:
@@ -13,6 +14,7 @@ def _resolve_username(member: discord.Member | None) -> str | None:
         return core.get_linked_anilist(member.id)
     except Exception:
         return None
+
 
 async def _respond(ctx: commands.Context, *, content: str | None = None, embed: discord.Embed | None = None) -> None:
     """Répond proprement en slash (avec/ sans defer) ou en préfixe."""
@@ -23,8 +25,8 @@ async def _respond(ctx: commands.Context, *, content: str | None = None, embed: 
         else:
             await itx.response.send_message(content=content, embed=embed)
         return
-    # commande préfixe
     await ctx.reply(content=content, embed=embed)
+
 
 class AniListAdmin(commands.Cog):
     """Commandes admin pour (re)sync AniList."""
@@ -44,15 +46,7 @@ class AniListAdmin(commands.Cog):
         force: bool = False,
         ttl_hours: int = 12,
     ) -> None:
-        """
-        - Sans argument: sync l'auteur (si lié)
-        - target: sync un membre lié
-        - username: sync un username AniList précis
-        - all: sync tous les comptes liés (rate-limit friendly)
-        - force: force un refresh (ignore le TTL)
-        - ttl_hours: TTL à utiliser si non-force
-        """
-        # Defer propre pour hybrid
+        lg = i18n.ctx_lang(ctx)
         itx = getattr(ctx, "interaction", None)
         if itx and not itx.response.is_done():
             await itx.response.defer(thinking=True)
@@ -62,69 +56,69 @@ class AniListAdmin(commands.Cog):
         if all:
             usernames = getattr(core, "get_linked_anilist_usernames_bulk", lambda: [])() or []
             if not usernames:
-                return await _respond(ctx, content="Aucun compte AniList lié trouvé.")
+                return await _respond(ctx, content=i18n.t("admin_anilist.sync_none", lg))
             ok = 0
             for name in usernames:
                 try:
                     if force:
                         core.force_refresh_anilist_stats(name)
-                        # 👇 NEW: refresh aussi le cache “profil”
                         core.force_refresh_anilist_profile(name)
                     else:
                         core.get_or_refresh_anilist_stats(name, ttl_hours=ttl)
-                        # 👇 NEW: refresh aussi le cache “profil”
                         core.get_or_refresh_anilist_profile(name, ttl_hours=ttl)
                     ok += 1
                 except Exception:
                     pass
-                await asyncio.sleep(1.0)  # doux pour l’API
-            return await _respond(ctx, content=f"Sync terminée : **{ok}/{len(usernames)}** comptes rafraîchis.")
+                await asyncio.sleep(1.0)
+            return await _respond(
+                ctx,
+                content=i18n.t("admin_anilist.sync_done", lg, ok=ok, total=len(usernames)),
+            )
 
-        # cas 1: username explicite
         if username:
             name = username.strip()
         else:
-            # cas 2: target membre ou auteur
             name = _resolve_username(target) if target else _resolve_username(ctx.author)
 
         if not name:
-            return await _respond(ctx, content="Aucun username AniList lié/valide à synchroniser.")
+            return await _respond(ctx, content=i18n.t("admin_anilist.no_user", lg))
 
-        # 🔄 Rafraîchir les DEUX caches : listes + profil
         try:
             if force:
-                counts  = core.force_refresh_anilist_stats(name) or {}
+                counts = core.force_refresh_anilist_stats(name) or {}
                 profile = core.force_refresh_anilist_profile(name) or {}
             else:
-                counts  = core.get_or_refresh_anilist_stats(name, ttl_hours=ttl) or {}
+                counts = core.get_or_refresh_anilist_stats(name, ttl_hours=ttl) or {}
                 profile = core.get_or_refresh_anilist_profile(name, ttl_hours=ttl) or {}
         except Exception:
             counts, profile = {}, {}
 
-        # Champs “listes”
         completed = int(counts.get("completed", 0))
-        current   = int(counts.get("current", 0))
-        total     = int(counts.get("total_entries", 0))
+        current = int(counts.get("current", 0))
+        total = int(counts.get("total_entries", 0))
 
-        # Champs “profil”
         prof_count = int(profile.get("count", 0))
-        prof_mean  = float(profile.get("meanScore", 0) or 0.0)
+        prof_mean = float(profile.get("meanScore", 0) or 0.0)
         prof_genre = str(profile.get("favoriteGenre", "—"))
 
-        e = discord.Embed(title="AniList Sync", color=discord.Color.blurple())
-        e.add_field(name="Utilisateur", value=name, inline=False)
+        e = discord.Embed(title=i18n.t("admin_anilist.embed_title", lg), color=discord.Color.blurple())
+        e.add_field(name=i18n.t("admin_anilist.field_user", lg), value=name, inline=False)
 
-        # Affiche les deux familles de stats pour bien vérifier
-        e.add_field(name="✅ Completed (MLC)", value=str(completed), inline=True)
-        e.add_field(name="📺 En cours (MLC)", value=str(current), inline=True)
-        e.add_field(name="📚 Total entrées (MLC)", value=str(total), inline=True)
+        e.add_field(name=i18n.t("admin_anilist.f_completed", lg), value=str(completed), inline=True)
+        e.add_field(name=i18n.t("admin_anilist.f_current", lg), value=str(current), inline=True)
+        e.add_field(name=i18n.t("admin_anilist.f_total", lg), value=str(total), inline=True)
 
-        e.add_field(name="🎬 Animés vus (profil)", value=str(prof_count), inline=True)
-        e.add_field(name="⭐ Note moyenne", value=f"{prof_mean:.1f}", inline=True)
-        e.add_field(name="🎭 Genre favori", value=prof_genre, inline=True)
+        e.add_field(name=i18n.t("admin_anilist.f_prof", lg), value=str(prof_count), inline=True)
+        e.add_field(name=i18n.t("admin_anilist.f_mean", lg), value=f"{prof_mean:.1f}", inline=True)
+        e.add_field(name=i18n.t("admin_anilist.f_genre", lg), value=prof_genre, inline=True)
 
-        e.set_footer(text=("Force refresh" if force else f"TTL {ttl}h"))
+        e.set_footer(
+            text=i18n.t("admin_anilist.footer_force", lg)
+            if force
+            else i18n.t("admin_anilist.footer_ttl", lg, ttl=ttl)
+        )
         await _respond(ctx, embed=e)
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(AniListAdmin(bot))
