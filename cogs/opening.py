@@ -18,6 +18,8 @@ from discord.ext import commands, tasks
 
 from modules import anilist_gate
 from modules import core
+from modules import i18n
+from modules.app_cmd_locale import ui_str
 from modules import voice              # ensure_connected + make_source précis/robuste
 from modules import animethemes        # provider AnimeThemes + filtres AniList
 from modules import guessop_catalog as gopc
@@ -195,19 +197,20 @@ def _build_question_embed(
     remaining_sec: int,
     footer: str | None = None,
     responders: List[str] | None = None,
-    title: str = "🎵 Devine l’opening !",
+    title: str | None = None,
+    *,
+    lang: str,
 ) -> discord.Embed:
     """`responders` est ignoré (plus d’affichage des noms dans le salon pour limiter le spam)."""
+    ttl = title or i18n.t("opening.question_title", lang)
+    bar = pct_bar_blocks(ANSWER_TIMEOUT - remaining_sec, ANSWER_TIMEOUT, 10)
     em = discord.Embed(
-        title=title,
-        description=(
-            f"{pct_bar_blocks(ANSWER_TIMEOUT - remaining_sec, ANSWER_TIMEOUT, 10)}  **{remaining_sec}s** restantes.\n"
-            "Clique sur **1–4** pour répondre *(même salon vocal que le bot)*."
-        ),
+        title=ttl,
+        description=i18n.t("opening.question_desc", lang, bar=bar, remaining=remaining_sec),
         color=discord.Color.purple()
     )
-    for i, title in enumerate(choices, 1):
-        em.add_field(name=f"{i}️⃣", value=title, inline=False)
+    for i, lbl in enumerate(choices, 1):
+        em.add_field(name=f"{i}️⃣", value=lbl, inline=False)
     if footer:
         em.set_footer(text=footer)
     return em
@@ -224,6 +227,7 @@ class GuessOPView(discord.ui.View):
         timeout_sec=ANSWER_TIMEOUT,
         source_footer: str = "",
         question_title: str | None = None,
+        lang: str = "fr",
     ):
         # Timer Discord désactivé : la manche est bornée par les tâches dans _run_one_guessop_round
         # (sinon le délai démarre à l’envoi du message alors que l’audio peut encore télécharger).
@@ -234,7 +238,8 @@ class GuessOPView(discord.ui.View):
         self.choices = choices
         self.correct_index = correct_index
         self.source_footer = source_footer
-        self._question_title = question_title or "🎵 Devine l’opening !"
+        self.lang = lang
+        self._question_title = question_title or i18n.t("opening.question_title", lang)
         self.already_answered: set[int] = set()
         self._remaining = timeout_sec
         self._embed_lock = asyncio.Lock()
@@ -269,24 +274,36 @@ class GuessOPButton(discord.ui.Button):
         # Vérifier si joueur est bien dans le vocal
         if not interaction.user.voice or interaction.user.voice.channel != view.voice_channel:
             return await interaction.response.send_message(
-                "🔇 Tu dois être dans **le même salon vocal** pour répondre.",
+                i18n.t("opening.need_voice", view.lang),
                 ephemeral=True
             )
 
         async with view._lock:
             if interaction.user.id in view.already_answered:
-                return await interaction.response.send_message("✋ Une seule réponse par joueur.", ephemeral=True)
+                return await interaction.response.send_message(
+                    i18n.t("opening.one_answer", view.lang),
+                    ephemeral=True,
+                )
             view.already_answered.add(interaction.user.id)
 
             if self.index == view.correct_index:
                 if len(view.winners_order) < 3:
                     view.winners_order.append(interaction.user)
-                    await interaction.response.send_message("✅ Bonne réponse !", ephemeral=True)
+                    await interaction.response.send_message(
+                        i18n.t("opening.correct", view.lang),
+                        ephemeral=True,
+                    )
                 else:
                     view.others_correct.append(interaction.user)
-                    await interaction.response.send_message("✅ Bonne réponse (hors podium) !", ephemeral=True)
+                    await interaction.response.send_message(
+                        i18n.t("opening.correct_off", view.lang),
+                        ephemeral=True,
+                    )
             else:
-                await interaction.response.send_message("❌ Mauvaise réponse.", ephemeral=True)
+                await interaction.response.send_message(
+                    i18n.t("opening.wrong", view.lang),
+                    ephemeral=True,
+                )
 
 
 @dataclass
@@ -323,9 +340,8 @@ async def _safe_delete_message(msg: discord.Message | None) -> None:
 
 async def _guessop_send_cooldown_notice(ctx: commands.Context, left_go: float) -> None:
     """Message vu uniquement par l’auteur : slash = éphémère ; préfixe = MP ou message effacé."""
-    msg = (
-        f"⏳ Attends **{int(left_go) + 1}s** après la fin du dernier Guess OP avant de relancer."
-    )
+    lg = i18n.ctx_lang(ctx)
+    msg = i18n.t("opening.cooldown", lg, s=int(left_go) + 1)
     itx = getattr(ctx, "interaction", None)
     if itx:
         try:
@@ -427,12 +443,13 @@ class Openings(commands.Cog):
         correct_anime = outcome.correct_anime
         theme_label = outcome.theme_label
         source_footer = outcome.source_footer
+        lg = i18n.ctx_lang(ctx)
         podium_xp = [15, 10, 7]
         others_xp = 3
         award_lines = []
         for rank, user in enumerate(view.winners_order, start=1):
             xp = podium_xp[rank - 1]
-            award_lines.append(f"**#{rank}** {user.mention} — +{xp} XP")
+            award_lines.append(i18n.t("opening.award_rank", lg, rank=rank, mention=user.mention, xp=xp))
             try:
                 await core.add_xp(self.bot, ctx.channel, user.id, xp)
             except Exception:
@@ -443,7 +460,7 @@ class Openings(commands.Cog):
                 pass
             _mission_guessop_correct(self.bot, user.id)
         for user in view.others_correct:
-            award_lines.append(f"• {user.mention} — +{others_xp} XP")
+            award_lines.append(i18n.t("opening.award_other", lg, mention=user.mention, xp=others_xp))
             try:
                 await core.add_xp(self.bot, ctx.channel, user.id, others_xp)
             except Exception:
@@ -453,23 +470,27 @@ class Openings(commands.Cog):
             except Exception:
                 pass
             _mission_guessop_correct(self.bot, user.id)
-        fast_line = f"⚡ Plus rapide : {view.winners_order[0].mention}" if view.winners_order else None
+        fast_line = (
+            i18n.t("opening.field_speed_val", lg, mention=view.winners_order[0].mention)
+            if view.winners_order
+            else None
+        )
         title_res = (
-            f"🏁 Résultats — Guess OP · Manche {round_manche}"
+            i18n.t("opening.result_title_round", lg, n=round_manche)
             if round_manche
-            else "🏁 Résultats — Guess OP"
+            else i18n.t("opening.result_title", lg)
         )
         res = discord.Embed(
             title=title_res,
-            description=f"✅ **Réponse :** {correct_anime}",
+            description=i18n.t("opening.result_answer", lg, anime=correct_anime),
             color=discord.Color.gold(),
         )
         if theme_label:
-            res.add_field(name="Opening", value=theme_label, inline=False)
+            res.add_field(name=i18n.t("opening.field_opening", lg), value=theme_label, inline=False)
         if fast_line:
-            res.add_field(name="Vitesse", value=fast_line, inline=False)
+            res.add_field(name=i18n.t("opening.field_speed", lg), value=fast_line, inline=False)
         if award_lines:
-            res.add_field(name="Récompenses", value="\n".join(award_lines), inline=False)
+            res.add_field(name=i18n.t("opening.field_rewards", lg), value="\n".join(award_lines), inline=False)
         if source_footer:
             res.set_footer(text=source_footer)
         await send(embed=res)
@@ -491,6 +512,7 @@ class Openings(commands.Cog):
         correct_anime = outcome.correct_anime
         theme_label = outcome.theme_label
         source_footer = outcome.source_footer
+        lg = i18n.ctx_lang(ctx)
         podium_xp = [15, 10, 7]
         others_xp = 3
 
@@ -531,10 +553,10 @@ class Openings(commands.Cog):
             total_u = base + extra
             totals_xp[uid] = totals_xp.get(uid, 0) + total_u
             wins[uid] = wins.get(uid, 0) + 1
-            line = f"**#{rank}** {user.mention} — +{base} XP"
+            line = i18n.t("opening.award_rank", lg, rank=rank, mention=user.mention, xp=base)
             if extra > 0:
-                line += f" · **+{extra} XP** série (×{st})"
-                streak_lines.append(f"{user.mention} — série **{st}** → +{extra} XP")
+                line += i18n.t("opening.award_extra", lg, extra=extra, st=st)
+                streak_lines.append(i18n.t("opening.streak_line", lg, mention=user.mention, st=st, extra=extra))
             try:
                 await core.add_xp(self.bot, ctx.channel, user.id, total_u)
             except Exception:
@@ -553,10 +575,10 @@ class Openings(commands.Cog):
             total_u = base + extra
             totals_xp[uid] = totals_xp.get(uid, 0) + total_u
             wins[uid] = wins.get(uid, 0) + 1
-            line = f"• {user.mention} — +{base} XP"
+            line = i18n.t("opening.award_other", lg, mention=user.mention, xp=base)
             if extra > 0:
-                line += f" · **+{extra} XP** série (×{st})"
-                streak_lines.append(f"{user.mention} — série **{st}** → +{extra} XP")
+                line += i18n.t("opening.award_extra", lg, extra=extra, st=st)
+                streak_lines.append(i18n.t("opening.streak_line", lg, mention=user.mention, st=st, extra=extra))
             try:
                 await core.add_xp(self.bot, ctx.channel, user.id, total_u)
             except Exception:
@@ -567,21 +589,25 @@ class Openings(commands.Cog):
                 pass
             award_lines.append(line)
 
-        fast_line = f"⚡ Plus rapide : {view.winners_order[0].mention}" if view.winners_order else None
-        title_res = f"🏁 Résultats — Guess OP · Manche {round_manche}"
+        fast_line = (
+            i18n.t("opening.field_speed_val", lg, mention=view.winners_order[0].mention)
+            if view.winners_order
+            else None
+        )
+        title_res = i18n.t("opening.result_title_round", lg, n=round_manche)
         res = discord.Embed(
             title=title_res,
-            description=f"✅ **Réponse :** {correct_anime}",
+            description=i18n.t("opening.result_answer", lg, anime=correct_anime),
             color=discord.Color.gold(),
         )
         if theme_label:
-            res.add_field(name="Opening", value=theme_label, inline=False)
+            res.add_field(name=i18n.t("opening.field_opening", lg), value=theme_label, inline=False)
         if fast_line:
-            res.add_field(name="Vitesse", value=fast_line, inline=False)
+            res.add_field(name=i18n.t("opening.field_speed", lg), value=fast_line, inline=False)
         if award_lines:
-            res.add_field(name="Récompenses", value="\n".join(award_lines), inline=False)
+            res.add_field(name=i18n.t("opening.field_rewards", lg), value="\n".join(award_lines), inline=False)
         if streak_lines:
-            res.add_field(name="Bonus série", value="\n".join(streak_lines), inline=False)
+            res.add_field(name=i18n.t("opening.field_bonus", lg), value="\n".join(streak_lines), inline=False)
         if source_footer:
             res.set_footer(text=source_footer)
         sent = await send(embed=res)
@@ -596,10 +622,15 @@ class Openings(commands.Cog):
         *,
         title: str,
         description: str | None,
+        lang: str,
     ) -> discord.Embed:
         emb = discord.Embed(title=title, description=description, color=discord.Color.dark_gold())
         if not totals_xp:
-            emb.add_field(name="Totaux", value="Aucun point marqué sur la chaîne.", inline=False)
+            emb.add_field(
+                name=i18n.t("opening.recap_totals_name", lang),
+                value=i18n.t("opening.recap_empty", lang),
+                inline=False,
+            )
             return emb
         guild = ctx.guild
         rows: list[tuple[int, int, int, int]] = []
@@ -610,10 +641,10 @@ class Openings(commands.Cog):
         for uid, tx, wn, ms in rows[:20]:
             mem = guild.get_member(uid) if guild else None
             mention = mem.mention if mem else f"<@{uid}>"
-            lines.append(f"{mention} — **{tx} XP** · {wn} victoire(s) · série max **{ms}**")
+            lines.append(i18n.t("opening.recap_line", lang, mention=mention, tx=tx, wn=wn, ms=ms))
         if len(rows) > 20:
-            lines.append(f"*… et {len(rows) - 20} autre(s)*")
-        emb.add_field(name="Totaux sur la chaîne", value="\n".join(lines), inline=False)
+            lines.append(i18n.t("opening.recap_more", lang, n=len(rows) - 20))
+        emb.add_field(name=i18n.t("opening.recap_field", lang), value="\n".join(lines), inline=False)
         return emb
 
     async def _run_one_guessop_round(
@@ -629,6 +660,7 @@ class Openings(commands.Cog):
         vc_existing: discord.VoiceClient | None,
         chain_round: int | None = None,
     ) -> GuessOPRoundOutcome | None:
+        lg = i18n.ctx_lang(ctx)
         correct_anime = None
         theme_label = None
         media_source = None
@@ -639,14 +671,14 @@ class Openings(commands.Cog):
             picked_list = gopc.pick_random_title_in_set(user_titles_lower)
             if picked_list:
                 oid, correct_anime, theme_label, media_source = picked_list
-                source_footer = f"Catalogue Guess OP · depuis ta liste AniList · {n_cat} openings"
+                source_footer = i18n.t("opening.footer_catalog_list", lg, n=n_cat)
                 gopc.record_used(oid)
 
         if not media_source and n_cat >= CATALOG_MIN_FOR_BIAS and random.random() < CATALOG_PICK_BIAS:
             picked = gopc.pick_random()
             if picked:
                 oid, correct_anime, theme_label, media_source = picked
-                source_footer = f"Catalogue Guess OP · {n_cat} openings"
+                source_footer = i18n.t("opening.footer_catalog", lg, n=n_cat)
                 gopc.record_used(oid)
 
         if not media_source:
@@ -667,7 +699,7 @@ class Openings(commands.Cog):
                     title, theme_label, video_url = got
                     correct_anime = title
                     media_source = video_url
-                    source_footer = "Source : AnimeThemes.moe → ajout catalogue"
+                    source_footer = i18n.t("opening.footer_animethemes", lg)
                     if video_url.startswith(("http://", "https://")):
                         _, _ = gopc.add_opening(
                             correct_anime, theme_label or "OP", video_url, "animethemes_live"
@@ -675,16 +707,16 @@ class Openings(commands.Cog):
 
         if not media_source:
             if not os.path.exists(LOCAL_AUDIO_FOLDER):
-                await send("❌ Aucun opening trouvé (AnimeThemes vide + pas de dossier local).")
+                await send(i18n.t("opening.no_media", lg))
                 return None
             files = [f for f in os.listdir(LOCAL_AUDIO_FOLDER) if f.lower().endswith(".mp3")]
             if not files:
-                await send("❌ Aucun opening trouvé dans le dossier local.")
+                await send(i18n.t("opening.no_local_mp3", lg))
                 return None
             pick = random.choice(files)
             media_source = os.path.join(LOCAL_AUDIO_FOLDER, pick)
             correct_anime = _clean_title_from_filename(pick)
-            source_footer = "Source : fichiers locaux"
+            source_footer = i18n.t("opening.footer_local", lg)
 
         async def _prepare_local_file():
             local_path = media_source
@@ -701,7 +733,7 @@ class Openings(commands.Cog):
         if pool is None:
             if core._anilist_slots_available() <= 0:
                 try:
-                    await send("⏳ **File AniList** — récupération des propositions…")
+                    await send(i18n.t("opening.anilist_queue", lg))
                 except Exception:
                     pass
             query = '''
@@ -752,16 +784,16 @@ class Openings(commands.Cog):
             if alt and alt.lower() != (correct_anime or "").lower() and alt not in choices:
                 choices.append(alt)
         while len(choices) < 4:
-            choices.append(f"Option {len(choices) + 1}")
+            choices.append(i18n.t("opening.option_n", lg, n=len(choices) + 1))
         random.shuffle(choices)
         correct_index = choices.index(correct_anime)
 
         q_title = (
-            f"🎵 Devine l'opening ! · Manche {chain_round}"
+            i18n.t("opening.question_title_round", lg, n=chain_round)
             if chain_round is not None
-            else "🎵 Devine l'opening !"
+            else i18n.t("opening.question_title", lg)
         )
-        em = _build_question_embed(choices, ANSWER_TIMEOUT, source_footer, [], title=q_title)
+        em = _build_question_embed(choices, ANSWER_TIMEOUT, source_footer, [], title=q_title, lang=lg)
         view = GuessOPView(
             self.bot,
             ctx,
@@ -771,6 +803,7 @@ class Openings(commands.Cog):
             timeout_sec=ANSWER_TIMEOUT,
             source_footer=source_footer,
             question_title=q_title,
+            lang=lg,
         )
         sent = await send(embed=em, view=view)
         if isinstance(sent, discord.Message):
@@ -782,7 +815,7 @@ class Openings(commands.Cog):
                 vc = await voice.ensure_connected(voice_channel)
             except Exception as e:
                 _mark_guessop_end(ctx.author.id)
-                await send(f"❌ Impossible de rejoindre le vocal : {e}")
+                await send(i18n.t("opening.voice_join_fail", lg, err=e))
                 await _safe_delete_message(view.message)
                 try:
                     prepare_task.cancel()
@@ -796,7 +829,7 @@ class Openings(commands.Cog):
             local_path, cleanup = await prepare_task
         except Exception as e:
             try:
-                await send(f"⚠️ Préparation de l’audio : {e}")
+                await send(i18n.t("opening.audio_prep", lg, err=e))
             except Exception:
                 pass
             await _safe_delete_message(view.message)
@@ -807,7 +840,7 @@ class Openings(commands.Cog):
                 vc = await voice.ensure_connected(voice_channel)
             except Exception as e:
                 _mark_guessop_end(ctx.author.id)
-                await send(f"❌ Impossible de rejoindre le vocal : {e}")
+                await send(i18n.t("opening.voice_join_fail", lg, err=e))
                 await _safe_delete_message(view.message)
                 if cleanup and local_path:
                     try:
@@ -829,7 +862,12 @@ class Openings(commands.Cog):
                     async with view._embed_lock:
                         await view.message.edit(
                             embed=_build_question_embed(
-                                choices, remaining, source_footer, None, title=view._question_title
+                                choices,
+                                remaining,
+                                source_footer,
+                                None,
+                                title=view._question_title,
+                                lang=view.lang,
                             ),
                             view=view,
                         )
@@ -929,7 +967,7 @@ class Openings(commands.Cog):
 
         except Exception as e:
             try:
-                await send(f"⚠️ Audio non lancé : {e}")
+                await send(i18n.t("opening.audio_play_fail", lg, err=e))
             except Exception:
                 pass
             if countdown_task is not None and not countdown_task.done():
@@ -975,9 +1013,10 @@ class Openings(commands.Cog):
 
     @commands.hybrid_command(
         name="guessop",
-        description="Devine l'opening (20s audio + 4 choix ; AniList lié → priorité + leurres depuis ta liste).",
+        description=ui_str("slash.opening_guessop"),
     )
     async def guess_op(self, ctx: commands.Context) -> None:
+        lg = i18n.ctx_lang(ctx)
         if getattr(ctx, "interaction", None):
             try:
                 await ctx.interaction.response.defer()
@@ -990,7 +1029,7 @@ class Openings(commands.Cog):
         send = (ctx.interaction.followup.send if getattr(ctx, "interaction", None) else ctx.send)
 
         if not ctx.author.voice or not ctx.author.voice.channel:
-            return await send("🔇 Tu dois être dans un **salon vocal** pour jouer.")
+            return await send(i18n.t("opening.voice_required", lg))
         voice_channel: discord.VoiceChannel = ctx.author.voice.channel
 
         left_go = _guessop_cooldown_remaining(ctx.author.id)
@@ -1027,7 +1066,7 @@ class Openings(commands.Cog):
             if not outcome.view.winners_order and not outcome.view.others_correct:
                 _mark_guessop_end(ctx.author.id)
                 return await send(
-                    f"⏰ Temps écoulé ! La bonne réponse était : **{outcome.correct_anime}**"
+                    i18n.t("opening.timeout_answer", lg, anime=outcome.correct_anime)
                 )
 
             await self._guessop_award_and_embed(ctx, send, outcome, round_manche=None)
@@ -1036,11 +1075,10 @@ class Openings(commands.Cog):
     @commands.hybrid_command(
         name="guessopchain",
         # Max 100 caractères (exigence API Discord slash).
-        description=(
-            "Guess OP en chaîne : reste en vocal, nouvelle manche après le timer. Arrêt si échec."
-        ),
+        description=ui_str("slash.opening_guessopchain"),
     )
     async def guess_op_chain(self, ctx: commands.Context) -> None:
+        lg = i18n.ctx_lang(ctx)
         if getattr(ctx, "interaction", None):
             try:
                 await ctx.interaction.response.defer()
@@ -1053,7 +1091,7 @@ class Openings(commands.Cog):
         send = (ctx.interaction.followup.send if getattr(ctx, "interaction", None) else ctx.send)
 
         if not ctx.author.voice or not ctx.author.voice.channel:
-            return await send("🔇 Tu dois être dans un **salon vocal** pour jouer.")
+            return await send(i18n.t("opening.voice_required", lg))
         voice_channel: discord.VoiceChannel = ctx.author.voice.channel
 
         left_go = _guessop_cooldown_remaining(ctx.author.id)
@@ -1122,11 +1160,13 @@ class Openings(commands.Cog):
                         totals_xp,
                         wins,
                         max_streak_ever,
-                        title="📊 Guess OP chaîne — fin",
-                        description=(
-                            "⏰ **Personne n'a trouvé** cette manche.\n"
-                            f"Réponse : **{outcome.correct_anime}**"
+                        title=i18n.t("opening.recap_title_end", lg),
+                        description=i18n.t(
+                            "opening.recap_desc_timeout",
+                            lg,
+                            anime=outcome.correct_anime,
                         ),
+                        lang=lg,
                     )
                     return await send(embed=recap)
 
@@ -1158,16 +1198,20 @@ class Openings(commands.Cog):
                 totals_xp,
                 wins,
                 max_streak_ever,
-                title="📊 Guess OP chaîne — fin",
-                description=(
-                    f"🔚 Limite de **{MAX_GUESSOP_CHAIN_ROUNDS}** manches atteintes — le bot a quitté le vocal."
+                title=i18n.t("opening.recap_title_end", lg),
+                description=i18n.t(
+                    "opening.recap_desc_limit",
+                    lg,
+                    max=MAX_GUESSOP_CHAIN_ROUNDS,
                 ),
+                lang=lg,
             )
             await send(embed=recap)
 
     # --- DIAG AUDIO intégré au même Cog ---
-    @commands.hybrid_command(name="voicediag", description="Diagnostic audio (ffmpeg/ffprobe/opus)")
+    @commands.hybrid_command(name="voicediag", description=ui_str("slash.opening_voicediag"))
     async def voice_diag(self, ctx: commands.Context):
+        lg = i18n.ctx_lang(ctx)
         import discord.opus
         ffmpeg_bin = os.getenv("FFMPEG_BIN", "ffmpeg")
         ffprobe_bin = os.getenv("FFPROBE_BIN", "ffprobe")
@@ -1193,12 +1237,16 @@ class Openings(commands.Cog):
         ok_ffprobe = _cmd_ok(ffprobe_bin)
 
         em = discord.Embed(
-            title="🔊 Voice Diag",
+            title=i18n.t("opening.diag_title", lg),
             color=discord.Color.green() if (ok_ffmpeg and ok_ffprobe and opus_loaded) else discord.Color.red()
         )
-        em.add_field(name="FFMPEG_BIN", value=f"`{ffmpeg_bin}` — {'✅' if ok_ffmpeg else '❌'}", inline=False)
-        em.add_field(name="FFPROBE_BIN", value=f"`{ffprobe_bin}` — {'✅' if ok_ffprobe else '❌'}", inline=False)
-        em.add_field(name="Opus", value="✅ chargé" if opus_loaded else "❌ non chargé", inline=False)
+        em.add_field(name=i18n.t("opening.diag_ffmpeg", lg), value=f"`{ffmpeg_bin}` — {'✅' if ok_ffmpeg else '❌'}", inline=False)
+        em.add_field(name=i18n.t("opening.diag_ffprobe", lg), value=f"`{ffprobe_bin}` — {'✅' if ok_ffprobe else '❌'}", inline=False)
+        em.add_field(
+            name=i18n.t("opening.diag_opus", lg),
+            value=i18n.t("opening.diag_opus_ok", lg) if opus_loaded else i18n.t("opening.diag_opus_bad", lg),
+            inline=False,
+        )
         await ctx.send(embed=em)
 
 async def setup(bot: commands.Bot):

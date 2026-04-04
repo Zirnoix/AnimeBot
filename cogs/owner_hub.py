@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules import i18n, owner_actions
+from modules.app_cmd_locale import ui_str
 
 LOG = __import__("logging").getLogger(__name__)
 
@@ -92,7 +93,7 @@ class OwnerHub(commands.Cog):
 
     @app_commands.command(
         name="owner",
-        description=i18n.t("owner.cmd_desc", "fr"),
+        description=ui_str("owner.cmd_desc"),
     )
     async def owner_panel(self, interaction: discord.Interaction) -> None:
         lg = i18n.guild_lang(interaction.guild)

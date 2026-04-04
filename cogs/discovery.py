@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands
 
 from modules import core, i18n
+from modules.app_cmd_locale import ui_str
 
 try:
     import aiohttp  # pour la traduction (HTTP)
@@ -256,7 +257,11 @@ class Discovery(commands.Cog):
         else:
             await ctx.send(content=content, embed=embed, view=view)
 
-    @commands.hybrid_command(name="decouverte", aliases=["discover", "randomanime"])
+    @commands.hybrid_command(
+        name="decouverte",
+        aliases=["discover", "randomanime"],
+        description=ui_str("slash.discovery_decouverte"),
+    )
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def decouverte(self, ctx: commands.Context):
         """Propose un anime à découvrir (mix Popularité/Tendance/Score) + boutons."""

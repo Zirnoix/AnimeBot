@@ -9,6 +9,8 @@ from discord.ext import commands
 from discord.ui import Button, Modal, TextInput, View
 
 from modules import core
+from modules import i18n
+from modules.app_cmd_locale import ui_str
 
 LOG = logging.getLogger(__name__)
 COLOR_OK = discord.Color.blurple()
@@ -68,40 +70,40 @@ def _daily_summary_effective(uid: int, pref: dict) -> bool:
     return True
 
 
-def _recap_embed_for_user(uid: int) -> discord.Embed:
+def _recap_embed_for_user(uid: int, lang: str) -> discord.Embed:
     """Embed du panneau /recap (état courant)."""
     pref = _get_user_pref(uid)
     on = _daily_summary_effective(uid, pref)
     hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
     linked = core.get_linked_username(uid)
-    link_txt = f"**{linked}**" if linked else "_(aucun — utilise `/linkanilist`)_"
+    link_txt = f"**{linked}**" if linked else i18n.t("recap.link_none", lang)
+    state = i18n.t("recap.state_on", lang) if on else i18n.t("recap.state_off", lang)
     em = discord.Embed(
-        title="📬 Récap quotidien — « Sorties du jour »",
-        description=(
-            "Configure le **même** récap MP que l’embed **« Sorties du … »** (liste à puces, "
-            "pas l’ancien message détaillé supprimé).\n\n"
-            "Un **message privé** chaque jour à l’heure choisie, selon **ton** compte AniList.\n\n"
-            f"• Compte lié : {link_txt}\n"
-            f"• État : **{'activé' if on else 'désactivé'}** · heure : **`{hh}`** (fuseau du bot)\n\n"
-            "Boutons ci-dessous : activer, désactiver, ou **saisir l’heure** (HH:MM). "
-            "Tu peux aussi régler l’heure avec **`/setalert`**. Utilise **Fermer** quand tu as terminé."
+        title=i18n.t("recap.embed_title", lang),
+        description=i18n.t(
+            "recap.embed_desc",
+            lang,
+            link_txt=link_txt,
+            state=state,
+            hh=hh,
         ),
         color=COLOR_OK,
     )
-    em.set_footer(text="/setalert HH:MM · /linkanilist")
+    em.set_footer(text=i18n.t("recap.embed_footer", lang))
     return em
 
 
 class RecapTimeModal(Modal):
     """Saisie HH:MM (fuseau du bot) — plus lisible qu’un long menu déroulant."""
 
-    def __init__(self, user_id: int, default_hhmm: str) -> None:
-        super().__init__(title="Heure du récap MP")
+    def __init__(self, user_id: int, default_hhmm: str, lang: str) -> None:
+        super().__init__(title=i18n.t("recap.modal_title", lang)[:45])
         self.user_id = user_id
+        self.lang = lang
         self._time = TextInput(
-            label="Heure (HH:MM)",
+            label=i18n.t("recap.modal_label_time", lang)[:45],
             default=(default_hhmm or "08:00")[:5],
-            placeholder="ex. 08:00, 21:30",
+            placeholder=i18n.t("recap.modal_ph_time", lang)[:100],
             min_length=4,
             max_length=5,
             required=True,
@@ -109,122 +111,130 @@ class RecapTimeModal(Modal):
         self.add_item(self._time)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        lg = self.lang
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Ce formulaire n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("recap.err_not_yours_form", lg), ephemeral=True)
             return
         norm = _normalize_hhmm(self._time.value)
         if not norm:
             await interaction.response.send_message(
-                "❌ Heure invalide. Utilise **HH:MM** (ex. `08:00`, `21:30`). Réessaie avec **`/recap`**.",
+                i18n.t("recap.err_invalid_time", lg),
                 ephemeral=True,
             )
             return
         _set_user_pref(interaction.user.id, daily_summary=True, alert_time=norm)
-        em = _recap_embed_for_user(interaction.user.id)
-        view = _recap_view_for_user(interaction.user.id)
+        em = _recap_embed_for_user(interaction.user.id, lg)
+        view = _recap_view_for_user(interaction.user.id, lg)
         await interaction.response.edit_message(embed=em, view=view, content=None)
 
 
 class RecapSetupView(View):
     """Boutons + modal de saisie : activer / désactiver / régler l’heure au clavier."""
 
-    def __init__(self, user_id: int, default_hhmm: str) -> None:
+    def __init__(self, user_id: int, default_hhmm: str, lang: str) -> None:
         super().__init__(timeout=300)
         self.user_id = user_id
         self.default_hhmm = default_hhmm
-        self.add_item(RecapEnableButton(user_id))
-        self.add_item(RecapDisableButton(user_id))
-        self.add_item(RecapTimeModalButton(user_id, default_hhmm))
-        self.add_item(RecapCloseButton(user_id))
+        self.lang = lang
+        self.add_item(RecapEnableButton(user_id, lang))
+        self.add_item(RecapDisableButton(user_id, lang))
+        self.add_item(RecapTimeModalButton(user_id, default_hhmm, lang))
+        self.add_item(RecapCloseButton(user_id, lang))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(
+                i18n.t("recap.err_not_yours", self.lang), ephemeral=True,
+            )
             return False
         return True
 
 
 class RecapEnableButton(Button):
-    def __init__(self, user_id: int) -> None:
+    def __init__(self, user_id: int, lang: str) -> None:
         super().__init__(
-            label="Activer (heure actuelle)",
+            label=i18n.t("recap.btn_enable", lang)[:80],
             style=discord.ButtonStyle.success,
             row=0,
         )
         self.user_id = user_id
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("recap.err_not_yours", self.lang), ephemeral=True)
             return
         _set_user_pref(interaction.user.id, daily_summary=True)
-        em = _recap_embed_for_user(interaction.user.id)
-        view = _recap_view_for_user(interaction.user.id)
+        em = _recap_embed_for_user(interaction.user.id, self.lang)
+        view = _recap_view_for_user(interaction.user.id, self.lang)
         await interaction.response.edit_message(embed=em, view=view, content=None)
 
 
 class RecapDisableButton(Button):
-    def __init__(self, user_id: int) -> None:
+    def __init__(self, user_id: int, lang: str) -> None:
         super().__init__(
-            label="Désactiver",
+            label=i18n.t("recap.btn_disable", lang)[:80],
             style=discord.ButtonStyle.danger,
             row=0,
         )
         self.user_id = user_id
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("recap.err_not_yours", self.lang), ephemeral=True)
             return
         _set_user_pref(interaction.user.id, daily_summary=False)
         await interaction.response.edit_message(
-            content="⏹️ Récap **désactivé**. Tu peux rouvrir **`/recap`** pour le rallumer.",
+            content=i18n.t("recap.disabled_msg", self.lang),
             embed=None,
             view=None,
         )
 
 
 class RecapTimeModalButton(Button):
-    def __init__(self, user_id: int, default_hhmm: str) -> None:
+    def __init__(self, user_id: int, default_hhmm: str, lang: str) -> None:
         super().__init__(
-            label="Choisir l’heure (HH:MM)",
+            label=i18n.t("recap.btn_time", lang)[:80],
             style=discord.ButtonStyle.primary,
             row=0,
         )
         self.user_id = user_id
         self.default_hhmm = default_hhmm
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("recap.err_not_yours", self.lang), ephemeral=True)
             return
-        await interaction.response.send_modal(RecapTimeModal(self.user_id, self.default_hhmm))
+        await interaction.response.send_modal(RecapTimeModal(self.user_id, self.default_hhmm, self.lang))
 
 
 class RecapCloseButton(Button):
-    def __init__(self, user_id: int) -> None:
+    def __init__(self, user_id: int, lang: str) -> None:
         super().__init__(
-            label="Fermer",
+            label=i18n.t("recap.btn_close", lang)[:80],
             style=discord.ButtonStyle.secondary,
             row=1,
         )
         self.user_id = user_id
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Ce panneau n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("recap.err_not_yours", self.lang), ephemeral=True)
             return
         await interaction.response.edit_message(
-            content="✅ Panneau fermé. Rouvre **`/recap`** pour modifier.",
+            content=i18n.t("recap.closed_msg", self.lang),
             embed=None,
             view=None,
         )
 
 
-def _recap_view_for_user(uid: int) -> RecapSetupView:
+def _recap_view_for_user(uid: int, lang: str) -> RecapSetupView:
     pref = _get_user_pref(uid)
     hh = pref.get("alert_time") or core.get_config().get("default_alert_time", "08:00")
-    return RecapSetupView(uid, _modal_default_hhmm(hh))
+    return RecapSetupView(uid, _modal_default_hhmm(hh), lang)
 
 
 class ReminderDigest(commands.Cog):
@@ -235,16 +245,17 @@ class ReminderDigest(commands.Cog):
 
     @commands.hybrid_command(
         name="recap",
-        description="Configurer le récap MP des sorties du jour (compte AniList lié). Boutons + saisie d’heure.",
+        description=ui_str("slash.recap"),
     )
     async def recap(self, ctx: commands.Context) -> None:
         """Slash : defer puis followup explicite (évite « réfléchit » infini si followup mal résolu)."""
+        lg = i18n.ctx_lang(ctx)
         try:
             if ctx.interaction is not None:
                 await ctx.defer(ephemeral=True)
 
-            em = _recap_embed_for_user(ctx.author.id)
-            view = _recap_view_for_user(ctx.author.id)
+            em = _recap_embed_for_user(ctx.author.id, lg)
+            view = _recap_view_for_user(ctx.author.id, lg)
 
             if ctx.interaction is not None:
                 await ctx.interaction.followup.send(embed=em, view=view, ephemeral=True)
@@ -252,33 +263,30 @@ class ReminderDigest(commands.Cog):
                 await ctx.reply(embed=em, view=view, delete_after=180)
         except Exception as e:
             LOG.exception("recap: %s", e)
+            detail = f"{type(e).__name__}: {e}"
+            err = i18n.t("recap.err_generic", lg, detail=detail)
             try:
                 if ctx.interaction is not None:
                     if ctx.interaction.response.is_done():
-                        await ctx.interaction.followup.send(
-                            f"❌ Erreur `/recap` : `{type(e).__name__}: {e}`",
-                            ephemeral=True,
-                        )
+                        await ctx.interaction.followup.send(err, ephemeral=True)
                     else:
-                        await ctx.interaction.response.send_message(
-                            f"❌ Erreur `/recap` : `{type(e).__name__}: {e}`",
-                            ephemeral=True,
-                        )
+                        await ctx.interaction.response.send_message(err, ephemeral=True)
                 else:
-                    await ctx.reply(f"❌ Erreur `/recap` : `{type(e).__name__}: {e}`")
+                    await ctx.reply(err)
             except Exception:
                 LOG.exception("recap: échec envoi message d’erreur")
 
     @commands.hybrid_command(
         name="setalert",
-        description="Heure (HH:MM) du récap MP « sorties du jour » (/recap), fuseau du bot.",
+        description=ui_str("slash.setalert"),
     )
     async def setalert(self, ctx: commands.Context, heure: str) -> None:
+        lg = i18n.ctx_lang(ctx)
         if not _hhmm_valid(heure):
-            return await ctx.reply("❌ Format invalide. Exemple : `08:00`", ephemeral=True)
+            return await ctx.reply(i18n.t("recap.setalert_bad", lg), ephemeral=True)
         _set_user_pref(ctx.author.id, alert_time=heure)
         await ctx.reply(
-            f"⏰ Heure réglée sur **{heure}** (fuseau du bot) — utilisée par le récap **`/recap`**.",
+            i18n.t("recap.setalert_ok", lg, heure=heure),
             ephemeral=True,
         )
 

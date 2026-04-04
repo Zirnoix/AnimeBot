@@ -6,9 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules import i18n
-
-_CMD_DESC = i18n.t("emoji_status.cmd_desc", "fr")
-_WHOAMI_DESC = i18n.t("emoji_status.whoami_desc", "fr")
+from modules.app_cmd_locale import ui_str
 
 ASSETS_GUILD_ID = int(os.getenv("ASSETS_GUILD_ID", "0"))
 OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "").replace(" ", "").split(",") if x.isdigit()}
@@ -31,7 +29,7 @@ class EmojiStatus(commands.Cog):
             return True
         return False
 
-    @app_commands.command(name="emojistatus", description=_CMD_DESC)
+    @app_commands.command(name="emojistatus", description=ui_str("emoji_status.cmd_desc"))
     async def emojistatus(self, interaction: discord.Interaction):
         lg = i18n.guild_lang(interaction.guild)
         if not await self._authorized(interaction):
@@ -55,7 +53,7 @@ class EmojiStatus(commands.Cog):
 
         await interaction.response.send_message("\n".join(lines) or i18n.t("emoji_status.empty", lg), ephemeral=True)
 
-    @app_commands.command(name="whoami", description=_WHOAMI_DESC)
+    @app_commands.command(name="whoami", description=ui_str("emoji_status.whoami_desc"))
     async def whoami(self, interaction: discord.Interaction):
         allowed = await self._authorized(interaction)
         perms = getattr(interaction.user, "guild_permissions", None)

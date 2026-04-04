@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules import core, i18n
+from modules.app_cmd_locale import ui_str
 
 
 def _format_uptime(delta_seconds: float) -> str:
@@ -37,7 +38,7 @@ class BotInfo(commands.Cog):
         if not hasattr(self.bot, "_launch_time"):
             self.bot._launch_time = datetime.now(timezone.utc)
 
-    @app_commands.command(name="botinfo", description="Infos sur le bot : version, serveurs, latence, uptime, etc.")
+    @app_commands.command(name="botinfo", description=ui_str("slash.botinfo"))
     async def botinfo(self, interaction: discord.Interaction):
         lg = i18n.guild_lang(interaction.guild)
         version = os.getenv("BOT_VERSION")

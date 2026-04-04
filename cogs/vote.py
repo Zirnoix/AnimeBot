@@ -11,9 +11,9 @@ from discord.ext import tasks
 from discord.ui import Button, View
 
 from modules import i18n, topgg_vote
+from modules.app_cmd_locale import ui_str
 
 LOG = logging.getLogger(__name__)
-_VOTE_CMD_DESC = i18n.t("vote.cmd_desc", "fr")
 
 
 def _fmt_remaining(seconds: int, lg: str) -> str:
@@ -130,7 +130,7 @@ class Vote(commands.Cog):
 
     @app_commands.command(
         name="vote",
-        description=_VOTE_CMD_DESC,
+        description=ui_str("vote.cmd_desc"),
     )
     async def vote_cmd(self, interaction: discord.Interaction) -> None:
         ephemeral = interaction.guild is not None

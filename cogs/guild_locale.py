@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules import core, i18n, locale_store
+from modules.app_cmd_locale import ui_str
 
 LOG = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class WelcomeLanguageSelect(discord.ui.Select):
         if not interaction.guild or interaction.guild.id != self.guild_id:
             await interaction.response.send_message("❌", ephemeral=True)
             return
-        if not interaction.user.guild_permissions.manage_guild:
+        if not interaction.user.guild_permissions.administrator:
             gl = locale_store.get_guild_lang(interaction.guild.id)
             await interaction.response.send_message(
                 i18n.t("welcome.select_need_perm", gl),
@@ -126,17 +127,18 @@ class GuildLocale(commands.Cog):
 
     @commands.hybrid_command(
         name="language",
-        description=i18n.t("language.cmd_description", "fr"),
+        description=ui_str("language.cmd_description"),
     )
-    @app_commands.describe(lang=i18n.t("language.param_description", "fr"))
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(lang=ui_str("language.param_description"))
     @app_commands.choices(
         lang=[
-            app_commands.Choice(name="Français", value="fr"),
-            app_commands.Choice(name="English", value="en"),
+            app_commands.Choice(name=ui_str("slash.choice_lang_fr"), value="fr"),
+            app_commands.Choice(name=ui_str("slash.choice_lang_en"), value="en"),
         ]
     )
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @commands.has_permissions(administrator=True)
     async def language_cmd(self, ctx: commands.Context, lang: str) -> None:
         if ctx.guild is None:
             return
@@ -155,16 +157,16 @@ class GuildLocale(commands.Cog):
             lg = i18n.guild_lang(ctx.guild)
             if ctx.interaction and not ctx.interaction.response.is_done():
                 await ctx.interaction.response.send_message(
-                    i18n.t("language.need_manage_guild", lg),
+                    i18n.t("language.need_administrator", lg),
                     ephemeral=True,
                 )
             elif ctx.interaction:
                 await ctx.interaction.followup.send(
-                    i18n.t("language.need_manage_guild", lg),
+                    i18n.t("language.need_administrator", lg),
                     ephemeral=True,
                 )
             else:
-                await ctx.send(i18n.t("language.need_manage_guild", lg))
+                await ctx.send(i18n.t("language.need_administrator", lg))
             return
         if isinstance(error, commands.NoPrivateMessage):
             if ctx.interaction and not ctx.interaction.response.is_done():

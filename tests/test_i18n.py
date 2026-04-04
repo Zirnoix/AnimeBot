@@ -46,3 +46,27 @@ def test_value_xp_titles():
 def test_title_for_global_level_fr():
     t = i18n.title_for_global_level(0, "fr")
     assert "Novice" in t or "👶" in t
+
+
+def test_profile_engagement_keys():
+    assert i18n.t("engagement.checkin_title", "en") != "engagement.checkin_title"
+    assert i18n.t("profile.animetop_mode_all", "en") != "profile.animetop_mode_all"
+    tr = i18n.value("profile.tier_ranks", "en")
+    assert isinstance(tr, list) and len(tr) >= 5
+
+
+def test_community_games_keys():
+    assert "Raid" in i18n.t("community_games.hub_title", "fr", emoji="⚔️", cur=1, mx=3)
+    assert "Boss" in i18n.t("community_games.hub_title", "en", emoji="⚔️", cur=1, mx=3)
+
+
+def test_emoji_sync_keys():
+    assert i18n.t("emoji_sync.denied", "en") == "⛔ Access denied."
+    assert "refusé" in i18n.t("emoji_sync.denied", "fr").lower()
+
+
+def test_common_minigame_busy():
+    assert "party" in i18n.t("common.minigame_busy", "en").lower() or "game" in i18n.t(
+        "common.minigame_busy", "en"
+    ).lower()
+    assert "partie" in i18n.t("common.minigame_busy", "fr").lower()

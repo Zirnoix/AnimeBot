@@ -10,6 +10,8 @@ from discord.ext import commands
 from discord import app_commands
 
 from modules import core
+from modules import i18n
+from modules.app_cmd_locale import ui_str
 
 LOG = logging.getLogger(__name__)
 COLOR_PRIMARY = discord.Color.blurple()
@@ -44,7 +46,10 @@ def _resolve_cover(item: Dict[str, Any]) -> Optional[str]:
             pass
     return None
 
-async def _ack_in_channel(ctx: commands.Context, text: str = "📬 Je t’ai envoyé ça en MP."):
+async def _ack_in_channel(ctx: commands.Context, text: str | None = None):
+    lg = i18n.ctx_lang(ctx)
+    if text is None:
+        text = i18n.t("episodes.ack_dm", lg)
     try:
         if ctx.interaction:
             if not ctx.interaction.response.is_done():
@@ -57,7 +62,8 @@ async def _ack_in_channel(ctx: commands.Context, text: str = "📬 Je t’ai env
         pass
 
 async def _notice_dm_closed(ctx: commands.Context, reason: str | None = None):
-    msg = "❌ Impossible d’ouvrir un MP avec toi. Active tes messages privés puis réessaie."
+    lg = i18n.ctx_lang(ctx)
+    msg = i18n.t("episodes.dm_closed", lg)
     if reason:
         msg += f"\n`{reason}`"
     try:
@@ -170,38 +176,30 @@ def _chunk_lines_for_embed(lines: List[str], max_chars: int = 1020) -> List[str]
     return chunks
 
 
-def _group_by_day_user(items: list[dict]) -> dict[str, list[tuple[dict, datetime]]]:
-    """items issus de core.get_upcoming_episodes(username)."""
-    out: dict[str, list[tuple[dict, datetime]]] = {}
+def _group_by_day_user(items: list[dict]) -> dict[int, list[tuple[dict, datetime]]]:
+    """items issus de core.get_upcoming_episodes(username). Clés : weekday() 0=lun … 6=dim."""
+    out: dict[int, list[tuple[dict, datetime]]] = {}
     tz = _tz()
     for it in items or []:
         ts = it.get("airingAt")
         if not ts:
             continue
         dt = datetime.fromtimestamp(int(ts), tz=tz)
-        jour = dt.strftime("%A")  # en anglais
-        out.setdefault(jour, []).append((it, dt))
+        wd = int(dt.weekday())
+        out.setdefault(wd, []).append((it, dt))
     return out
 
-_JOUR_EN2FR = {
-    "Monday":"Lundi","Tuesday":"Mardi","Wednesday":"Mercredi",
-    "Thursday":"Jeudi","Friday":"Vendredi","Saturday":"Samedi","Sunday":"Dimanche"
-}
 
-def _group_by_day(items: List[Dict[str, Any]]) -> Dict[str, List[tuple[Dict[str, Any], datetime]]]:
+def _group_by_day(items: List[Dict[str, Any]]) -> Dict[int, List[tuple[Dict[str, Any], datetime]]]:
     tz = _tz()
-    JOURS_FR = getattr(core, "JOURS_FR", {
-        "Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi",
-        "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"
-    })
-    plan: Dict[str, List[tuple[Dict[str, Any], datetime]]] = {}
+    plan: Dict[int, List[tuple[Dict[str, Any], datetime]]] = {}
     for ep in items:
         ts = ep.get("airingAt")
         if not ts:
             continue
         dt = datetime.fromtimestamp(ts, tz=tz)
-        jour_fr = JOURS_FR.get(dt.strftime("%A"), dt.strftime("%A"))
-        plan.setdefault(jour_fr, []).append((ep, dt))
+        wd = int(dt.weekday())
+        plan.setdefault(wd, []).append((ep, dt))
     return plan
 
 def _cover_from_anilist_id(media_id: int | None) -> str | None:
@@ -225,11 +223,11 @@ class Episodes(commands.Cog):
     # ---------- /planning (server/global via choix) ----------
     @commands.hybrid_command(
         name="planning",
-        description="Planning hebdo. Par défaut : liste du serveur (`/airings`). Envoi en MP."
+        description=ui_str("slash.episodes_planning"),
     )
     @app_commands.choices(scope=[
-        app_commands.Choice(name="🛡️ Serveur — liste /airings", value="server"),
-        app_commands.Choice(name="🌐 Global — toutes les sorties", value="global"),
+        app_commands.Choice(name=ui_str("slash.choice_scope_server"), value="server"),
+        app_commands.Choice(name=ui_str("slash.choice_scope_global"), value="global"),
     ])
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def planning(self, ctx: commands.Context, scope: app_commands.Choice[str] = None) -> None:
@@ -237,11 +235,13 @@ class Episodes(commands.Cog):
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
 
         scope_val = (scope.value if scope else "server")
+        lg = i18n.ctx_lang(ctx)
 
         try:
             all_items = core.get_airings_global(days=7, limit=250)
         except Exception as e:
-            await _send_dm(ctx, content=f"⚠️ Impossible de récupérer le planning global.\n`{type(e).__name__}: {e}`")
+            detail = f"{type(e).__name__}: {e}"
+            await _send_dm(ctx, content=i18n.t("episodes.err_planning", lg, detail=detail))
             return
 
         items = all_items
@@ -249,21 +249,22 @@ class Episodes(commands.Cog):
             items = core.filter_airings_for_guild(ctx.guild.id, all_items)
 
         if not items:
-            human = "liste du serveur" if scope_val == "server" else "global"
-            await _send_dm(ctx, content=f"📭 Aucun épisode prévu ({human}) cette semaine.")
+            sc = i18n.t("episodes.scope_server", lg) if scope_val == "server" else i18n.t("episodes.scope_global", lg)
+            await _send_dm(ctx, content=i18n.t("episodes.no_ep_week", lg, scope=sc))
             return
 
         genre_emoji = getattr(core, "genre_emoji", lambda g: "🎬")
         planning = _group_by_day(items)
-        ordre_jours = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
+        scope_label = i18n.t("episodes.scope_server", lg) if scope_val == "server" else i18n.t("episodes.scope_global", lg)
 
         embeds: List[discord.Embed] = []
-        for jour in ordre_jours:
-            if jour not in planning:
+        for wd in range(7):
+            if wd not in planning:
                 continue
-            episodes_jour = sorted(planning[jour], key=lambda x: x[1])[:10]
+            day_name = i18n.weekday_name(lg, wd)
+            episodes_jour = sorted(planning[wd], key=lambda x: x[1])[:10]
             e = discord.Embed(
-                title=f"📅 Planning {jour} ({'liste du serveur' if scope_val=='server' else 'global'})",
+                title=i18n.t("episodes.planning_title", lg, day=day_name, scope=scope_label),
                 color=COLOR_PRIMARY,
             )
             lines: List[str] = []
@@ -289,9 +290,9 @@ class Episodes(commands.Cog):
             chunks = _chunk_lines_for_embed(lines)
             for ci, chunk in enumerate(chunks):
                 if len(chunks) == 1:
-                    fname = f"{jour} · {len(episodes_jour)} sortie(s)"
+                    fname = i18n.t("episodes.field_day", lg, day=day_name, n=len(episodes_jour))
                 else:
-                    fname = f"{jour} · partie {ci + 1}/{len(chunks)}"
+                    fname = i18n.t("episodes.field_day_part", lg, day=day_name, ci=ci + 1, parts=len(chunks))
                 e.add_field(name=fname[:256], value=chunk[:1024], inline=False)
             embeds.append(e)
 
@@ -300,11 +301,11 @@ class Episodes(commands.Cog):
     # ---------- /next (serveur/global) avec IMAGE ----------
     @commands.hybrid_command(
         name="next",
-        description="Prochain épisode. Par défaut : liste du serveur. Envoi en MP (carte image)."
+        description=ui_str("slash.episodes_next"),
     )
     @app_commands.choices(scope=[
-        app_commands.Choice(name="🛡️ Serveur — liste /airings", value="server"),
-        app_commands.Choice(name="🌐 Global — toutes les sorties", value="global"),
+        app_commands.Choice(name=ui_str("slash.choice_scope_server"), value="server"),
+        app_commands.Choice(name=ui_str("slash.choice_scope_global"), value="global"),
     ])
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def next_cmd(self, ctx: commands.Context, scope: app_commands.Choice[str] = None) -> None:
@@ -312,11 +313,13 @@ class Episodes(commands.Cog):
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
 
         scope_val = (scope.value if scope else "server")
+        lg = i18n.ctx_lang(ctx)
 
         try:
             all_items = core.get_airings_global(days=7, limit=200)
         except Exception as e:
-            await _send_dm(ctx, content=f"⚠️ Impossible de récupérer le prochain épisode.\n`{type(e).__name__}: {e}`")
+            detail = f"{type(e).__name__}: {e}"
+            await _send_dm(ctx, content=i18n.t("episodes.err_next", lg, detail=detail))
             return
 
         items = all_items
@@ -327,8 +330,8 @@ class Episodes(commands.Cog):
         item = next((it for it in items if (it.get("airingAt") or 0) > now), items[0] if items else None)
 
         if not item:
-            human = "liste du serveur" if scope_val == "server" else "global"
-            await _send_dm(ctx, content=f"📭 Aucun épisode à venir ({human}) trouvé cette semaine.")
+            sc = i18n.t("episodes.scope_server", lg) if scope_val == "server" else i18n.t("episodes.scope_global", lg)
+            await _send_dm(ctx, content=i18n.t("episodes.no_next_week", lg, scope=sc))
             return
 
         media = item.get("media") or {}
@@ -349,7 +352,11 @@ class Episodes(commands.Cog):
         #   - genres (list[str])
         #   - when (str)
         tdict = media.get("title") or {}
-        when_str = core.format_airing_datetime_fr(ts, "Europe/Paris") if ts else "date inconnue"
+        when_str = (
+            core.format_airing_datetime_fr(ts, "Europe/Paris")
+            if ts
+            else i18n.t("episodes.date_unknown", lg)
+        )
 
         img_path = generate_next_card({
             "cover": cover,
@@ -369,26 +376,28 @@ class Episodes(commands.Cog):
     # ---------- /monnext (perso AniList lié) ----------
     @commands.hybrid_command(
         name="monnext",
-        description="Tes prochain(s) épisode(s) (compte AniList lié). Envoi en MP (carte image + liste)."
+        description=ui_str("slash.episodes_monnext"),
     )
     @app_commands.describe(
-        limite="Nombre d’entrées (1-5 recommandés)",
-        rafraichir="Ignorer le cache et reinterroger AniList (utile après une panne API).",
+        limite=ui_str("slash.episodes_monnext_limite"),
+        rafraichir=ui_str("slash.episodes_monnext_rafraichir"),
     )
     @commands.cooldown(1, 12, commands.BucketType.user)
     async def monnext(self, ctx: commands.Context, limite: Optional[int] = 1, rafraichir: bool = False) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
 
+        lg = i18n.ctx_lang(ctx)
         username = core.get_linked_username(ctx.author.id)
         if not username:
-            await _send_dm(ctx, content="🔗 Tu n’as pas lié ton compte AniList. Utilise **/linkanilist <pseudo>**.")
+            await _send_dm(ctx, content=i18n.t("episodes.not_linked", lg))
             return
 
         try:
             items = core.get_upcoming_episodes(username, force=rafraichir) or []
         except Exception as e:
-            await _send_dm(ctx, content=f"⚠️ Impossible de récupérer tes prochains épisodes.\n`{type(e).__name__}: {e}`")
+            detail = f"{type(e).__name__}: {e}"
+            await _send_dm(ctx, content=i18n.t("episodes.err_monnext_fetch", lg, detail=detail))
             return
 
         try:
@@ -398,15 +407,7 @@ class Episodes(commands.Cog):
 
         items = sorted(items, key=lambda x: x.get("airingAt", 0))[:n]
         if not items:
-            await _send_dm(
-                ctx,
-                content=(
-                    "📭 Aucun **prochain épisode annoncé** pour ta liste **En cours / Répété** sur AniList.\n"
-                    "• Seules les séries avec une date d’épisode côté AniList (`nextAiringEpisode`) apparaissent ici.\n"
-                    "• Ta liste doit être **publique** pour que le bot puisse la lire.\n"
-                    "• Si l’API venait de planter, réessaie avec **`rafraichir: Oui`** sur cette commande."
-                ),
-            )
+            await _send_dm(ctx, content=i18n.t("episodes.monnext_empty", lg))
             return
 
         # 1) Carte image sur le premier
@@ -415,7 +416,11 @@ class Episodes(commands.Cog):
         title = _pick_title(tdict)
         epnum = first.get("episode") or "?"
         ts = first.get("airingAt") or 0
-        when_str = core.format_airing_datetime_fr(ts, "Europe/Paris") if ts else "date inconnue"
+        when_str = (
+            core.format_airing_datetime_fr(ts, "Europe/Paris")
+            if ts
+            else i18n.t("episodes.date_unknown", lg)
+        )
 
         cover = first.get("cover") or _cover_from_anilist_id(first.get("id"))
 
@@ -437,53 +442,47 @@ class Episodes(commands.Cog):
     # ---------- /monplanning (perso) ----------
     @commands.hybrid_command(
         name="monplanning",
-        description="Ton planning hebdo depuis ta liste AniList (compte lié requis). Envoi en MP."
+        description=ui_str("slash.episodes_monplanning"),
     )
     @app_commands.describe(
-        rafraichir="Ignorer le cache et reinterroger AniList (utile après une panne API).",
+        rafraichir=ui_str("slash.episodes_monplanning_rafraichir"),
     )
     @commands.cooldown(1, 12, commands.BucketType.user)
     async def monplanning(self, ctx: commands.Context, rafraichir: bool = False) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
 
+        lg = i18n.ctx_lang(ctx)
         username = core.get_linked_username(ctx.author.id)
         if not username:
-            await _send_dm(ctx, content="🔗 Tu n’as pas lié ton compte AniList. Utilise **/linkanilist <pseudo>**.")
+            await _send_dm(ctx, content=i18n.t("episodes.not_linked", lg))
             return
 
         try:
             items = core.get_upcoming_episodes(username, force=rafraichir) or []
         except Exception as e:
-            await _send_dm(ctx, content=f"⚠️ Impossible de récupérer ton planning.\n`{type(e).__name__}: {e}`")
+            detail = f"{type(e).__name__}: {e}"
+            await _send_dm(ctx, content=i18n.t("episodes.err_monplanning_fetch", lg, detail=detail))
             return
 
         if not items:
-            await _send_dm(
-                ctx,
-                content=(
-                    "📭 Pas de **prochain épisode annoncé** sur AniList pour tes entrées **En cours / Répété** "
-                    "(liste **privée**, titres sans date d’épisode publiée sur AniList, ou cache obsolète).\n"
-                    "Réessaie avec **`rafraichir: Oui`** si besoin."
-                ),
-            )
+            await _send_dm(ctx, content=i18n.t("episodes.monplanning_empty", lg))
             return
 
         planning = _group_by_day_user(items)
-        ordre_jours = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
 
         embeds: list[discord.Embed] = []
-        for j_en in ordre_jours:
-            jour_items = planning.get(j_en)
+        for wd in range(7):
+            jour_items = planning.get(wd)
             if not jour_items:
                 continue
 
             # tri par heure
             jour_items.sort(key=lambda x: x[1])
 
-            jour_fr = _JOUR_EN2FR.get(j_en, j_en)
+            day_name = i18n.weekday_name(lg, wd)
             e = discord.Embed(
-                title=f"📅 Ton planning {jour_fr}",
+                title=i18n.t("episodes.monplanning_title", lg, day=day_name),
                 description="",
                 color=COLOR_PRIMARY,
             )
@@ -507,9 +506,9 @@ class Episodes(commands.Cog):
             chunks = _chunk_lines_for_embed(lines)
             for ci, chunk in enumerate(chunks):
                 if len(chunks) == 1:
-                    fname = f"{jour_fr} · {len(jour_items[:10])} sortie(s)"
+                    fname = i18n.t("episodes.field_mon_part", lg, day=day_name, n=len(jour_items[:10]))
                 else:
-                    fname = f"{jour_fr} · partie {ci + 1}/{len(chunks)}"
+                    fname = i18n.t("episodes.field_mon_part2", lg, day=day_name, ci=ci + 1, parts=len(chunks))
                 e.add_field(name=fname[:256], value=chunk[:1024], inline=False)
 
             embeds.append(e)

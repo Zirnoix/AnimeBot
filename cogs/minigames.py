@@ -19,6 +19,8 @@ from discord.ui import View, Button, Select
 from modules import anilist_gate
 from modules import core
 from modules import higherlower_combine
+from modules import i18n
+from modules.app_cmd_locale import ui_str
 from modules import minigame_lock
 
 LOG = logging.getLogger(__name__)
@@ -130,12 +132,10 @@ def _guess_genre_prune_times(uid: int, now: float) -> deque[float]:
     return dq
 
 
-def _easy_genre_hint_short() -> str:
+def _easy_genre_hint_short(lg: str) -> str:
     names = sorted(_SPAM_GENRE_NAMES, key=lambda s: s.lower())
     sample = ", ".join(n.replace("-", " ").title() for n in names[:14])
-    return (
-        f"_Genres souvent considérés comme « faciles » (spam si répétés) : **{sample}**, …_"
-    )
+    return i18n.t("minigames.gg_hint_line", lg, sample=sample)
 
 
 def _guess_genre_norm_key(guess: str) -> str:
@@ -211,13 +211,14 @@ class HigherLowerView(View):
     def __init__(self, ctx, choice1, choice2):
         super().__init__(timeout=20)
         self.ctx = ctx
+        self.lang = i18n.ctx_lang(ctx)
         self.choice1 = choice1
         self.choice2 = choice2
         self.result_sent = False
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user != self.ctx.author:
-            await interaction.response.send_message("❌ Ce mini-jeu n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("minigames.hl_not_yours", self.lang), ephemeral=True)
             return False
         return True
 
@@ -238,15 +239,18 @@ class HigherLowerView(View):
         pop2 = self.choice2.get("popularity", 0)
         correct = "1" if pop1 >= pop2 else "2"
 
+        lg = self.lang
+        t1 = self.choice1["title"]["romaji"]
+        t2 = self.choice2["title"]["romaji"]
         if answer == correct:
             await interaction.response.send_message(
-                f"✅ Bravo ! **{self.choice1['title']['romaji']}** ({pop1}) vs **{self.choice2['title']['romaji']}** ({pop2})\nTu gagnes **5 XP** !"
+                i18n.t("minigames.hl_win", lg, t1=t1, p1=pop1, t2=t2, p2=pop2)
             )
             await core.add_xp(interaction.client, interaction.channel, interaction.user.id, 5)
             core.add_mini_score(interaction.user.id, "higherlower", 1)
         else:
             await interaction.response.send_message(
-                f"❌ Mauvais choix. **{self.choice1['title']['romaji']}** : {pop1}, **{self.choice2['title']['romaji']}** : {pop2}."
+                i18n.t("minigames.hl_lose", lg, t1=t1, p1=pop1, t2=t2, p2=pop2)
             )
         self.stop()
 
@@ -254,35 +258,35 @@ class HigherLowerView(View):
 class MinijeuxGuessSelect(Select):
     """Menu déroulant : tous les modes Guess (+ Guess OP)."""
 
-    def __init__(self) -> None:
+    def __init__(self, lang: str) -> None:
         super().__init__(
             custom_id="minijeux_guess_pick",
-            placeholder="🎯 Devinettes (Guess)…",
+            placeholder=i18n.t("minigames.guess_ph", lang)[:150],
             options=[
                 discord.SelectOption(
-                    label="📅 Année",
+                    label=i18n.t("minigames.guess_year_l", lang)[:100],
                     value="guess_year",
-                    description="Devine l’année de diffusion",
+                    description=i18n.t("minigames.guess_year_d", lang)[:100],
                 ),
                 discord.SelectOption(
-                    label="🎞️ Épisodes",
+                    label=i18n.t("minigames.guess_ep_l", lang)[:100],
                     value="guess_episodes",
-                    description="Devine le nombre d’épisodes",
+                    description=i18n.t("minigames.guess_ep_d", lang)[:100],
                 ),
                 discord.SelectOption(
-                    label="🎭 Genre",
+                    label=i18n.t("minigames.guess_genre_l", lang)[:100],
                     value="guess_genre",
-                    description="Trouve un des genres",
+                    description=i18n.t("minigames.guess_genre_d", lang)[:100],
                 ),
                 discord.SelectOption(
-                    label="👤 Personnage",
+                    label=i18n.t("minigames.guess_char_l", lang)[:100],
                     value="guess_character",
-                    description="4 boutons — bon personnage",
+                    description=i18n.t("minigames.guess_char_d", lang)[:100],
                 ),
                 discord.SelectOption(
-                    label="🎵 Guess OP (vocal)",
+                    label=i18n.t("minigames.guessop_l", lang)[:100],
                     value="guessop",
-                    description="Extraits audio — salon vocal requis",
+                    description=i18n.t("minigames.guessop_d", lang)[:100],
                 ),
             ],
         )
@@ -293,7 +297,10 @@ class MinijeuxGuessSelect(Select):
             LOG.error("MinijeuxGuessSelect: view inattendue %r", type(hub))
             return
         if interaction.user.id != hub.invoker_id:
-            await interaction.response.send_message("❌ Ce menu n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(
+                i18n.t("minigames.hub_not_yours", i18n.interaction_lang(interaction)),
+                ephemeral=True,
+            )
             return
         key = self.values[0] if self.values else ""
         await hub.cog._run_minigame_choice(interaction, key)
@@ -302,40 +309,40 @@ class MinijeuxGuessSelect(Select):
 class MinijeuxAutresSelect(Select):
     """Menu déroulant : quiz, higher/lower, duel (rappel)."""
 
-    def __init__(self) -> None:
+    def __init__(self, lang: str) -> None:
         super().__init__(
             custom_id="minijeux_autres_pick",
-            placeholder="🎮 Autres mini-jeux…",
+            placeholder=i18n.t("minigames.autres_ph", lang)[:150],
             options=[
                 discord.SelectOption(
-                    label="⬆️⬇️ Higher / Lower",
+                    label=i18n.t("minigames.hl_menu_l", lang)[:100],
                     value="higherlower",
-                    description="Quel anime est le plus populaire ?",
+                    description=i18n.t("minigames.hl_menu_d", lang)[:100],
                 ),
                 discord.SelectOption(
-                    label="🎞️ Anime quiz (solo)",
+                    label=i18n.t("minigames.aq_solo_l", lang)[:100],
                     value="animequiz",
-                    description="Quiz image / indices",
+                    description=i18n.t("minigames.aq_solo_d", lang)[:100],
                 ),
                 discord.SelectOption(
-                    label="🎬 Anime quiz (multi)",
+                    label=i18n.t("minigames.aq_multi_l", lang)[:100],
                     value="animequizmulti",
-                    description="Plusieurs questions d’affilée",
+                    description=i18n.t("minigames.aq_multi_d", lang)[:100],
                 ),
                 discord.SelectOption(
-                    label="⚔️ Duel",
+                    label=i18n.t("minigames.duel_menu_l", lang)[:100],
                     value="duel",
-                    description="1v1 — utilise `/duel @membre` pour lancer",
+                    description=i18n.t("minigames.duel_menu_d", lang)[:100],
                 ),
                 discord.SelectOption(
-                    label="⛓️ Chain quiz",
+                    label=i18n.t("minigames.chain_l", lang)[:100],
                     value="chainquiz",
-                    description="Difficulté qui monte à chaque bonne réponse",
+                    description=i18n.t("minigames.chain_d", lang)[:100],
                 ),
                 discord.SelectOption(
-                    label="🕵️ Qui est-ce ?",
+                    label=i18n.t("minigames.gw_l", lang)[:100],
                     value="guesswho",
-                    description="Flou + difficulté (jusqu’à +42 XP)",
+                    description=i18n.t("minigames.gw_d", lang)[:100],
                 ),
             ],
         )
@@ -346,7 +353,10 @@ class MinijeuxAutresSelect(Select):
             LOG.error("MinijeuxAutresSelect: view inattendue %r", type(hub))
             return
         if interaction.user.id != hub.invoker_id:
-            await interaction.response.send_message("❌ Ce menu n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(
+                i18n.t("minigames.hub_not_yours", i18n.interaction_lang(interaction)),
+                ephemeral=True,
+            )
             return
         key = self.values[0] if self.values else ""
         await hub.cog._run_minigame_choice(interaction, key)
@@ -355,12 +365,13 @@ class MinijeuxAutresSelect(Select):
 class MinijeuxHubView(View):
     """Deux menus : Guess (devinettes) et Autres (quiz, H/L, rappel duel)."""
 
-    def __init__(self, cog: "MiniGames", invoker_id: int):
+    def __init__(self, cog: "MiniGames", invoker_id: int, lang: str):
         super().__init__(timeout=180)
         self.cog = cog
         self.invoker_id = invoker_id
-        self.add_item(MinijeuxGuessSelect())
-        self.add_item(MinijeuxAutresSelect())
+        self.lang = lang
+        self.add_item(MinijeuxGuessSelect(lang))
+        self.add_item(MinijeuxAutresSelect(lang))
 
 
 class MiniGames(commands.Cog):
@@ -369,6 +380,7 @@ class MiniGames(commands.Cog):
 
     async def _run_minigame_choice(self, interaction: discord.Interaction, key: str) -> None:
         """Lance un mini-jeu depuis un menu (Select) : même logique que les commandes slash."""
+        lg = i18n.interaction_lang(interaction)
         if not await anilist_gate.ensure_anilist_for_interaction(self.bot, interaction):
             return
         await interaction.response.defer(thinking=True)
@@ -380,7 +392,7 @@ class MiniGames(commands.Cog):
             if ra > 0:
                 try:
                     await interaction.followup.send(
-                        f"⏳ Cooldown du mini-jeu : réessaie dans **{int(ra) + 1}s**.",
+                        i18n.t("minigames.cooldown", lg, s=int(ra) + 1),
                         ephemeral=True,
                     )
                 except Exception:
@@ -398,8 +410,7 @@ class MiniGames(commands.Cog):
         try:
             if key == "duel":
                 await interaction.followup.send(
-                    "⚔️ Un **duel** nécessite un adversaire : utilise **`/duel @membre`** "
-                    "(manches + difficulté). Tu peux aussi taper **`!duel`**.",
+                    i18n.t("minigames.duel_slash", lg),
                     ephemeral=True,
                 )
                 return
@@ -418,19 +429,19 @@ class MiniGames(commands.Cog):
                 if og:
                     await og.guess_op(ctx)  # type: ignore[attr-defined]
                 else:
-                    await interaction.followup.send("❌ Guess OP indisponible.", ephemeral=True)
+                    await interaction.followup.send(i18n.t("minigames.no_guessop", lg), ephemeral=True)
             elif key == "animequiz":
                 qz = self.bot.get_cog("Quiz")
                 if qz:
                     await qz.animequiz(ctx, "medium")  # type: ignore[attr-defined]
                 else:
-                    await interaction.followup.send("❌ Quiz indisponible.", ephemeral=True)
+                    await interaction.followup.send(i18n.t("minigames.no_quiz", lg), ephemeral=True)
             elif key == "animequizmulti":
                 qz = self.bot.get_cog("Quiz")
                 if qz:
                     await qz.animequizmulti(ctx, 5)  # type: ignore[attr-defined]
                 else:
-                    await interaction.followup.send("❌ Quiz indisponible.", ephemeral=True)
+                    await interaction.followup.send(i18n.t("minigames.no_quiz", lg), ephemeral=True)
             elif key in {"chainquiz", "guesswho"}:
                 cg = self.bot.get_cog("CommunityGames")
                 if cg:
@@ -439,14 +450,14 @@ class MiniGames(commands.Cog):
                     else:
                         await cg.guesswho(ctx)  # type: ignore[attr-defined]
                 else:
-                    await interaction.followup.send("❌ Mini-jeu indisponible.", ephemeral=True)
+                    await interaction.followup.send(i18n.t("minigames.no_minigame", lg), ephemeral=True)
             else:
-                await interaction.followup.send("❌ Option inconnue.", ephemeral=True)
+                await interaction.followup.send(i18n.t("minigames.unknown_option", lg), ephemeral=True)
         except Exception:
             LOG.exception("minigame dispatch failed (%s)", key)
             try:
                 await interaction.followup.send(
-                    "❌ Erreur en lançant le mini-jeu. Réessaie ou utilise la commande directement.",
+                    i18n.t("minigames.dispatch_err", lg),
                     ephemeral=True,
                 )
             except Exception:
@@ -455,10 +466,11 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     # Guess (year, episodes, genre, character) — /guess* + /minijeux
     # --------------------------------------
-    @commands.hybrid_command(name="higherlower", description="Quel anime est le plus populaire ?")
+    @commands.hybrid_command(name="higherlower", description=ui_str("slash.minigames_higherlower"))
     @commands.cooldown(1, 18, commands.BucketType.user)
     async def higher_lower(self, ctx: commands.Context):
         uid = ctx.author.id
+        lg = i18n.ctx_lang(ctx)
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
         if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
@@ -467,7 +479,7 @@ class MiniGames(commands.Cog):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            await ctx.send("🎲 Préparation du mini-jeu…")
+            await ctx.send(i18n.t("minigames.hl_prep", lg))
 
             page = random.randint(1, 10)
             query = '''
@@ -488,17 +500,18 @@ class MiniGames(commands.Cog):
 
             media_list = data["data"]["Page"]["media"]
             if len(media_list) < 2:
-                await ctx.send("❌ Pas assez de données pour jouer.")
+                await ctx.send(i18n.t("minigames.not_enough_data", lg))
                 return
 
             choice1, choice2 = random.sample(media_list, 2)
 
             embed = discord.Embed(
-                title="⬆️⬇️ Quel anime est le plus populaire ?",
-                description=(
-                    "Clique sur **1️⃣** ou **2️⃣** pour choisir :\n\n"
-                    f"**1️⃣** {choice1['title']['romaji']}\n"
-                    f"**2️⃣** {choice2['title']['romaji']}"
+                title=i18n.t("minigames.hl_title", lg),
+                description=i18n.t(
+                    "minigames.hl_desc",
+                    lg,
+                    t1=choice1["title"]["romaji"],
+                    t2=choice2["title"]["romaji"],
                 ),
                 color=discord.Color.orange(),
             )
@@ -516,7 +529,7 @@ class MiniGames(commands.Cog):
             try:
                 await view.wait()
             except asyncio.TimeoutError:
-                await ctx.send("⏰ Temps écoulé !")
+                await ctx.send(i18n.t("minigames.timeout_short", lg))
         finally:
             minigame_lock.end(uid)
 
@@ -525,6 +538,7 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     async def _guess_year(self, ctx: commands.Context) -> None:
         uid = ctx.author.id
+        lg = i18n.ctx_lang(ctx)
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
         if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
@@ -533,7 +547,7 @@ class MiniGames(commands.Cog):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            await ctx.send("🗓️ Chargement d'un anime…")
+            await ctx.send(i18n.t("minigames.gy_load", lg))
             linked = core.get_linked_username(uid)
             list_source = False
             user_list_fallback = False
@@ -576,26 +590,23 @@ class MiniGames(commands.Cog):
             title = anime["title"]["romaji"]
             year = anime.get("startDate", {}).get("year")
             if not year:
-                await ctx.send("❌ L'année de cet anime est indisponible.")
+                await ctx.send(i18n.t("minigames.gy_no_year", lg))
                 return
 
             try:
                 embed = discord.Embed(
-                    title="📅 Mini-jeu : Devine l'année !",
-                    description=(
-                        f"En quelle année **{title}** a-t-il commencé à être diffusé ?\n"
-                        "Réponds par une année (ex : `2015`)."
-                    ),
+                    title=i18n.t("minigames.gy_title", lg),
+                    description=i18n.t("minigames.gy_desc", lg, title=title),
                     color=discord.Color.purple(),
                 )
-                base_tip = "Réponse attendue : une année à 4 chiffres."
+                base_tip = i18n.t("minigames.gy_footer_base", lg)
                 if list_source:
                     embed.set_footer(
-                        text="Animé tiré depuis ta liste AniList (complété, en cours, relecture, en pause).\n" + base_tip
+                        text=i18n.t("minigames.gy_footer_list", lg) + base_tip
                     )
                 elif user_list_fallback and linked:
                     embed.set_footer(
-                        text="Liste AniList vide ou sans année connue — tirage global.\n" + base_tip
+                        text=i18n.t("minigames.gy_footer_fb", lg) + base_tip
                     )
                 else:
                     embed.set_footer(text=base_tip)
@@ -611,16 +622,16 @@ class MiniGames(commands.Cog):
                 try:
                     guessed_year = int(msg.content.strip())
                     if abs(guessed_year - year) <= 1:
-                        await ctx.send(f"✅ Bravo ! L'année était bien **{year}** (tu as répondu {guessed_year}). Tu gagnes 8 XP !")
+                        await ctx.send(i18n.t("minigames.gy_win", lg, year=year, guess=guessed_year))
                         await core.add_xp(self.bot, ctx.channel, ctx.author.id, 8)
                         core.add_mini_score(ctx.author.id, "guessyear", 1)
                         _mission_guess_win(self.bot, ctx.author.id)
                     else:
-                        await ctx.send(f"❌ Raté. L'année était **{year}** (tu as répondu {guessed_year}).")
+                        await ctx.send(i18n.t("minigames.gy_lose", lg, year=year, guess=guessed_year))
                 except ValueError:
-                    await ctx.send(f"❌ Format invalide. L'année était **{year}**.")
+                    await ctx.send(i18n.t("minigames.gy_badfmt", lg, year=year))
             except (Exception, asyncio.TimeoutError):
-                await ctx.send("❌ Une erreur s'est produite ou temps écoulé.")
+                await ctx.send(i18n.t("minigames.gy_err", lg))
         finally:
             minigame_lock.end(uid)
 
@@ -629,6 +640,7 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     async def _guess_episodes(self, ctx: commands.Context) -> None:
         uid = ctx.author.id
+        lg = i18n.ctx_lang(ctx)
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
         if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
@@ -637,7 +649,7 @@ class MiniGames(commands.Cog):
             await minigame_lock.reply_busy(ctx)
             return
         try:
-            await ctx.send("🎬 Sélection d'un anime…")
+            await ctx.send(i18n.t("minigames.ge_load", lg))
             linked = core.get_linked_username(uid)
             list_source = False
             user_list_fallback = False
@@ -680,21 +692,18 @@ class MiniGames(commands.Cog):
             title = anime["title"]["romaji"]
             episodes = anime["episodes"]
             embed = discord.Embed(
-                title="🎞️ Mini-jeu : Combien d'épisodes ?",
-                description=(
-                    f"Combien d'épisodes compte **{title}** ?\n"
-                    "Réponds par un nombre (ex : `24`)."
-                ),
+                title=i18n.t("minigames.ge_title", lg),
+                description=i18n.t("minigames.ge_desc", lg, title=title),
                 color=discord.Color.blue(),
             )
-            base_tip = "Tolérance : ±10 % du total (min. 5 épisodes)."
+            base_tip = i18n.t("minigames.ge_footer_base", lg)
             if list_source:
                 embed.set_footer(
-                    text="Animé tiré depuis ta liste AniList (complété, en cours, relecture, en pause).\n" + base_tip
+                    text=i18n.t("minigames.ge_footer_list", lg) + base_tip
                 )
             elif user_list_fallback and linked:
                 embed.set_footer(
-                    text="Liste AniList vide ou sans nombre d'épisodes fixe — tirage global.\n" + base_tip
+                    text=i18n.t("minigames.ge_footer_fb", lg) + base_tip
                 )
             else:
                 embed.set_footer(text=base_tip)
@@ -712,16 +721,16 @@ class MiniGames(commands.Cog):
                     guessed = int(msg.content.strip())
                     tolerance = max(int(episodes * 0.1), 5)
                     if abs(guessed - episodes) <= tolerance:
-                        await ctx.send(f"✅ Bravo ! **{title}** compte {episodes} épisodes (tu as répondu {guessed}). Tu gagnes 8 XP !")
+                        await ctx.send(i18n.t("minigames.ge_win", lg, title=title, ep=episodes, guess=guessed))
                         await core.add_xp(self.bot, ctx.channel, ctx.author.id, 8)
                         core.add_mini_score(ctx.author.id, "guessepisodes", 1)
                         _mission_guess_win(self.bot, ctx.author.id)
                     else:
-                        await ctx.send(f"❌ Raté. **{title}** compte {episodes} épisodes (tu as répondu {guessed}).")
+                        await ctx.send(i18n.t("minigames.ge_lose", lg, title=title, ep=episodes, guess=guessed))
                 except ValueError:
-                    await ctx.send(f"❌ Ce n'est pas un nombre valide. **{title}** a **{episodes}** épisodes.")
+                    await ctx.send(i18n.t("minigames.ge_badnum", lg, title=title, ep=episodes))
             except asyncio.TimeoutError:
-                await ctx.send("⏰ Temps écoulé ! Le mini-jeu est annulé.")
+                await ctx.send(i18n.t("minigames.ge_timeout", lg))
         finally:
             minigame_lock.end(uid)
 
@@ -730,6 +739,7 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     async def _guess_genre(self, ctx: commands.Context) -> None:
         uid = ctx.author.id
+        lg = i18n.ctx_lang(ctx)
         now = time.monotonic()
         cd_until = _GUESS_GENRE_COOLDOWN_UNTIL.get(uid, 0.0)
         if now < cd_until:
@@ -746,7 +756,7 @@ class MiniGames(commands.Cog):
             return
 
         try:
-            await ctx.send("🎭 Sélection d'un anime…")
+            await ctx.send(i18n.t("minigames.gg_load", lg))
             anime = None
             linked = core.get_linked_username(uid)
             list_source = False
@@ -789,27 +799,24 @@ class MiniGames(commands.Cog):
             title = anime["title"]["romaji"]
             genres = [g.lower() for g in anime.get("genres", [])]
             embed = discord.Embed(
-                title="🎭 Mini-jeu : Devine le genre !",
-                description=(
-                    f"Quel est un des genres de **{title}** ?\n"
-                    "Réponds par un genre AniList (ex. `Psychological`, `Slice of Life`).\n"
-                    "Les genres **très courants** (Action, Comedy, Romance, Fantasy…) sont valides, "
-                    "mais **répéter le même mot** en boucle déclenche des **avertissements puis des sanctions**.\n"
-                    f"{_easy_genre_hint_short()}"
+                title=i18n.t("minigames.gg_title", lg),
+                description=i18n.t(
+                    "minigames.gg_desc",
+                    lg,
+                    title=title,
+                    hint=_easy_genre_hint_short(lg),
                 ),
                 color=discord.Color.magenta(),
             )
-            base_tip = (
-                "Astuce : varie — un genre plus rare ou précis évite les avertissements « facile »."
-            )
+            base_tip = i18n.t("minigames.gg_tip", lg)
             if list_source:
                 footer_txt = (
-                    "Animé tiré depuis ta liste AniList (complété, en cours, relecture, en pause).\n"
+                    i18n.t("minigames.gg_footer_list", lg)
                     + base_tip
                 )
             elif user_list_fallback and linked:
                 footer_txt = (
-                    "Liste AniList vide, privée ou sans genres exploitables — tirage global.\n"
+                    i18n.t("minigames.gg_footer_fb", lg)
                     + base_tip
                 )
             else:
@@ -838,15 +845,22 @@ class MiniGames(commands.Cog):
 
                     if same_attempts == _ATTEMPT_SOFT_WARN:
                         await ctx.send(
-                            f"⚠️ {ctx.author.mention} — tu as déjà utilisé **{guess_raw}** plusieurs fois en ~5 min.\n"
-                            f"Évite de **répéter ce mot** ; choisis un **autre** genre (ou un plus précis).\n"
-                            f"{_easy_genre_hint_short()}"
+                            i18n.t(
+                                "minigames.gg_soft",
+                                lg,
+                                mention=ctx.author.mention,
+                                guess=guess_raw,
+                                hint=_easy_genre_hint_short(lg),
+                            )
                         )
                     elif same_attempts == _ATTEMPT_HARD_WARN:
                         await ctx.send(
-                            f"🚨 **Dernier avertissement** pour **{guess_raw}** : une répétition de plus = "
-                            f"**sanction** (−XP, cooldown long, voir `/profile`). Varie vraiment.\n"
-                            f"{_easy_genre_hint_short()}"
+                            i18n.t(
+                                "minigames.gg_hard",
+                                lg,
+                                guess=guess_raw,
+                                hint=_easy_genre_hint_short(lg),
+                            )
                         )
 
                     if same_attempts >= _ATTEMPT_PENALTY:
@@ -860,21 +874,35 @@ class MiniGames(commands.Cog):
                         await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_hit, announce=False)
                         total_pen = core.inc_guess_genre_penalty_count(uid)
                         correct = guess in genres
+                        genres_txt = ", ".join(anime["genres"])
                         if correct:
                             await ctx.send(
-                                f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de répétitions du même "
-                                f"genre « facile » en ~5 min.\n"
-                                f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
-                                f"**{total_pen}** (voir `/profile`).\n"
-                                f"Genres de **{title}** : {', '.join(anime['genres'])}."
+                                i18n.t(
+                                    "minigames.gg_pen_ok",
+                                    lg,
+                                    guess=guess_raw,
+                                    xp=xp_hit,
+                                    cd=int(cd_sec),
+                                    strike=strike,
+                                    total=total_pen,
+                                    title=title,
+                                    genres=genres_txt,
+                                )
                             )
                         else:
                             await ctx.send(
-                                f"❌ **{guess_raw}** ne fait pas partie des genres de **{title}**.\n"
-                                f"**Anti-spam** : même genre « facile » répété **{same_attempts}×** en ~5 min.\n"
-                                f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
-                                f"**{total_pen}** (voir `/profile`).\n"
-                                f"Les genres étaient : {', '.join(anime['genres'])}."
+                                i18n.t(
+                                    "minigames.gg_pen_bad",
+                                    lg,
+                                    guess=guess_raw,
+                                    title=title,
+                                    n=same_attempts,
+                                    xp=xp_hit,
+                                    cd=int(cd_sec),
+                                    strike=strike,
+                                    total=total_pen,
+                                    genres=genres_txt,
+                                )
                             )
                         return
 
@@ -887,13 +915,11 @@ class MiniGames(commands.Cog):
                         _GUESS_GENRE_SPAM_STREAK[uid] = streak
                         if streak == 2:
                             await ctx.send(
-                                f"⚠️ {ctx.author.mention} — **2** bonnes réponses d’affilée avec un genre « facile ». "
-                                f"Enchaîne encore comme ça et tu risques une **sanction** ; varie les genres."
+                                i18n.t("minigames.gg_spam2", lg, mention=ctx.author.mention)
                             )
                         elif streak == 3:
                             await ctx.send(
-                                f"🚨 **Dernier avertissement** (série de genres courants) : au prochain dépassement, "
-                                f"**sanction** (−XP + cooldown)."
+                                i18n.t("minigames.gg_spam3", lg)
                             )
                         penalize = streak > _SPAM_MAX_STREAK or len(dq) > _SPAM_MAX_IN_WINDOW
                         if penalize:
@@ -906,15 +932,26 @@ class MiniGames(commands.Cog):
                             await core.add_xp(self.bot, ctx.channel, ctx.author.id, xp_hit, announce=False)
                             total_pen = core.inc_guess_genre_penalty_count(uid)
                             await ctx.send(
-                                f"✅ Le genre **{guess_raw}** était bon, mais **anti-spam** : trop de réponses « faciles » "
-                                f"d’affilée ou en 5 min.\n"
-                                f"**{xp_hit} XP** · cooldown **{int(cd_sec)}s** (niveau **{strike}**) · sanctions : "
-                                f"**{total_pen}** (voir `/profile`).\n"
-                                f"Genres de **{title}** : {', '.join(anime['genres'])}."
+                                i18n.t(
+                                    "minigames.gg_spam_pen",
+                                    lg,
+                                    guess=guess_raw,
+                                    xp=xp_hit,
+                                    cd=int(cd_sec),
+                                    strike=strike,
+                                    total=total_pen,
+                                    title=title,
+                                    genres=", ".join(anime["genres"]),
+                                )
                             )
                         else:
                             await ctx.send(
-                                f"✅ Exact ! Les genres de **{title}** incluent {', '.join(anime['genres'])}. Tu gagnes 5 XP !"
+                                i18n.t(
+                                    "minigames.gg_exact",
+                                    lg,
+                                    title=title,
+                                    genres=", ".join(anime["genres"]),
+                                )
                             )
                             await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
                             core.add_mini_score(ctx.author.id, "guessgenre", 1)
@@ -923,7 +960,12 @@ class MiniGames(commands.Cog):
                         _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
                         _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
                         await ctx.send(
-                            f"✅ Exact ! Les genres de **{title}** incluent {', '.join(anime['genres'])}. Tu gagnes 5 XP !"
+                            i18n.t(
+                                "minigames.gg_exact",
+                                lg,
+                                title=title,
+                                genres=", ".join(anime["genres"]),
+                            )
                         )
                         await core.add_xp(self.bot, ctx.channel, ctx.author.id, 5)
                         core.add_mini_score(ctx.author.id, "guessgenre", 1)
@@ -931,10 +973,17 @@ class MiniGames(commands.Cog):
                 else:
                     _GUESS_GENRE_SPAM_STREAK.pop(uid, None)
                     _GUESS_GENRE_SPAM_TIMES.pop(uid, None)
-                    await ctx.send(f"❌ Mauvaise réponse. Les genres de **{title}** étaient : {', '.join(anime['genres'])}.")
+                    await ctx.send(
+                        i18n.t(
+                            "minigames.gg_wrong",
+                            lg,
+                            title=title,
+                            genres=", ".join(anime["genres"]),
+                        )
+                    )
             except asyncio.TimeoutError:
                 _clear_guess_genre_spam(uid)
-                await ctx.send("⏰ Temps écoulé ! Le mini-jeu est annulé.")
+                await ctx.send(i18n.t("minigames.ge_timeout", lg))
         finally:
             minigame_lock.end(uid)
 
@@ -943,6 +992,7 @@ class MiniGames(commands.Cog):
     # --------------------------------------
     async def _guess_character(self, ctx: commands.Context) -> None:
         uid = ctx.author.id
+        lg = i18n.ctx_lang(ctx)
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
         if not await anilist_gate.ensure_anilist_for_ctx(self.bot, ctx):
@@ -982,7 +1032,7 @@ class MiniGames(commands.Cog):
 
                 characters = data["data"]["Page"]["characters"]
                 if len(characters) < 4:
-                    await ctx.send("❌ Pas assez de personnages trouvés.")
+                    await ctx.send(i18n.t("minigames.gc_noperson", lg))
                     return
 
                 correct = random.choice(characters)
@@ -998,17 +1048,17 @@ class MiniGames(commands.Cog):
                     correct_index = random.randrange(len(options))
 
             embed = discord.Embed(
-                title="👤 Devine le personnage !",
-                description="Clique sur le bouton correspondant au bon nom.",
+                title=i18n.t("minigames.gc_title", lg),
+                description=i18n.t("minigames.gc_desc", lg),
                 color=discord.Color.blurple()
             )
             if list_choice:
                 embed.set_footer(
-                    text="Quatre animés différents tirés depuis ta liste AniList ; une image = le bon perso."
+                    text=i18n.t("minigames.gc_footer_list", lg)
                 )
             elif linked:
                 embed.set_footer(
-                    text="Liste AniList vide ou indisponible — tirage global (popularité)."
+                    text=i18n.t("minigames.gc_footer_fb", lg)
                 )
             embed.set_image(url=correct_image)
 
@@ -1030,7 +1080,12 @@ class MiniGames(commands.Cog):
                         if isinstance(item, Button):
                             item.disabled = True
                     await self.message.edit(
-                        content=f"⏰ Temps écoulé. La bonne réponse était **{correct_name}** *(**{correct_anime}**)*.",
+                        content=i18n.t(
+                            "minigames.gc_timeout",
+                            lg,
+                            name=correct_name,
+                            anime=correct_anime,
+                        ),
                         view=self
                     )
                     self.stop()
@@ -1040,7 +1095,7 @@ class MiniGames(commands.Cog):
             async def make_button_callback(inter: discord.Interaction, index: int):
                 # Seul le lanceur peut cliquer
                 if inter.user.id != ctx.author.id:
-                    await inter.response.send_message("❌ Ce n'est pas ton quiz !", ephemeral=True)
+                    await inter.response.send_message(i18n.t("minigames.gc_not_yours", lg), ephemeral=True)
                     return
 
                 if view.resolved:
@@ -1056,9 +1111,13 @@ class MiniGames(commands.Cog):
                         item.disabled = True
 
                 if index == correct_index:
-                    txt = (f"✅ Bien joué **{inter.user.display_name}** ! "
-                           f"C’était **{correct_name}** *(**{correct_anime}**)*. "
-                           f"Tu gagnes **+5 XP**.")
+                    txt = i18n.t(
+                        "minigames.gc_win",
+                        lg,
+                        user=inter.user.display_name,
+                        name=correct_name,
+                        anime=correct_anime,
+                    )
                     try:
                         await core.add_xp(self.bot, view.message.channel, inter.user.id, 5)
                     except Exception:
@@ -1069,8 +1128,12 @@ class MiniGames(commands.Cog):
                     except Exception:
                         pass
                 else:
-                    txt = (f"❌ Mauvaise réponse. "
-                           f"C’était **{correct_name}** *(**{correct_anime}**)*.")
+                    txt = i18n.t(
+                        "minigames.gc_lose",
+                        lg,
+                        name=correct_name,
+                        anime=correct_anime,
+                    )
 
                 await inter.response.edit_message(content=txt, view=view)
                 view.stop()
@@ -1090,7 +1153,7 @@ class MiniGames(commands.Cog):
 
     @commands.hybrid_command(
         name="guessyear",
-        description="Devine l’année de diffusion (AniList lié → tirage depuis ta liste).",
+        description=ui_str("slash.minigames_guessyear"),
     )
     @commands.cooldown(1, 18, commands.BucketType.user)
     async def guessyear(self, ctx: commands.Context) -> None:
@@ -1098,7 +1161,7 @@ class MiniGames(commands.Cog):
 
     @commands.hybrid_command(
         name="guessepisodes",
-        description="Devine le nombre d’épisodes (AniList lié → depuis ta liste si possible).",
+        description=ui_str("slash.minigames_guessepisodes"),
     )
     @commands.cooldown(1, 18, commands.BucketType.user)
     async def guessepisodes(self, ctx: commands.Context) -> None:
@@ -1106,7 +1169,7 @@ class MiniGames(commands.Cog):
 
     @commands.hybrid_command(
         name="guessgenre",
-        description="Trouve un des genres de l’anime (compte AniList lié → tirage depuis ta liste).",
+        description=ui_str("slash.minigames_guessgenre"),
     )
     @commands.cooldown(1, 18, commands.BucketType.user)
     async def guessgenre(self, ctx: commands.Context) -> None:
@@ -1114,7 +1177,7 @@ class MiniGames(commands.Cog):
 
     @commands.hybrid_command(
         name="guesscharacter",
-        description="Choisis le bon personnage parmi 4 propositions (lié AniList → depuis ta liste).",
+        description=ui_str("slash.minigames_guesscharacter"),
     )
     @commands.cooldown(1, 18, commands.BucketType.user)
     async def guesscharacter(self, ctx: commands.Context) -> None:
@@ -1122,23 +1185,17 @@ class MiniGames(commands.Cog):
 
     @commands.hybrid_command(
         name="minijeux",
-        description="Menu des mini-jeux : choisis dans la liste pour lancer une partie.",
+        description=ui_str("slash.minigames_minijeux"),
     )
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def minijeux(self, ctx: commands.Context) -> None:
+        lg = i18n.ctx_lang(ctx)
         em = discord.Embed(
-            title="🎮 Mini-jeux",
-            description=(
-                "**Deux menus** : **Devinettes (Guess)** et **Autres** — la partie **démarre** dans ce salon "
-                "dès que tu choisis.\n"
-                "• **Duel** : rappel — lance **`/duel @membre`** (pas de partie auto depuis le menu).\n\n"
-                "Raccourcis : **`/guessyear`**, **`/guessepisodes`**, **`/guessgenre`**, **`/guesscharacter`**, "
-                "**`/guesswho`**, **`/chainquiz`**, **`/higherlower`**, **`/guessop`**, "
-                "**`/animequiz`**, **`/animequizmulti`**. Raid boss : **`/raidconfig`** (admin)."
-            ),
+            title=i18n.t("minigames.hub_title", lg),
+            description=i18n.t("minigames.hub_desc", lg),
             color=discord.Color.blurple(),
         )
-        await ctx.send(embed=em, view=MinijeuxHubView(self, ctx.author.id))
+        await ctx.send(embed=em, view=MinijeuxHubView(self, ctx.author.id, lg))
 
 
 async def setup(bot: commands.Bot) -> None:

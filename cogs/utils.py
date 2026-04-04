@@ -12,6 +12,7 @@ import time
 import discord
 from discord.ext import commands
 from modules import core, i18n
+from modules.app_cmd_locale import ui_str
 
 
 class Utils(commands.Cog):
@@ -21,14 +22,14 @@ class Utils(commands.Cog):
         self.bot = bot
         self.start_time = time.time()
 
-    @commands.hybrid_command(name="ping")
+    @commands.hybrid_command(name="ping", description=ui_str("slash.utils_ping"))
     async def ping(self, ctx: commands.Context):
         """Affiche la latence du bot."""
         lg = i18n.ctx_lang(ctx)
         latency = round(self.bot.latency * 1000)  # en ms
         await ctx.send(i18n.t("utils.ping", lg, latency=latency))
 
-    @commands.hybrid_command(name="uptime")
+    @commands.hybrid_command(name="uptime", description=ui_str("slash.utils_uptime"))
     async def uptime(self, ctx: commands.Context):
         """Affiche depuis combien de temps le bot est en ligne."""
         lg = i18n.ctx_lang(ctx)
@@ -41,13 +42,13 @@ class Utils(commands.Cog):
             i18n.t("utils.uptime", lg, days=days, hours=hours, minutes=minutes, seconds=seconds)
         )
 
-    @commands.hybrid_command(name="source")
+    @commands.hybrid_command(name="source", description=ui_str("slash.utils_source"))
     async def source(self, ctx: commands.Context):
         """Affiche le lien vers le code source du bot."""
         lg = i18n.ctx_lang(ctx)
         await ctx.send(i18n.t("utils.source", lg))
 
-    @commands.hybrid_command(name="setchannel")
+    @commands.hybrid_command(name="setchannel", description=ui_str("slash.utils_setchannel"))
     @commands.has_permissions(administrator=True)
     async def setchannel(self, ctx: commands.Context) -> None:
         """Définit le salon des annonces « sortie d’épisode » pour ce serveur."""
@@ -63,7 +64,7 @@ class Utils(commands.Cog):
 
     @commands.hybrid_command(
         name="setlevelupchannel",
-        description="Salon des annonces : nouveau titre global (XP) et nouveau titre quiz (paliers score).",
+        description=ui_str("slash.utils_setlevelupchannel"),
     )
     @commands.has_permissions(administrator=True)
     async def setlevelupchannel(self, ctx: commands.Context) -> None:
@@ -80,7 +81,7 @@ class Utils(commands.Cog):
 
     @commands.hybrid_command(
         name="clearlevelupchannel",
-        description="Supprime le salon dédié aux annonces de niveau XP (comportement par défaut).",
+        description=ui_str("slash.utils_clearlevelupchannel"),
     )
     @commands.has_permissions(administrator=True)
     async def clearlevelupchannel(self, ctx: commands.Context) -> None:

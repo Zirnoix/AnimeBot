@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules import core, i18n
+from modules.app_cmd_locale import ui_str
 from modules import bug_report as bug_report_store
 from modules.image import generate_mycard_image
 from modules.badges import BADGES, BADGE_SECTION_TITLE_FR, evaluate_tier, iter_badges_sorted, tier_name_fr
@@ -43,7 +44,7 @@ def _payload_from_search_hit(hit: dict) -> dict:
     }
 
 
-def _resolve_anime_favorite_input(raw: str) -> Tuple[str, Any]:
+def _resolve_anime_favorite_input(raw: str, *, lg: str) -> Tuple[str, Any]:
     """
     Retourne (kind, data) :
     - ("help", None) entrée vide
@@ -63,44 +64,56 @@ def _resolve_anime_favorite_input(raw: str) -> Tuple[str, Any]:
         mid = int(m.group(2))
         info = core.get_anime_media_basic(mid)
         if not info:
-            return ("error", f"Aucun anime trouvé pour l’ID **`{mid}`** (vérifie que c’est bien une fiche **anime** sur AniList).")
+            return ("error", i18n.t("profile.fav_err_id_anime", lg, mid=mid))
         return ("set", info)
 
     if s.isdigit():
         mid = int(s)
         info = core.get_anime_media_basic(mid)
         if not info:
-            return ("error", f"Aucun anime trouvé pour l’ID **`{mid}`**.")
+            return ("error", i18n.t("profile.fav_err_id_short", lg, mid=mid))
         return ("set", info)
 
     hits = core.search_media(s, limit=8)
     if not hits:
-        return ("error", f"Aucun résultat pour **{s[:100]}**. Essaie un autre titre ou colle l’URL AniList.")
+        return ("error", i18n.t("profile.fav_err_search", lg, q=s[:100]))
     return ("set", _payload_from_search_hit(hits[0]))
 
 
-# Ordre d’affichage pour /animetop aperçu (clé mini_scores.json → libellé)
-_ANITOP_GAME_LABELS: list[tuple[str, str]] = [
-    ("animequiz", "Anime quiz"),
-    ("guessyear", "Guess année"),
-    ("guessepisodes", "Guess épisodes"),
-    ("guesscharacter", "Guess personnage"),
-    ("guesswho", "Guess who"),
-    ("guessgenre", "Guess genre"),
-    ("higherlower", "Higher / Lower"),
-    ("chainquiz", "Chain quiz"),
-    ("bossraid", "Boss raid (dégâts)"),
-    ("duel", "Duel"),
-    ("guessop", "Guess OP"),
-    ("guessopchain_streak", "Guess OP chaîne (série max)"),
-    ("mission_hardcore", "Missions Hardcore"),
-]
+def _tier_name_i18n(tier_index: int, lg: str) -> str:
+    arr = i18n.value("profile.tier_ranks", lg)
+    if isinstance(arr, list) and 0 <= tier_index < len(arr):
+        return str(arr[tier_index])
+    return tier_name_fr(tier_index)
+
+
+def _animetop_game_label(key: str, lg: str) -> str:
+    return i18n.t(f"profile.animetop_game_{key}", lg)
+
+
+# Ordre d’affichage pour /animetop aperçu (clés mini_scores.json)
+_ANITOP_GAME_KEYS: tuple[str, ...] = (
+    "animequiz",
+    "guessyear",
+    "guessepisodes",
+    "guesscharacter",
+    "guesswho",
+    "guessgenre",
+    "higherlower",
+    "chainquiz",
+    "bossraid",
+    "duel",
+    "guessop",
+    "guessopchain_streak",
+    "mission_hardcore",
+)
 
 
 async def _animetop_names_map(
     bot: commands.Bot,
     guild: Optional[discord.Guild],
     uids: Iterable[int],
+    lg: str,
 ) -> dict[int, str]:
     """Pseudo affiché : membre du serveur si présent, sinon nom Discord global (fetch_user)."""
     uniq = {int(u) for u in uids}
@@ -116,9 +129,9 @@ async def _animetop_names_map(
             u = await bot.fetch_user(uid)
             out[uid] = ((u.global_name or u.name or "")).strip() or str(uid)
         except discord.NotFound:
-            out[uid] = f"Compte supprimé ({uid})"
+            out[uid] = i18n.t("profile.name_deleted", lg, uid=uid)
         except Exception:
-            out[uid] = f"Utilisateur {uid}"
+            out[uid] = i18n.t("profile.name_user", lg, uid=uid)
 
     await asyncio.gather(*(one(u) for u in uniq))
     return out
@@ -128,18 +141,18 @@ def _animetop_valid_mode(mode: str) -> str:
     m = (mode or "all").strip().lower()
     if m in {"all", "overview"}:
         return m
-    if any(m == k for k, _ in _ANITOP_GAME_LABELS):
+    if any(m == k for k in _ANITOP_GAME_KEYS):
         return m
     return "all"
 
 
-def _animetop_mode_label(mode: str) -> str:
+def _animetop_mode_label(mode: str, lg: str) -> str:
     m = _animetop_valid_mode(mode)
     if m == "all":
-        return "Total — tous mini-jeux"
+        return i18n.t("profile.animetop_mode_all", lg)
     if m == "overview":
-        return "Aperçu multi-jeux"
-    return dict(_ANITOP_GAME_LABELS).get(m, m)
+        return i18n.t("profile.animetop_mode_overview", lg)
+    return _animetop_game_label(m, lg)
 
 
 def _animetop_embed_color(mode: str) -> discord.Color:
@@ -163,17 +176,21 @@ def _animetop_medal(rank: int) -> str:
     return {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"`#{rank}`")
 
 
-def _animetop_select_placeholder(mode: str) -> str:
+def _animetop_select_placeholder(mode: str, lg: str) -> str:
     """Indique clairement la vue active (max 150 car. pour le Select Discord)."""
-    s = f"Vue : {_animetop_mode_label(mode)}"
+    s = i18n.t("profile.animetop_view_prefix", lg, label=_animetop_mode_label(mode, lg))
     return s if len(s) <= 150 else s[:147] + "…"
 
 
-def _animetop_short_blurb(mode: str) -> str:
+def _animetop_short_blurb(mode: str, lg: str) -> str:
     m = _animetop_valid_mode(mode)
     if m == "all":
-        return "Somme des compteurs de **tous** les mini-jeux."
-    return f"Compteur **{_animetop_mode_label(m)}** dans les stats du bot."
+        return i18n.t("profile.animetop_blurb_all", lg)
+    return i18n.t(
+        "profile.animetop_blurb_game",
+        lg,
+        label=_animetop_mode_label(m, lg),
+    )
 
 
 # ---------- HELPERS BADGES ----------
@@ -259,10 +276,17 @@ def _xp_bar(xp: int, next_xp: int, seg: int = 20) -> str:
     return pct_bar_parallelogram(xp, max(1, int(next_xp)), seg)
 
 
-def _append_badge_section_header(lines: list[str], state: list[str | None], category: str) -> None:
+def _append_badge_section_header(
+    lines: list[str],
+    state: list[str | None],
+    category: str,
+    lg: str,
+) -> None:
     """Insère un titre de section (catégorie) avant la prochaine ligne, si besoin."""
     if category != state[0]:
-        title = BADGE_SECTION_TITLE_FR.get(category, BADGE_SECTION_TITLE_FR["autre"])
+        title = i18n.t(f"profile.badge_sec_{category}", lg)
+        if title.startswith("profile.badge_sec_"):
+            title = BADGE_SECTION_TITLE_FR.get(category, BADGE_SECTION_TITLE_FR["autre"])
         if lines:
             lines.append("")
         lines.append(f"**— {title} —**")
@@ -300,32 +324,32 @@ def _mycard_devinettes_total(mini_scores: dict) -> int:
     return s
 
 
-def _mycard_score_hint(key: str) -> str:
+def _mycard_score_hint(key: str, lg: str) -> str:
     """
     Ce que mesure réellement le compteur (d’après add_mini_score dans le code).
     Phrase courte pour carte / embed.
     """
     if key == "bossraid":
-        return "dégâts cumulés au raid boss"
+        return i18n.t("profile.hint_bossraid", lg)
     if key == "guessopchain_streak":
-        return "meilleure série de bonnes réponses d’affilée (chaîne)"
+        return i18n.t("profile.hint_guessopchain_streak", lg)
     if key == "mission_hardcore":
-        return "missions quotidiennes Hardcore terminées"
+        return i18n.t("profile.hint_mission_hardcore", lg)
     if key == "duel":
-        return "manches où tu marques le point (duel)"
+        return i18n.t("profile.hint_duel", lg)
     if key == "duel_victory":
-        return "duels remportés (match gagné)"
+        return i18n.t("profile.hint_duel_victory", lg)
     if key in ("animequiz", "animequizmulti"):
-        return "bonnes réponses (questions justes)"
+        return i18n.t("profile.hint_animequiz", lg)
     if key == "chainquiz":
-        return "bonnes réponses (chaîne)"
+        return i18n.t("profile.hint_chainquiz", lg)
     if key == "higherlower":
-        return "comparaisons gagnées (H/L)"
+        return i18n.t("profile.hint_higherlower", lg)
     if key in _MYCARD_GUESS_KEYS or key == "guesswho":
-        return "bonnes réponses (devinette réussie)"
+        return i18n.t("profile.hint_guess", lg)
     if key == "topgg_vote":
-        return "votes Top.gg"
-    return "activité (compteur bot)"
+        return i18n.t("profile.hint_topgg_vote", lg)
+    return i18n.t("profile.hint_default", lg)
 
 
 def _top_mini_game_play(mini_scores: dict) -> tuple[str, int] | None:
@@ -359,41 +383,52 @@ def _top_mini_game_wins(mini_scores: dict) -> tuple[str, int] | None:
     return None
 
 
-def _mycard_play_line(mini_scores: dict) -> Optional[str]:
+def _mycard_play_line(mini_scores: dict, lg: str) -> Optional[str]:
     """Une ligne pour la carte image : mini-jeu le plus actif + précision sur le compteur."""
     tp = _top_mini_game_play(mini_scores or {})
     if not tp:
         return None
     k, v = tp
-    hint = _mycard_score_hint(k)
-    return f"Plus joué · {_mini_label(k)} — {_fmt_number(v)} · {hint}"
+    hint = _mycard_score_hint(k, lg)
+    return i18n.t(
+        "profile.mycard_line_play",
+        lg,
+        label=_mini_label(k, lg),
+        v=_fmt_number(v),
+        hint=hint,
+    )
 
 
-def _mycard_image_line1(mini_scores: dict) -> Optional[str]:
+def _mycard_image_line1(mini_scores: dict, lg: str) -> Optional[str]:
     """Carte image : priorité au total Quiz (solo + multi), sinon ancien « plus joué »."""
     ms = mini_scores or {}
     q = int(ms.get("animequiz", 0) or 0) + int(ms.get("animequizmulti", 0) or 0)
     if q > 0:
-        return f"Quiz — {_fmt_number(q)} bonnes réponses (solo + multi)"
-    return _mycard_play_line(ms)
+        return i18n.t("profile.mycard_img_quiz", lg, n=_fmt_number(q))
+    return _mycard_play_line(ms, lg)
 
 
-def _mycard_image_line2(mini_scores: dict) -> Optional[str]:
+def _mycard_image_line2(mini_scores: dict, lg: str) -> Optional[str]:
     """Carte image : priorité au total devinettes, sinon victoires / 2e activité."""
     ms = mini_scores or {}
     dev = _mycard_devinettes_total(ms)
     if dev > 0:
-        return f"Devinettes — {_fmt_number(dev)} bonnes réponses (guess + H/L)"
-    return _mycard_record_line(ms)
+        return i18n.t("profile.mycard_img_dev", lg, n=_fmt_number(dev))
+    return _mycard_record_line(ms, lg)
 
 
-def _mycard_record_line(mini_scores: dict) -> Optional[str]:
+def _mycard_record_line(mini_scores: dict, lg: str) -> Optional[str]:
     """Victoires duels en priorité, sinon 2e meilleur mini-jeu (hors engagement)."""
     if not mini_scores:
         return None
     dv = int(mini_scores.get("duel_victory") or 0)
     if dv > 0:
-        return f"Duels — {_fmt_number(dv)} {_mycard_score_hint('duel_victory')}"
+        return i18n.t(
+            "profile.mycard_line_duel",
+            lg,
+            n=_fmt_number(dv),
+            hint=_mycard_score_hint("duel_victory", lg),
+        )
     items: list[tuple[str, int]] = []
     for k, raw in mini_scores.items():
         if k in _ENGAGE_MINI_KEYS:
@@ -407,20 +442,27 @@ def _mycard_record_line(mini_scores: dict) -> Optional[str]:
     items.sort(key=lambda x: -x[1])
     if len(items) >= 2:
         k, v = items[1]
-        return f"2e activité · {_mini_label(k)} — {_fmt_number(v)} · {_mycard_score_hint(k)}"
+        return i18n.t(
+            "profile.mycard_line_2nd",
+            lg,
+            label=_mini_label(k, lg),
+            v=_fmt_number(v),
+            hint=_mycard_score_hint(k, lg),
+        )
     return None
 
 
-def _format_minis_compact(mini_scores: dict) -> str:
+def _format_minis_compact(mini_scores: dict, lg: str) -> str:
+    empty = i18n.t("profile.minis_empty", lg)
     if not mini_scores:
-        return "— Aucune activité enregistrée."
+        return empty
     items = sorted(
         ((k, int(v)) for k, v in mini_scores.items() if int(v or 0) > 0),
         key=lambda x: -x[1],
     )[:20]
     if not items:
-        return "— Aucune activité enregistrée."
-    lines = [f"• **{_mini_label(k)}** — {_fmt_number(v)}" for k, v in items]
+        return empty
+    lines = [f"• **{_mini_label(k, lg)}** — {_fmt_number(v)}" for k, v in items]
     return "\n".join(lines)[:1020]
 
 
@@ -428,34 +470,11 @@ def _fmt_number(n: int) -> str:
     return f"{n:,}".replace(",", " ")
 
 
-_MINI_LABELS: Dict[str, str] = {
-    "mission_completed": "Missions du jour",
-    "checkin": "Check-ins",
-    "mycard_visits": "Carte (/mycard)",
-    "animequiz": "Anime quiz (solo)",
-    "animequizmulti": "Anime quiz (multi)",
-    "higherlower": "Higher / Lower",
-    "guessyear": "Guess — année",
-    "guessepisodes": "Guess — épisodes",
-    "guessgenre": "Guess — genre",
-    "guesscharacter": "Guess — perso",
-    "guesswho": "Qui est-ce ?",
-    "chainquiz": "Chain quiz",
-    "bossraid": "Raid boss",
-    "guessop": "Guess OP",
-    "guessopchain_streak": "Guess OP chaîne (série max)",
-    "mission_hardcore": "Missions Hardcore",
-    "duel": "Duel lancés",
-    "duel_victory": "Duels gagnés",
-    "guesspop": "GuessPop",
-    "guesspo": "GuessPo",
-    "guessspo": "GuessSpo",
-    "guessopener": "OP Challenger",
-}
-
-
-def _mini_label(key: str) -> str:
-    return _MINI_LABELS.get(key, key.replace("_", " ").title())
+def _mini_label(key: str, lg: str) -> str:
+    v = i18n.value(f"profile.mini_{key}", lg)
+    if isinstance(v, str) and v:
+        return v
+    return key.replace("_", " ").title()
 
 
 def _mini_bar_line(val: int, max_val: int, width: int = 8) -> str:
@@ -463,7 +482,7 @@ def _mini_bar_line(val: int, max_val: int, width: int = 8) -> str:
     return pct_bar_parallelogram(val, max_val, width)
 
 
-def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str, int]]]]:
+def _mini_group_blocks(mini_scores: dict, lg: str) -> list[tuple[str, str, list[tuple[str, int]]]]:
     """
     Regroupe les stats par famille (Quiz / Devinettes / Duels / Autres), tri par score décroissant.
     Retourne [(titre_emoji, titre_texte, [(label, count), ...]), ...]
@@ -472,16 +491,16 @@ def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str
         return []
 
     groups: list[tuple[str, str, frozenset[str]]] = [
-        ("📅", "Engagement", frozenset({"mission_completed", "mission_hardcore", "checkin", "mycard_visits"})),
-        ("🎯", "Quiz", frozenset({"animequiz", "animequizmulti"})),
-        ("🎭", "Devinettes", frozenset({
+        ("📅", i18n.t("profile.mini_grp_engagement", lg), frozenset({"mission_completed", "mission_hardcore", "checkin", "mycard_visits"})),
+        ("🎯", i18n.t("profile.mini_grp_quiz", lg), frozenset({"animequiz", "animequizmulti"})),
+        ("🎭", i18n.t("profile.mini_grp_guess", lg), frozenset({
             "guessyear", "guessepisodes", "guessgenre", "guesscharacter", "guesswho",
             "guessop",
             "guesspop", "guesspo", "guessspo", "guessopener",
             "guessopchain_streak",
         })),
-        ("🐉", "Communauté", frozenset({"chainquiz", "bossraid"})),
-        ("⚔️", "Duels", frozenset({"duel", "duel_victory"})),
+        ("🐉", i18n.t("profile.mini_grp_community", lg), frozenset({"chainquiz", "bossraid"})),
+        ("⚔️", i18n.t("profile.mini_grp_duels", lg), frozenset({"duel", "duel_victory"})),
     ]
     used: set[str] = set()
     out: list[tuple[str, str, list[tuple[str, int]]]] = []
@@ -492,7 +511,7 @@ def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str
             if k in mini_scores:
                 v = int(mini_scores[k])
                 if v:
-                    rows.append((_mini_label(k), v))
+                    rows.append((_mini_label(k, lg), v))
                     used.add(k)
         rows.sort(key=lambda x: -x[1])
         if rows:
@@ -504,10 +523,10 @@ def _mini_group_blocks(mini_scores: dict) -> list[tuple[str, str, list[tuple[str
             continue
         iv = int(v)
         if iv:
-            rest.append((_mini_label(k), iv))
+            rest.append((_mini_label(k, lg), iv))
     rest.sort(key=lambda x: -x[1])
     if rest:
-        out.append(("🎲", "Autres", rest))
+        out.append(("🎲", i18n.t("profile.mini_grp_other", lg), rest))
 
     return out
 
@@ -523,7 +542,7 @@ def _format_mini_group(emoji: str, title: str, rows: list[tuple[str, int]]) -> s
     return f"**{emoji} {title}**\n" + "\n".join(lines_out)
 
 
-def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
+def _badge_mycard_summary(bot, counts: dict, lg: str) -> dict[str, Any]:
     """Résumé lisible pour l’onglet Trophées (pas la liste détaillée de /mybadges)."""
     unlocked_lines: list[str] = []
     next_rows: list[tuple[float, str, int, int]] = []  # ratio, name, count, need
@@ -554,7 +573,7 @@ def _badge_mycard_summary(bot, counts: dict) -> dict[str, Any]:
                 if resolved:
                     icon = resolved
             paliers = len(thresholds)
-            rank = tier_name_fr(tier)
+            rank = _tier_name_i18n(tier, lg)
             unlocked_lines.append(f"{icon} **{spec['name']}** · _{rank}_ ({tier + 1}/{paliers})")
         elif not hidden and thresholds:
             need = int(thresholds[0])
@@ -585,42 +604,44 @@ def _embed_mycard_simple(
     al_name: Optional[str],
     mini_scores: dict,
     bug_validated: int,
+    lg: str,
 ) -> discord.Embed:
     """Carte courte : pas de menu, pas de timeout."""
     e = discord.Embed(
-        title=f"🎴 {ctx.author.display_name}",
-        description="Vue rapide — tout le détail : **`/profile`**",
+        title=i18n.t("profile.mycard_title", lg, name=ctx.author.display_name),
+        description=i18n.t("profile.mycard_desc", lg),
         color=_EMBED_OVERVIEW,
     )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
+    aln = i18n.t("profile.mycard_anilist", lg)
     if al_name:
-        e.add_field(name="🔗 AniList", value=f"`{al_name}`", inline=False)
+        e.add_field(name=aln, value=i18n.t("profile.mycard_anilist_linked", lg, name=al_name), inline=False)
     else:
-        e.add_field(name="🔗 AniList", value="Non lié · `/linkanilist`", inline=False)
+        e.add_field(name=aln, value=i18n.t("profile.mycard_anilist_unlinked", lg), inline=False)
     if anime_fav:
         ft = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
         su = (anime_fav.get("site_url") or "").strip()
         fav_val = f"[{ft}]({su})" if su else f"**{ft}**"
-        e.add_field(name="⭐ Anime favori", value=fav_val, inline=False)
+        e.add_field(name=i18n.t("profile.mycard_fav", lg), value=fav_val, inline=False)
     tp = _top_mini_game_play(mini_scores or {})
     if tp:
         k, v = tp
         e.add_field(
-            name="🎮 Le plus actif",
-            value=f"**{_mini_label(k)}** · {_fmt_number(v)}\n_{_mycard_score_hint(k)}_",
+            name=i18n.t("profile.mycard_top_play", lg),
+            value=f"**{_mini_label(k, lg)}** · {_fmt_number(v)}\n_{_mycard_score_hint(k, lg)}_",
             inline=True,
         )
     tw = _top_mini_game_wins(mini_scores or {})
     if tw:
         kw, vw = tw
         e.add_field(
-            name="🏆 Duels",
-            value=f"**{_fmt_number(vw)}** — {_mycard_score_hint(kw)}",
+            name=i18n.t("profile.mycard_duels", lg),
+            value=f"**{_fmt_number(vw)}** — {_mycard_score_hint(kw, lg)}",
             inline=True,
         )
     if bug_validated > 0:
-        e.add_field(name="🐞 Bugs validés (staff)", value=f"**{bug_validated}**", inline=True)
-    e.set_footer(text="/profile · /mybadges · /animefav")
+        e.add_field(name=i18n.t("profile.mycard_bugs", lg), value=f"**{bug_validated}**", inline=True)
+    e.set_footer(text=i18n.t("profile.mycard_footer", lg))
     return e
 
 
@@ -638,70 +659,77 @@ def _embed_profile_full(
     anime_fav: Optional[dict],
     mini_scores: dict,
     counts: dict,
+    lg: str,
 ) -> discord.Embed:
     """Profil détaillé : XP, streak, mini-jeux, sanctions, trophées (aperçu)."""
     bar = _xp_bar(xp, next_xp)
     e = discord.Embed(
-        title=f"📋 Profil — {ctx.author.display_name}",
-        description="Stats complètes sur le bot (niveau, activité, trophées…).",
+        title=i18n.t("profile.profile_title", lg, name=ctx.author.display_name),
+        description=i18n.t("profile.profile_desc", lg),
         color=_EMBED_MINIS,
     )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
-    e.add_field(name="🏅 Titre", value=f"**{title}**", inline=True)
-    e.add_field(name="🧬 Niveau", value=f"**{level}**", inline=True)
-    e.add_field(name="🧪 XP", value=f"{_fmt_number(xp)} / {_fmt_number(next_xp)}", inline=True)
-    e.add_field(name="📈 Progression XP", value=bar, inline=False)
-    e.add_field(name="🏆 Score quiz", value=str(_fmt_number(quiz_score)), inline=False)
+    e.add_field(name=i18n.t("profile.profile_field_title", lg), value=f"**{title}**", inline=True)
+    e.add_field(name=i18n.t("profile.profile_field_level", lg), value=f"**{level}**", inline=True)
+    e.add_field(name=i18n.t("profile.profile_field_xp", lg), value=f"{_fmt_number(xp)} / {_fmt_number(next_xp)}", inline=True)
+    e.add_field(name=i18n.t("profile.profile_field_xp_prog", lg), value=bar, inline=False)
+    e.add_field(name=i18n.t("profile.profile_field_quiz", lg), value=str(_fmt_number(quiz_score)), inline=False)
 
     next_pal = None
     for t in sorted(BADGES.get("serie", {}).get("thresholds", [])):
         if streak_days < t:
             next_pal = t
             break
-    streak_line = f"**{streak_days}** jour(s)"
+    next_seg = ""
     if next_pal:
-        streak_line += f" · prochain palier série : **{streak_days}/{next_pal}**"
-    e.add_field(name="🔥 Streak (check-in)", value=streak_line, inline=False)
+        next_seg = i18n.t("profile.profile_streak_next", lg, cur=streak_days, need=next_pal)
+    streak_line = i18n.t("profile.profile_streak_line", lg, n=streak_days, next=next_seg)
+    e.add_field(name=i18n.t("profile.profile_streak", lg), value=streak_line, inline=False)
 
     if bug_validated > 0:
         e.add_field(
-            name="🐞 Bugs validés",
-            value=f"**{bug_validated}** — _signaler : `/reportbug`_",
+            name=i18n.t("profile.profile_bugs", lg),
+            value=i18n.t("profile.profile_bugs_val", lg, n=bug_validated),
             inline=False,
         )
 
     al_name = core.get_linked_username(ctx.author.id)
+    aln = i18n.t("profile.mycard_anilist", lg)
     if al_name:
-        e.add_field(name="🔗 AniList", value=f"Compte lié : **`{al_name}`**", inline=False)
+        e.add_field(name=aln, value=i18n.t("profile.profile_al_linked", lg, name=al_name), inline=False)
     else:
-        e.add_field(name="🔗 AniList", value="Non lié — `/linkanilist`", inline=False)
+        e.add_field(name=aln, value=i18n.t("profile.profile_al_unlinked", lg), inline=False)
 
     if anime_fav:
         ft = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
         su = (anime_fav.get("site_url") or "").strip()
         fav_val = f"[{ft}]({su})" if su else f"**{ft}**"
-        e.add_field(name="⭐ Anime favori", value=fav_val, inline=False)
+        e.add_field(name=i18n.t("profile.profile_fav", lg), value=fav_val, inline=False)
 
     gg_pen = core.get_guess_genre_penalty_count(ctx.author.id)
-    e.add_field(name="⚠️ Sanctions Guess genre", value=str(gg_pen) if gg_pen else "0", inline=False)
+    e.add_field(name=i18n.t("profile.profile_sanctions", lg), value=str(gg_pen) if gg_pen else "0", inline=False)
 
-    e.add_field(name="🎮 Activité (compteurs)", value=_format_minis_compact(mini_scores), inline=False)
+    e.add_field(name=i18n.t("profile.profile_minis", lg), value=_format_minis_compact(mini_scores, lg), inline=False)
 
-    s = _badge_mycard_summary(bot, counts)
+    s = _badge_mycard_summary(bot, counts, lg)
     vt = max(1, int(s["visible_total"] or 1))
     un = int(s["unlocked_n"] or 0)
     pct = min(100, int(round(100 * un / vt))) if s["visible_total"] else 0
-    badge_line = (
-        f"{_pct_bar_pretty(un, vt, 10)} **{pct}%** — **{un}/{s['visible_total']}** séries\n"
-        f"_▰ progression · ▱ reste · Rangs : Initié → … → Mythe · `/mybadges`_"
+    badge_line = i18n.t(
+        "profile.profile_badges_line",
+        lg,
+        bar=_pct_bar_pretty(un, vt, 10),
+        pct=pct,
+        un=un,
+        vt=s["visible_total"],
     )
-    e.add_field(name="🏅 Trophées (aperçu)", value=badge_line[:1024], inline=False)
+    e.add_field(name=i18n.t("profile.profile_badges_preview", lg), value=badge_line[:1024], inline=False)
 
-    e.set_footer(text="/mybadges · /mycard")
+    e.set_footer(text=i18n.t("profile.profile_footer", lg))
     return e
 
 
-def _build_mybadges_payload(bot: commands.Bot, counts: dict) -> dict[str, Any]:
+def _build_mybadges_payload(bot: commands.Bot, counts: dict, lg: str) -> dict[str, Any]:
     """Données pour /mybadges : listes de lignes + résumé."""
     unlocked: list[str] = []
     locked: list[str] = []
@@ -731,9 +759,9 @@ def _build_mybadges_payload(bot: commands.Bot, counts: dict) -> dict[str, Any]:
                 if resolved:
                     icon = resolved
             paliers = len(thresholds)
-            rank = tier_name_fr(tier)
+            rank = _tier_name_i18n(tier, lg)
             prog = f"{count}/{next_th}" if next_th else "**max**"
-            _append_badge_section_header(unlocked, sec_u, cat)
+            _append_badge_section_header(unlocked, sec_u, cat, lg)
             unlocked.append(
                 f"{icon} **{spec['name']}** · _{rank}_ · {prog}\n"
                 f"_{spec['desc']}_"
@@ -743,13 +771,13 @@ def _build_mybadges_payload(bot: commands.Bot, counts: dict) -> dict[str, Any]:
             rest = max(0, need - count)
             pct = min(100, int(round(100 * count / need))) if need else 0
             bar = _pct_bar_pretty(count, need, 10)
-            _append_badge_section_header(locked, sec_l, cat)
+            _append_badge_section_header(locked, sec_l, cat, lg)
             locked.append(
                 f"{bar} **{spec['name']}** — {count}/{need} ({pct}%) · reste **{rest}**\n"
                 f"_{spec['desc']}_"
             )
 
-    s = _badge_mycard_summary(bot, counts)
+    s = _badge_mycard_summary(bot, counts, lg)
     return {
         "unlocked": unlocked,
         "locked": locked,
@@ -789,7 +817,13 @@ def _mybadges_embed_color(section: str) -> discord.Color:
     return discord.Color.dark_gray()
 
 
-def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str, Any], section: str) -> discord.Embed:
+def _embed_mybadges(
+    ctx: commands.Context,
+    bot: commands.Bot,
+    payload: dict[str, Any],
+    section: str,
+    lg: str,
+) -> discord.Embed:
     """section: summary | unlocked | locked | mystery"""
     s = payload["summary"]
     vt = max(1, int(s["visible_total"] or 1))
@@ -797,102 +831,122 @@ def _embed_mybadges(ctx: commands.Context, bot: commands.Bot, payload: dict[str,
     pct = min(100, int(round(100 * un / vt))) if s["visible_total"] else 0
     bar = _pct_bar_pretty(un, vt, 14)
     col = _mybadges_embed_color(section)
+    nm = ctx.author.display_name
 
     if section == "summary":
         e = discord.Embed(
-            title=f"🏅 Trophées — {ctx.author.display_name}",
-            description=(
-                f"{bar}  **{pct}%** de la collection visible\n"
-                f"**{un}** / **{s['visible_total']}** séries avec au moins un palier\n"
-                f"_▰ = avancé · ▱ = reste_\n\n"
-                "**Rangs :** 🌱 Initié → **Confirmé** → **Vétéran** → **Élite** → **Mythe** ✨"
+            title=i18n.t("profile.mybadges_summary_title", lg, name=nm),
+            description=i18n.t(
+                "profile.mybadges_summary_desc",
+                lg,
+                bar=bar,
+                pct=pct,
+                un=un,
+                vt=s["visible_total"],
             ),
             color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
         if s["next_lines"]:
             e.add_field(
-                name="🎯 Prochains paliers",
+                name=i18n.t("profile.mybadges_field_next", lg),
                 value="\n".join(f"• {x}" for x in s["next_lines"])[:1024],
                 inline=False,
             )
         else:
-            e.add_field(name="🎯 Prochains paliers", value="— Tout est à jour ou rien à viser pour l’instant.", inline=False)
+            e.add_field(
+                name=i18n.t("profile.mybadges_field_next", lg),
+                value=i18n.t("profile.mybadges_field_next_empty", lg),
+                inline=False,
+            )
         if s["unlocked_lines"]:
             snap = "\n".join(f"• {x}" for x in s["unlocked_lines"][:6])
             if s["unlocked_extra"] > 0:
-                snap += f"\n_… **+{s['unlocked_extra']}** dans « Débloqués »_"
-            e.add_field(name="✨ En poche (aperçu)", value=snap[:1024], inline=False)
-        e.set_footer(text="Menu déroulant : Résumé · Débloqués · À débloquer · Mystères")
+                snap += i18n.t("profile.mybadges_snap_more", lg, n=s["unlocked_extra"])
+            e.add_field(name=i18n.t("profile.mybadges_field_snap", lg), value=snap[:1024], inline=False)
+        e.set_footer(text=i18n.t("profile.mybadges_footer_summary", lg))
         return e
 
     if section == "unlocked":
         lines = payload["unlocked"]
         chunks = _chunk_text_blocks(lines)
         e = discord.Embed(
-            title=f"✅ Débloqués — {ctx.author.display_name}",
-            description=f"**{len(lines)}** trophée(s) avec au moins un palier.",
+            title=i18n.t("profile.mybadges_unlocked_title", lg, name=nm),
+            description=i18n.t("profile.mybadges_unlocked_desc", lg, n=len(lines)),
             color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
         if not chunks:
-            e.add_field(name="—", value="Aucun pour l’instant.", inline=False)
+            e.add_field(name="—", value=i18n.t("profile.mybadges_unlocked_empty", lg), inline=False)
         else:
             for i, ch in enumerate(chunks[:6]):
-                name = "Liste" if i == 0 else f"Suite ({i + 1})"
+                name = i18n.t("profile.mybadges_field_list", lg) if i == 0 else i18n.t("profile.mybadges_field_cont", lg, i=i + 1)
                 e.add_field(name=name, value=ch[:1024], inline=False)
             if len(chunks) > 6:
-                e.add_field(name="…", value="Trop de texte — affichage tronqué.", inline=False)
-        e.set_footer(text="Menu : section « Résumé » pour la vue d’ensemble")
+                e.add_field(name="…", value=i18n.t("profile.mybadges_trunc", lg), inline=False)
+        e.set_footer(text=i18n.t("profile.mybadges_footer_unlocked", lg))
         return e
 
     if section == "locked":
         lines = payload["locked"]
         chunks = _chunk_text_blocks(lines)
         e = discord.Embed(
-            title=f"🎯 À débloquer — {ctx.author.display_name}",
-            description=f"**{len(lines)}** trophée(s) à compléter · _▰ progression · ▱ reste jusqu’au palier_",
+            title=i18n.t("profile.mybadges_locked_title", lg, name=nm),
+            description=i18n.t("profile.mybadges_locked_desc", lg, n=len(lines)),
             color=col,
         )
         e.set_thumbnail(url=ctx.author.display_avatar.url)
         if not chunks:
-            e.add_field(name="—", value="Rien à afficher (ou tout est déjà débloqué côté visible).", inline=False)
+            e.add_field(name="—", value=i18n.t("profile.mybadges_locked_empty", lg), inline=False)
         else:
             for i, ch in enumerate(chunks[:6]):
-                name = "Progression" if i == 0 else f"Suite ({i + 1})"
+                name = i18n.t("profile.mybadges_field_progress", lg) if i == 0 else i18n.t("profile.mybadges_field_cont", lg, i=i + 1)
                 e.add_field(name=name, value=ch[:1024], inline=False)
-        e.set_footer(text="Les badges secrets apparaissent dans « Mystères » tant qu’ils sont cachés.")
+        e.set_footer(text=i18n.t("profile.mybadges_footer_locked", lg))
         return e
 
     # mystery
     lines = payload["mystery"]
     e = discord.Embed(
-        title=f"🔒 Badges secrets — {ctx.author.display_name}",
-        description="Tant que le palier n’est pas atteint, le nom reste masqué.",
+        title=i18n.t("profile.mybadges_mystery_title", lg, name=nm),
+        description=i18n.t("profile.mybadges_mystery_desc", lg),
         color=col,
     )
     e.set_thumbnail(url=ctx.author.display_avatar.url)
     if not lines:
-        e.add_field(name="—", value="Aucun secret en attente (ou déjà révélé).", inline=False)
+        e.add_field(name="—", value=i18n.t("profile.mybadges_mystery_empty", lg), inline=False)
     else:
-        e.add_field(name="Indices", value="\n".join(lines)[:1024], inline=False)
-    e.set_footer(text="Après déblocage, le trophée apparaît dans « Débloqués ».")
+        e.add_field(name=i18n.t("profile.mybadges_mystery_field", lg), value="\n".join(lines)[:1024], inline=False)
+    e.set_footer(text=i18n.t("profile.mybadges_footer_mystery", lg))
     return e
 
 
 class MyBadgesNavigator(discord.ui.View):
-    def __init__(self, ctx: commands.Context, author: discord.abc.User, bot: commands.Bot, payload: dict[str, Any], section: str = "summary"):
+    def __init__(
+        self,
+        ctx: commands.Context,
+        author: discord.abc.User,
+        bot: commands.Bot,
+        payload: dict[str, Any],
+        section: str = "summary",
+        *,
+        lang: str,
+    ):
         super().__init__(timeout=3600.0)
         self.ctx = ctx
         self.author = author
         self.bot = bot
         self.payload = payload
         self.section = section
+        self.lang = lang
         self.add_item(MyBadgesSectionSelect(self))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message("Ce panneau n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(
+                i18n.t("profile.mybadges_panel_nope", self.lang),
+                ephemeral=True,
+            )
             return False
         return True
 
@@ -905,49 +959,58 @@ class MyBadgesNavigator(discord.ui.View):
 class MyBadgesSectionSelect(discord.ui.Select):
     def __init__(self, nav: MyBadgesNavigator):
         self.nav = nav
+        lg = nav.lang
         sec = nav.section
         opts = [
             discord.SelectOption(
-                label="Résumé",
+                label=i18n.t("profile.mybadges_opt_summary_l", lg)[:100],
                 value="summary",
                 emoji="📊",
-                description="Vue d’ensemble et prochains paliers",
+                description=i18n.t("profile.mybadges_opt_summary_d", lg)[:100],
                 default=(sec == "summary"),
             ),
             discord.SelectOption(
-                label="Débloqués",
+                label=i18n.t("profile.mybadges_opt_unlocked_l", lg)[:100],
                 value="unlocked",
                 emoji="✅",
-                description="Tous les trophées obtenus",
+                description=i18n.t("profile.mybadges_opt_unlocked_d", lg)[:100],
                 default=(sec == "unlocked"),
             ),
             discord.SelectOption(
-                label="À débloquer",
+                label=i18n.t("profile.mybadges_opt_locked_l", lg)[:100],
                 value="locked",
                 emoji="🎯",
-                description="Objectifs restants (barres ▰▱)",
+                description=i18n.t("profile.mybadges_opt_locked_d", lg)[:100],
                 default=(sec == "locked"),
             ),
             discord.SelectOption(
-                label="Mystères",
+                label=i18n.t("profile.mybadges_opt_mystery_l", lg)[:100],
                 value="mystery",
                 emoji="🔒",
-                description="Badges cachés non obtenus",
+                description=i18n.t("profile.mybadges_opt_mystery_d", lg)[:100],
                 default=(sec == "mystery"),
             ),
         ]
         ph = {
-            "summary": "📊 Résumé",
-            "unlocked": "✅ Débloqués",
-            "locked": "🎯 À débloquer",
-            "mystery": "🔒 Mystères",
-        }.get(sec, "Choisir une section…")
+            "summary": i18n.t("profile.mybadges_ph_summary", lg),
+            "unlocked": i18n.t("profile.mybadges_ph_unlocked", lg),
+            "locked": i18n.t("profile.mybadges_ph_locked", lg),
+            "mystery": i18n.t("profile.mybadges_ph_mystery", lg),
+        }.get(sec, i18n.t("profile.mybadges_ph_pick", lg))
         super().__init__(placeholder=ph, min_values=1, max_values=1, options=opts, row=0)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         sec = self.values[0]
-        emb = _embed_mybadges(self.nav.ctx, self.nav.bot, self.nav.payload, sec)
-        nv = MyBadgesNavigator(self.nav.ctx, self.nav.author, self.nav.bot, self.nav.payload, section=sec)
+        lg = self.nav.lang
+        emb = _embed_mybadges(self.nav.ctx, self.nav.bot, self.nav.payload, sec, lg)
+        nv = MyBadgesNavigator(
+            self.nav.ctx,
+            self.nav.author,
+            self.nav.bot,
+            self.nav.payload,
+            section=sec,
+            lang=lg,
+        )
         await interaction.response.edit_message(embed=emb, view=nv)
 
 
@@ -959,11 +1022,12 @@ class Profile(commands.Cog):
 
     @commands.hybrid_command(
         name="mycard",
-        description="Image panoramique (niveau, XP, AniList, favori, mini-jeux) — sans embed.",
+        description=ui_str("slash.profile_mycard"),
     )
     @commands.cooldown(1, 20, commands.BucketType.user)
     async def mycard(self, ctx: commands.Context) -> None:
         await core.maybe_defer_hybrid(ctx)
+        lg = i18n.ctx_lang(ctx)
         user_id = ctx.author.id
 
         try:
@@ -984,8 +1048,8 @@ class Profile(commands.Cog):
         xp = int(ud.get("xp", 0))
         level = int(ud.get("level", 0))
         next_xp = core.xp_for_next_level(level)
-        play_line = _mycard_image_line1(mini_scores)
-        record_line = _mycard_image_line2(mini_scores)
+        play_line = _mycard_image_line1(mini_scores, lg)
+        record_line = _mycard_image_line2(mini_scores, lg)
         fav_plain: Optional[str] = None
         if anime_fav:
             fav_plain = (anime_fav.get("title") or "—").replace("[", "(").replace("]", ")")
@@ -1012,15 +1076,17 @@ class Profile(commands.Cog):
                 al_name=al_name,
                 mini_scores=mini_scores,
                 bug_validated=bug_validated,
+                lg=lg,
             )
             await ctx.send(embed=embed)
 
     @commands.hybrid_command(
         name="profile",
-        description="Profil détaillé : XP, streak, mini-jeux, sanctions, trophées (aperçu).",
+        description=ui_str("slash.profile_profile"),
     )
     @commands.cooldown(1, 25, commands.BucketType.user)
     async def profile_cmd(self, ctx: commands.Context) -> None:
+        lg = i18n.ctx_lang(ctx)
         is_slash = bool(getattr(ctx, "interaction", None))
         if is_slash and ctx.guild is not None:
             await core.maybe_defer_hybrid(ctx, ephemeral=True)
@@ -1063,6 +1129,7 @@ class Profile(commands.Cog):
             anime_fav=anime_fav,
             mini_scores=mini_scores,
             counts=counts,
+            lg=lg,
         )
         ep = is_slash and ctx.guild is not None
         if is_slash and ctx.interaction:
@@ -1072,33 +1139,34 @@ class Profile(commands.Cog):
 
     @commands.hybrid_command(
         name="animefav",
-        description="Définis ton anime préféré — affiché sur ta carte /mycard.",
+        description=ui_str("slash.profile_animefav"),
     )
     @app_commands.describe(
-        anime="Titre (recherche), ID ou URL anilist.co/anime/… — « clear » pour retirer — vide = aide",
+        anime=ui_str("slash.profile_animefav_param"),
     )
     @commands.cooldown(2, 15, commands.BucketType.user)
     async def animefav(self, ctx: commands.Context, anime: Optional[str] = None):
         """Enregistre un animé favori pour l’aperçu /mycard (AniList)."""
+        lg = i18n.ctx_lang(ctx)
         is_slash = bool(getattr(ctx, "interaction", None))
         uid = ctx.author.id
 
         async def _send_help() -> None:
             cur = core.get_anime_favorite(uid)
             if cur:
-                desc = (
-                    f"⭐ Actuellement : **{cur['title']}**\n{cur['site_url']}\n\n"
-                    "Pour changer : indique un **titre**, un **ID** ou une **URL** AniList. "
-                    "**`clear`** pour retirer."
+                desc = i18n.t(
+                    "profile.animefav_help_current",
+                    lg,
+                    title=cur["title"],
+                    url=cur["site_url"],
                 )
             else:
-                desc = (
-                    "Indique un **nom** (recherche sur AniList), un **ID** ou une **URL** "
-                    "`https://anilist.co/anime/...`. "
-                    "Ce sera affiché sur **`/mycard`**. "
-                    "Écris **`clear`** pour retirer un favori déjà enregistré."
-                )
-            em = discord.Embed(title="⭐ Anime favori", description=desc, color=_EMBED_OVERVIEW)
+                desc = i18n.t("profile.animefav_help_none", lg)
+            em = discord.Embed(
+                title=i18n.t("profile.animefav_title", lg),
+                description=desc,
+                color=_EMBED_OVERVIEW,
+            )
             if is_slash and ctx.interaction:
                 ep = ctx.guild is not None
                 if not ctx.interaction.response.is_done():
@@ -1113,20 +1181,16 @@ class Profile(commands.Cog):
             return
 
         await core.maybe_defer_hybrid(ctx, ephemeral=True)
-        kind, data = _resolve_anime_favorite_input(anime)
+        kind, data = _resolve_anime_favorite_input(anime, lg=lg)
         if kind == "help":
+            hint = i18n.t("profile.animefav_hint_empty", lg)
             if is_slash and ctx.interaction:
-                await ctx.interaction.followup.send(
-                    "Indique un titre, un ID ou une URL — ou **`/animefav`** sans argument pour l’aide.",
-                    ephemeral=True,
-                )
+                await ctx.interaction.followup.send(hint, ephemeral=True)
             else:
-                await ctx.reply(
-                    "Indique un titre, un ID ou une URL — ou **`/animefav`** sans argument pour l’aide."
-                )
+                await ctx.reply(hint)
             return
         if kind == "error":
-            err = str(data) if data else "Erreur."
+            err = str(data) if data else i18n.t("profile.animefav_err_generic", lg)
             if is_slash and ctx.interaction:
                 await ctx.interaction.followup.send(err, ephemeral=True)
             else:
@@ -1134,7 +1198,7 @@ class Profile(commands.Cog):
             return
         if kind == "clear":
             core.clear_anime_favorite(uid)
-            msg = "✅ Animé favori retiré — ta **`/mycard`** sera mise à jour."
+            msg = i18n.t("profile.animefav_cleared", lg)
             if is_slash and ctx.interaction:
                 await ctx.interaction.followup.send(msg, ephemeral=True)
             else:
@@ -1143,7 +1207,7 @@ class Profile(commands.Cog):
 
         assert kind == "set" and isinstance(data, dict)
         core.set_anime_favorite(uid, data)
-        msg = f"✅ **{data['title']}** est enregistré comme favori — voir **`/mycard`**."
+        msg = i18n.t("profile.animefav_set_ok", lg, title=data["title"])
         if is_slash and ctx.interaction:
             await ctx.interaction.followup.send(msg, ephemeral=True)
         else:
@@ -1151,47 +1215,46 @@ class Profile(commands.Cog):
 
     @commands.hybrid_command(
         name="animetop",
-        description="Classement des mini-jeux (participations enregistrées dans les stats du bot).",
+        description=ui_str("slash.profile_animetop"),
     )
     @commands.cooldown(1, 5, commands.BucketType.user)
     @app_commands.describe(
-        classement=(
-            "Vue au départ (total, aperçu ou un jeu) — modifiable ensuite avec le menu déroulant sous le message."
-        ),
+        classement=ui_str("slash.profile_animetop_param"),
     )
     @app_commands.choices(
         classement=[
-            app_commands.Choice(name="Toute activité (tous mini-jeux)", value="all"),
-            app_commands.Choice(name="Aperçu : total + top 3 par jeu", value="overview"),
-            app_commands.Choice(name="Anime quiz", value="animequiz"),
-            app_commands.Choice(name="Guess année", value="guessyear"),
-            app_commands.Choice(name="Guess épisodes", value="guessepisodes"),
-            app_commands.Choice(name="Guess genre", value="guessgenre"),
-            app_commands.Choice(name="Guess personnage", value="guesscharacter"),
-            app_commands.Choice(name="Guess who", value="guesswho"),
-            app_commands.Choice(name="Higher / Lower", value="higherlower"),
-            app_commands.Choice(name="Chain quiz", value="chainquiz"),
-            app_commands.Choice(name="Boss raid (coups)", value="bossraid"),
-            app_commands.Choice(name="Duel", value="duel"),
-            app_commands.Choice(name="Guess OP", value="guessop"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_all"), value="all"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_overview"), value="overview"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_animequiz"), value="animequiz"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_guessyear"), value="guessyear"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_guessepisodes"), value="guessepisodes"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_guessgenre"), value="guessgenre"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_guesscharacter"), value="guesscharacter"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_guesswho"), value="guesswho"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_higherlower"), value="higherlower"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_chainquiz"), value="chainquiz"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_bossraid"), value="bossraid"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_duel"), value="duel"),
+            app_commands.Choice(name=ui_str("slash.choice_animetop_guessop"), value="guessop"),
         ]
     )
     async def animetop(self, ctx: commands.Context, classement: str = "all") -> None:
+        lg = i18n.ctx_lang(ctx)
         key = _animetop_valid_mode((classement or "all").strip().lower())
         is_slash = bool(getattr(ctx, "interaction", None))
         if is_slash and ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer()
 
         if not core.mini_game_activity_leaderboard(n=1):
-            msg = "Pas encore de scores dans data/mini_scores.json."
+            msg = i18n.t("profile.animetop_no_scores", lg)
             if is_slash and ctx.interaction:
                 await ctx.interaction.followup.send(msg, ephemeral=True)
             else:
                 await ctx.send(msg)
             return
 
-        emb = await self._animetop_make_embed(self.bot, ctx.guild, key)
-        view = AnimetopLeaderboardView(self, ctx.author.id, ctx.guild, key)
+        emb = await self._animetop_make_embed(self.bot, ctx.guild, key, lg)
+        view = AnimetopLeaderboardView(self, ctx.author.id, ctx.guild, key, lg)
         if is_slash and ctx.interaction:
             msg = await ctx.interaction.followup.send(embed=emb, view=view, wait=True)
         else:
@@ -1203,10 +1266,11 @@ class Profile(commands.Cog):
         bot: commands.Bot,
         guild: Optional[discord.Guild],
         mode: str,
+        lg: str,
     ) -> discord.Embed:
         m = _animetop_valid_mode(mode)
         if m == "overview":
-            return await self._animetop_overview_embed(bot, guild)
+            return await self._animetop_overview_embed(bot, guild, lg)
 
         n = 15
         if m == "all":
@@ -1215,21 +1279,18 @@ class Profile(commands.Cog):
             rows = core.mini_game_leaderboard(m, n=n)
 
         color = _animetop_embed_color(m)
-        label = _animetop_mode_label(m)
+        label = _animetop_mode_label(m, lg)
 
         if not rows:
             emb = discord.Embed(
                 title=f"🏆 {label}",
-                description=(
-                    "Aucune entrée pour ce classement.\n"
-                    "Choisis un autre mode dans le **menu** ci-dessous."
-                ),
+                description=i18n.t("profile.animetop_empty_lb", lg),
                 color=color,
             )
-            emb.set_footer(text="mini_scores.json · noms : serveur ou profil Discord")
+            emb.set_footer(text=i18n.t("profile.animetop_footer_names", lg))
             return emb
 
-        names = await _animetop_names_map(bot, guild, (u for u, _ in rows))
+        names = await _animetop_names_map(bot, guild, (u for u, _ in rows), lg)
         lines = []
         for i, (uid, sc) in enumerate(rows, start=1):
             nm = _animetop_trunc_display(names.get(uid, str(uid)), 22)
@@ -1244,43 +1305,40 @@ class Profile(commands.Cog):
 
         emb = discord.Embed(
             title=f"🏆 {label}",
-            description=_animetop_short_blurb(m),
+            description=_animetop_short_blurb(m, lg),
             color=color,
         )
-        emb.add_field(name="Classement", value=block, inline=False)
-        emb.set_footer(text="mini_scores.json · défaites pas toujours comptées selon le jeu")
+        emb.add_field(name=i18n.t("profile.animetop_field_lb", lg), value=block, inline=False)
+        emb.set_footer(text=i18n.t("profile.animetop_footer_defeats", lg))
         return emb
 
     async def _animetop_overview_embed(
         self,
         bot: commands.Bot,
         guild: Optional[discord.Guild],
+        lg: str,
     ) -> discord.Embed:
         rows = core.mini_game_activity_leaderboard(n=8)
         if not rows:
             return discord.Embed(
-                title="🧩 Aperçu multi-jeux",
-                description="Pas encore de scores.",
+                title=i18n.t("profile.animetop_overview_title", lg),
+                description=i18n.t("profile.animetop_overview_empty", lg),
                 color=_EMBED_MINIS,
             )
 
         uid_collect: list[int] = [u for u, _ in rows]
         sections: list[tuple[str, list[tuple[int, int]]]] = [("__total__", rows)]
-        for gk, _lbl in _ANITOP_GAME_LABELS:
+        for gk in _ANITOP_GAME_KEYS:
             sub = core.mini_game_leaderboard(gk, n=3)
             if sub:
                 uid_collect.extend(u for u, _ in sub)
                 sections.append((gk, sub))
 
-        names = await _animetop_names_map(bot, guild, uid_collect)
-        label_by_key = dict(_ANITOP_GAME_LABELS)
+        names = await _animetop_names_map(bot, guild, uid_collect, lg)
         color = _animetop_embed_color("overview")
         emb = discord.Embed(
-            title="🧩 Aperçu multi-jeux",
-            description=(
-                "Vue **résumé** : le menu indique **« Vue : Aperçu multi-jeux »**. "
-                "Pour un classement détaillé par jeu, choisis un mini-jeu dans la liste."
-            ),
+            title=i18n.t("profile.animetop_overview_title", lg),
+            description=i18n.t("profile.animetop_overview_desc", lg),
             color=color,
         )
 
@@ -1292,11 +1350,15 @@ class Profile(commands.Cog):
         val_total = "\n".join(total_lines)
         if len(val_total) > 1024:
             val_total = val_total[:1021] + "…"
-        emb.add_field(name="📊 Total (tous jeux)", value=val_total or "—", inline=False)
+        emb.add_field(
+            name=i18n.t("profile.animetop_field_total", lg),
+            value=val_total or "—",
+            inline=False,
+        )
 
         per_game_chunks: list[str] = []
         for gk, sub in sections[1:]:
-            glabel = label_by_key.get(gk, gk)
+            glabel = _animetop_game_label(gk, lg)
             slines = [
                 f"{_animetop_medal(i)} **{_animetop_trunc_display(names.get(uid, str(uid)))}** — {_fmt_number(int(sc))}"
                 for i, (uid, sc) in enumerate(sub, start=1)
@@ -1307,28 +1369,29 @@ class Profile(commands.Cog):
             per_game_block = per_game_block[:1021] + "…"
         if per_game_block:
             emb.add_field(
-                name="Par mini-jeu (top 3 si activité)",
+                name=i18n.t("profile.animetop_field_per_game", lg),
                 value=per_game_block,
                 inline=False,
             )
 
-        emb.set_footer(text="mini_scores.json · défaites pas toujours comptées selon le jeu")
+        emb.set_footer(text=i18n.t("profile.animetop_footer_defeats", lg))
         return emb
 
     @commands.hybrid_command(
         name="mybadges",
-        description="Trophées par catégorie (rangs Initié→Mythe) et progression.",
+        description=ui_str("slash.profile_mybadges"),
     )
     async def mybadges(self, ctx: commands.Context) -> None:
+        lg = i18n.ctx_lang(ctx)
         is_slash = bool(getattr(ctx, "interaction", None))
         ephemeral = bool(is_slash and ctx.guild is not None)
         await core.maybe_defer_hybrid(ctx, ephemeral=ephemeral)
 
         user_id = ctx.author.id
         counts = _get_user_counts(user_id)
-        payload = _build_mybadges_payload(self.bot, counts)
-        embed = _embed_mybadges(ctx, self.bot, payload, "summary")
-        view = MyBadgesNavigator(ctx, ctx.author, self.bot, payload, section="summary")
+        payload = _build_mybadges_payload(self.bot, counts, lg)
+        embed = _embed_mybadges(ctx, self.bot, payload, "summary", lg)
+        view = MyBadgesNavigator(ctx, ctx.author, self.bot, payload, section="summary", lang=lg)
         if is_slash and ctx.interaction:
             await ctx.interaction.followup.send(embed=embed, view=view, ephemeral=ephemeral)
         else:
@@ -1344,34 +1407,37 @@ class AnimetopCategorySelect(discord.ui.Select):
         initial: str,
         *,
         placeholder: str,
+        lang: str,
     ):
         self.cog = cog
         self.author_id = author_id
         self.guild = guild
+        self.lang = lang
+        lg = lang
         ini = _animetop_valid_mode(initial)
         opts: list[discord.SelectOption] = [
             discord.SelectOption(
-                label="Total — tous mini-jeux",
+                label=i18n.t("profile.animetop_sel_total_l", lg)[:100],
                 value="all",
                 emoji="📊",
-                description="Somme de tous les compteurs",
+                description=i18n.t("profile.animetop_sel_total_d", lg)[:100],
                 default=(ini == "all"),
             ),
             discord.SelectOption(
-                label="Aperçu multi-jeux",
+                label=i18n.t("profile.animetop_sel_overview_l", lg)[:100],
                 value="overview",
                 emoji="🧩",
-                description="Top global + podium par jeu",
+                description=i18n.t("profile.animetop_sel_overview_d", lg)[:100],
                 default=(ini == "overview"),
             ),
         ]
-        for key, label in _ANITOP_GAME_LABELS:
+        for key in _ANITOP_GAME_KEYS:
             opts.append(
                 discord.SelectOption(
-                    label=label[:100],
+                    label=_animetop_game_label(key, lg)[:100],
                     value=key,
                     emoji="🎮",
-                    description="Classement pour ce mini-jeu",
+                    description=i18n.t("profile.animetop_sel_game_d", lg)[:100],
                     default=(ini == key),
                 )
             )
@@ -1383,23 +1449,31 @@ class AnimetopCategorySelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        lg = self.lang
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
-                "Ce menu est réservé à la personne qui a lancé la commande.",
+                i18n.t("profile.animetop_menu_reserved", lg),
                 ephemeral=True,
             )
             return
         mode = self.values[0]
-        emb = await self.cog._animetop_make_embed(interaction.client, self.guild, mode)
-        new_view = AnimetopLeaderboardView(self.cog, self.author_id, self.guild, mode)
+        emb = await self.cog._animetop_make_embed(interaction.client, self.guild, mode, lg)
+        new_view = AnimetopLeaderboardView(self.cog, self.author_id, self.guild, mode, lg)
         await interaction.response.edit_message(embed=emb, view=new_view)
         new_view._message = interaction.message
 
 
 class AnimetopLeaderboardView(discord.ui.View):
-    def __init__(self, cog: Profile, author_id: int, guild: Optional[discord.Guild], initial: str):
+    def __init__(
+        self,
+        cog: Profile,
+        author_id: int,
+        guild: Optional[discord.Guild],
+        initial: str,
+        lang: str,
+    ):
         super().__init__(timeout=300.0)
-        ph = _animetop_select_placeholder(initial)
+        ph = _animetop_select_placeholder(initial, lang)
         self.add_item(
             AnimetopCategorySelect(
                 cog,
@@ -1407,6 +1481,7 @@ class AnimetopLeaderboardView(discord.ui.View):
                 guild,
                 initial,
                 placeholder=ph,
+                lang=lang,
             )
         )
         self._message: Optional[discord.Message] = None

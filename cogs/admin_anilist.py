@@ -5,6 +5,7 @@ import discord
 from discord.ext import commands
 
 from modules import core, i18n
+from modules.app_cmd_locale import ui_str
 
 
 def _resolve_username(member: discord.Member | None) -> str | None:
@@ -34,7 +35,7 @@ class AniListAdmin(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @commands.hybrid_command(name="anilist_sync", description="(Admin) Rafraîchit le cache AniList")
+    @commands.hybrid_command(name="anilist_sync", description=ui_str("slash.admin_anilist_sync"))
     @commands.cooldown(1, 60, commands.BucketType.user)
     @commands.has_permissions(administrator=True)
     async def anilist_sync(

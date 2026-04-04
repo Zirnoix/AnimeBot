@@ -7,16 +7,12 @@ from __future__ import annotations
 import threading
 from typing import Any, Dict, Optional
 
+from modules import i18n
 from modules import user_reply
 
 # user_id -> nom court du jeu (debug / messages)
 _PENDING: Dict[int, str] = {}
 _PENDING_LOCK = threading.Lock()
-
-_BUSY_MSG = (
-    "Tu as déjà une partie ou une question en attente — réponds-y (ou attends la fin) "
-    "avant d’en lancer une autre."
-)
 
 
 def try_begin(user_id: int, game_key: str) -> bool:
@@ -40,14 +36,13 @@ def active_game(user_id: int) -> Optional[str]:
 
 async def reply_busy(ctx: Any) -> None:
     """Réponse « partie déjà en cours » — éphémère / privée (pas de spam salon)."""
-    await user_reply.send_ephemeral_or_private(ctx, _BUSY_MSG)
+    lg = i18n.ctx_lang(ctx)
+    await user_reply.send_ephemeral_or_private(ctx, i18n.t("common.minigame_busy", lg))
 
 
 async def reply_guessgenre_cooldown(ctx: Any, user_id: int, remaining: int) -> None:
     """Cooldown guess genre : éphémère / privé (user_id conservé pour l’API)."""
     _ = user_id
-    text = (
-        f"⏳ Attends encore **{remaining}s** avant de relancer le **Guess genre** "
-        f"(`/guessgenre` ou `/minijeux`)."
-    )
+    lg = i18n.ctx_lang(ctx)
+    text = i18n.t("common.guessgenre_cooldown", lg, remaining=remaining)
     await user_reply.send_ephemeral_or_private(ctx, text)

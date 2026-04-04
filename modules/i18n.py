@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 import discord
+
+_LOG = logging.getLogger(__name__)
 
 _DEFAULT_LANG = "fr"
 _LOCALE_DIR = Path(__file__).resolve().parent / "locales"
@@ -56,6 +59,26 @@ def value(key: str, lang: str) -> Any:
     return None
 
 
+def t_exact(key: str, lang: str, **kwargs: Any) -> str | None:
+    """
+    Chaîne pour `lang` uniquement (pas de repli sur l’autre langue).
+    Utile pour les traductions slash (en-US) : None si la clé manque en anglais.
+    """
+    lang = lang if lang in ("fr", "en") else _DEFAULT_LANG
+    try:
+        raw = _get_nested(_load_locale(lang), key)
+        if not isinstance(raw, str):
+            return None
+        if kwargs:
+            try:
+                return raw.format(**kwargs)
+            except Exception:
+                return raw
+        return raw
+    except KeyError:
+        return None
+
+
 def t(key: str, lang: str, **kwargs: Any) -> str:
     """
     Récupère une chaîne par clé pointée (ex: ``language.set_confirm``).
@@ -63,16 +86,21 @@ def t(key: str, lang: str, **kwargs: Any) -> str:
     """
     lang = lang if lang in ("fr", "en") else _DEFAULT_LANG
     s: str | None = None
+    resolved_from: str | None = None
     for attempt in (lang, _DEFAULT_LANG):
         try:
             raw = _get_nested(_load_locale(attempt), key)
             if isinstance(raw, str):
                 s = raw
+                resolved_from = attempt
                 break
         except KeyError:
             continue
     if s is None:
+        _LOG.debug("i18n missing key %r (not in fr or en)", key)
         return key
+    if resolved_from is not None and resolved_from != lang:
+        _LOG.debug("i18n key %r missing for lang %s; using %s", key, lang, resolved_from)
     if kwargs:
         try:
             return s.format(**kwargs)

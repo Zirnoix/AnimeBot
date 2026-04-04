@@ -6,6 +6,7 @@ from discord.ext import commands
 from discord import app_commands
 
 from modules import i18n
+from modules.app_cmd_locale import ui_str
 
 SUPPORT_DISCORD = "@zirnoix"
 SUPPORT_ID = "180389173985804288"
@@ -98,7 +99,7 @@ class Onboarding(commands.Cog):
     # ---- /guide : détaillé, pensé pour **MP**. Utilisable depuis un serveur -> redirige en MP. ----
     @app_commands.command(
         name="guide",
-        description="(MP) Tutoriel joueur : XP, mini-jeux, AniList, rappels — pas la config serveur.",
+        description=ui_str("slash.guide"),
     )
     async def guide(self, interaction: discord.Interaction):
         try:
@@ -220,7 +221,7 @@ class Onboarding(commands.Cog):
 
     @app_commands.command(
         name="guide_admin",
-        description="(MP) Réglages serveur : airings, salons d’annonces, niveaux XP, raid (admins).",
+        description=ui_str("slash.guide_admin"),
     )
     @app_commands.default_permissions(administrator=True)
     async def guide_admin(self, interaction: discord.Interaction) -> None:

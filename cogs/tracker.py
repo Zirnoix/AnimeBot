@@ -21,6 +21,8 @@ from discord.ext import commands, tasks
 from discord import app_commands
 
 from modules import core
+from modules import i18n
+from modules.app_cmd_locale import ui_str
 from modules.image import generate_next_card
 
 LOG = logging.getLogger(__name__)
@@ -45,40 +47,44 @@ def _should_notify_episode_release(anime: Dict[str, Any]) -> bool:
         return False
     if now > airing + _RELEASE_GRACE_SEC:
         return False
-        return True
+    return True
 
 
 class TrackClearConfirmView(discord.ui.View):
     """Confirmation (boutons) — en slash la question est éphémère."""
 
-    def __init__(self, cog: "Tracker", author_id: int) -> None:
+    def __init__(self, cog: "Tracker", author_id: int, lang: str) -> None:
         super().__init__(timeout=20)
         self.cog = cog
         self.author_id = author_id
+        self.lang = lang
+        self.confirm.label = i18n.t("tracker.clear_yes", lang)[:80]
+        self.cancel.label = i18n.t("tracker.clear_no", lang)[:80]
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("Ce menu n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("tracker.clear_not_you", self.lang), ephemeral=True)
             return False
         return True
 
     @discord.ui.button(label="Oui, tout supprimer", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        lg = self.lang
         tracker = core.load_tracker()
         uid = str(self.author_id)
         tracker[uid] = []
         core.save_tracker(tracker)
-        await interaction.response.edit_message(content="✅ **Liste vidée.**", view=None)
+        await interaction.response.edit_message(content=i18n.t("tracker.clear_done", lg), view=None)
         try:
             u = await self.cog.bot.fetch_user(self.author_id)
-            await u.send("✅ Ta liste de suivi a été **complètement vidée**.")
+            await u.send(i18n.t("tracker.clear_dm", lg))
         except Exception:
             pass
         self.stop()
 
     @discord.ui.button(label="Non", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.edit_message(content="❌ **Annulé.**", view=None)
+        await interaction.response.edit_message(content=i18n.t("tracker.clear_cancel", self.lang), view=None)
         self.stop()
 
 
@@ -151,12 +157,16 @@ class Tracker(commands.Cog):
         except discord.Forbidden:
             await self._reply(
                 ctx,
-                content="⚠️ Impossible de t'envoyer un MP. Active-les pour ce serveur (Confidentialité & sécurité).",
+                content=i18n.t("tracker.dm_forbidden", i18n.ctx_lang(ctx)),
                 ephemeral=True,
             )
         except Exception as e:
             LOG.warning("DM failed: %s", e)
-            await self._reply(ctx, content="⚠️ Impossible d'envoyer le MP (erreur inconnue).", ephemeral=True)
+            await self._reply(
+                ctx,
+                content=i18n.t("tracker.dm_error", i18n.ctx_lang(ctx)),
+                ephemeral=True,
+            )
         return False
 
     @staticmethod
@@ -172,7 +182,7 @@ class Tracker(commands.Cog):
 
     @commands.hybrid_group(
         name="track",
-        description="Gestion du tracking (AniList, suivis, alertes MP).",
+        description=ui_str("slash.tracker_group"),
         invoke_without_command=True
     )
     async def track(self, ctx: commands.Context, *, anime: Optional[str] = None) -> None:
@@ -186,16 +196,17 @@ class Tracker(commands.Cog):
 
     # ----------------- Liste -----------------
 
-    @track.command(name="list", with_app_command=True, description="Liste tes animes suivis (en MP).")
+    @track.command(name="list", with_app_command=True, description=ui_str("slash.track_list"))
     async def track_list(self, ctx: commands.Context) -> None:
         await self._maybe_defer(ctx, ephemeral=True)
+        lg = i18n.ctx_lang(ctx)
         tracker = core.load_tracker()
         current_list = tracker.get(str(ctx.author.id), [])
         if not current_list:
             usage = "/track add <titre>" if ctx.interaction else "!track add <titre>"
-            ok = await self._dm(ctx, content=f"📭 Tu ne suis aucun anime actuellement.\nUtilise **{usage}** pour commencer.")
+            ok = await self._dm(ctx, content=i18n.t("tracker.list_empty", lg, usage=usage))
             if ok and ctx.interaction:
-                await self._reply(ctx, content="📬 Message envoyé en **message privé**.", ephemeral=True)
+                await self._reply(ctx, content=i18n.t("tracker.list_sent", lg), ephemeral=True)
             return
 
         items_per_page = 10
@@ -204,13 +215,13 @@ class Tracker(commands.Cog):
         sent_any = False
         for i, page in enumerate(pages, 1):
             embed = discord.Embed(
-                title=f"📌 Animes suivis par {ctx.author.display_name}",
+                title=i18n.t("tracker.list_title", lg, name=ctx.author.display_name),
                 description="\n".join(f"{idx+1}. {title}"
                                       for idx, title in enumerate(page, start=(i-1)*items_per_page)),
                 color=discord.Color.gold()
             )
             if len(pages) > 1:
-                embed.set_footer(text=f"Page {i}/{len(pages)}")
+                embed.set_footer(text=i18n.t("tracker.list_footer_page", lg, cur=i, total=len(pages)))
             ok = await self._dm(ctx, embed=embed)
             if ok:
                 sent_any = True
@@ -218,35 +229,29 @@ class Tracker(commands.Cog):
                 break
 
         if sent_any and ctx.interaction:
-            await self._reply(ctx, content="📬 Liste envoyée en **message privé**.", ephemeral=True)
+            await self._reply(ctx, content=i18n.t("tracker.list_dm_confirm", lg), ephemeral=True)
 
     # ----------------- Ajout -----------------
 
-    @track.command(name="add", with_app_command=True, description="Ajoute un anime à ta liste de suivi.")
-    @app_commands.describe(anime="Titre de l'anime à suivre")
+    @track.command(name="add", with_app_command=True, description=ui_str("slash.track_add"))
+    @app_commands.describe(anime=ui_str("slash.track_param_anime_add"))
     async def track_add(self, ctx: commands.Context, *, anime: str) -> None:
         await self._maybe_defer(ctx, ephemeral=True)
+        lg = i18n.ctx_lang(ctx)
 
         matches = await self.find_anime_matches(anime, queue_ctx=ctx)
         if not matches:
             await self._reply(
                 ctx,
-                content=(
-                    f"❌ Aucun résultat AniList pour **{anime}**.\n"
-                    "Essaie un **autre mot-clé** (début du titre romaji, mot distinctif…)."
-                ),
+                content=i18n.t("tracker.add_no_results", lg, anime=anime),
                 ephemeral=True,
             )
             return
 
         if len(matches) > 1:
             embed = discord.Embed(
-                title="📌 Quel anime suivre ?",
-                description=(
-                    "Choisis un titre : réponds avec le **numéro** **dans ce salon** (30 s). "
-                    "Tu recevras un **MP** quand un **nouvel épisode** sort.\n"
-                    "_Ton message avec le numéro sera supprimé pour limiter le bruit._"
-                ),
+                title=i18n.t("tracker.pick_title", lg),
+                description=i18n.t("tracker.pick_desc", lg),
                 color=discord.Color.from_rgb(88, 101, 242),
             )
             for i, match in enumerate(matches, 1):
@@ -256,9 +261,9 @@ class Tracker(commands.Cog):
                     ep_l = core.format_episode_line_part(
                         match["nextAiringEpisode"].get("episode"), match
                     )
-                    info.append(f"Épisode {ep_l} à venir")
+                    info.append(i18n.t("tracker.field_ep_upcoming", lg, ep=ep_l))
                 elif match.get("episodes"):
-                    info.append(f"{match['episodes']} épisodes")
+                    info.append(i18n.t("tracker.field_episodes", lg, n=match["episodes"]))
                 if match.get("status"):
                     info.append(match["status"])
                 if match.get("seasonYear"):
@@ -289,9 +294,9 @@ class Tracker(commands.Cog):
                 selected = matches[int(msg.content) - 1]
             except asyncio.TimeoutError:
                 if ctx.interaction:
-                    await self._reply(ctx, content="⏰ Temps écoulé, aucun anime ajouté.", ephemeral=True)
+                    await self._reply(ctx, content=i18n.t("tracker.timeout_pick", lg), ephemeral=True)
                 else:
-                    await ctx.send("⏰ Temps écoulé, aucun anime ajouté.")
+                    await ctx.send(i18n.t("tracker.timeout_pick", lg))
                 return
         else:
             selected = matches[0]
@@ -302,7 +307,7 @@ class Tracker(commands.Cog):
         current_list = tracker.setdefault(uid, [])
 
         if core.normalize(title) in [core.normalize(t) for t in current_list]:
-            await self._reply(ctx, content=f"⚠️ Tu suis déjà **{title}**.", ephemeral=True)
+            await self._reply(ctx, content=i18n.t("tracker.already_following", lg, title=title), ephemeral=True)
             return
 
         current_list.append(title)
@@ -314,55 +319,49 @@ class Tracker(commands.Cog):
             ep_l = core.format_episode_line_part(
                 selected["nextAiringEpisode"].get("episode"), selected
             )
-            info.append(f"• Prochain : Épisode {ep_l}")
+            info.append(i18n.t("tracker.detail_next", lg, ep=ep_l))
         if selected.get("episodes"):
-            info.append(f"• Épisodes : {selected['episodes']}")
+            info.append(i18n.t("tracker.detail_eps", lg, n=selected["episodes"]))
         if selected.get("status"):
-            info.append(f"• Statut : {selected['status']}")
+            info.append(i18n.t("tracker.detail_status", lg, status=selected["status"]))
 
         cover = (selected.get("coverImage") or {}).get("large")
         embed = discord.Embed(
-            title="📺 Ajouté à ton suivi",
-            description=(
-                f"**{title}** — tu recevras un **message privé** avec une **carte** quand un **épisode sort** "
-                f"(fenêtre ~18 h après la diffusion ; pas d’alerte « X minutes avant »).\n"
-                f"Gère ta liste avec **`/track list`** / **`/track remove`**."
-            ),
+            title=i18n.t("tracker.added_title", lg),
+            description=i18n.t("tracker.added_desc", lg, title=title),
             color=discord.Color.from_rgb(67, 181, 129),
         )
         if cover:
             embed.set_thumbnail(url=cover)
         if info:
-            embed.add_field(name="Détails", value="\n".join(info), inline=False)
+            embed.add_field(name=i18n.t("tracker.field_details", lg), value="\n".join(info), inline=False)
         ok = await self._dm(ctx, embed=embed)
         if ok and ctx.interaction:
-            await self._reply(ctx, content="📬 Détails envoyés en **message privé**.", ephemeral=True)
+            await self._reply(ctx, content=i18n.t("tracker.details_sent", lg), ephemeral=True)
 
     # ----------------- Suppression -----------------
 
-    @track.command(name="remove", with_app_command=True, description="Retire un anime de ta liste.")
-    @app_commands.describe(anime="Titre (ou partie) de l'anime à retirer")
+    @track.command(name="remove", with_app_command=True, description=ui_str("slash.track_remove"))
+    @app_commands.describe(anime=ui_str("slash.track_param_anime_rm"))
     async def track_remove(self, ctx: commands.Context, *, anime: str) -> None:
         await self._maybe_defer(ctx, ephemeral=True)
+        lg = i18n.ctx_lang(ctx)
         tracker = core.load_tracker()
         uid = str(ctx.author.id)
         current_list = tracker.get(uid, [])
         if not current_list:
-            await self._reply(ctx, content="❌ Ta liste est vide.", ephemeral=True)
+            await self._reply(ctx, content=i18n.t("tracker.remove_empty", lg), ephemeral=True)
             return
 
         matches = [t for t in current_list if core.normalize(anime) in core.normalize(t)]
         if not matches:
-            await self._reply(ctx, content=f"❌ Aucun anime trouvé pour **{anime}** dans ta liste.", ephemeral=True)
+            await self._reply(ctx, content=i18n.t("tracker.remove_none", lg, anime=anime), ephemeral=True)
             return
 
         if len(matches) > 1:
             embed = discord.Embed(
-                title="🔍 Plusieurs correspondances trouvées",
-                description=(
-                    "Réponds avec le **numéro** à retirer (30s). "
-                    "Ton message sera **supprimé** après."
-                ),
+                title=i18n.t("tracker.remove_multi_title", lg),
+                description=i18n.t("tracker.remove_multi_desc", lg),
                 color=discord.Color.blue()
             )
             for i, title in enumerate(matches, 1):
@@ -386,9 +385,9 @@ class Tracker(commands.Cog):
                 to_remove = matches[int(msg.content) - 1]
             except asyncio.TimeoutError:
                 if ctx.interaction:
-                    await self._reply(ctx, content="⏰ Temps écoulé, aucun anime retiré.", ephemeral=True)
+                    await self._reply(ctx, content=i18n.t("tracker.timeout_remove", lg), ephemeral=True)
                 else:
-                    await ctx.send("⏰ Temps écoulé, aucun anime retiré.")
+                    await ctx.send(i18n.t("tracker.timeout_remove", lg))
                 return
         else:
             to_remove = matches[0]
@@ -397,33 +396,35 @@ class Tracker(commands.Cog):
         tracker[uid] = current_list
         core.save_tracker(tracker)
 
-        ok = await self._dm(ctx, content=f"✅ **{to_remove}** a été retiré de ta liste.")
+        ok = await self._dm(ctx, content=i18n.t("tracker.removed_ok", lg, title=to_remove))
         if ok and ctx.interaction:
-            await self._reply(ctx, content="📬 Confirmation envoyée en **message privé**.", ephemeral=True)
+            await self._reply(ctx, content=i18n.t("tracker.remove_confirm", lg), ephemeral=True)
 
     # ----------------- Clear -----------------
 
-    @track.command(name="clear", with_app_command=True, description="Vide entièrement ta liste de suivi.")
+    @track.command(name="clear", with_app_command=True, description=ui_str("slash.track_clear"))
     async def track_clear(self, ctx: commands.Context) -> None:
         await self._maybe_defer(ctx, ephemeral=True)
+        lg = i18n.ctx_lang(ctx)
         tracker = core.load_tracker()
         uid = str(ctx.author.id)
         if uid not in tracker or not tracker[uid]:
-            ok = await self._dm(ctx, content="📭 Ta liste est déjà vide.")
+            ok = await self._dm(ctx, content=i18n.t("tracker.clear_empty", lg))
             if ok and ctx.interaction:
-                await self._reply(ctx, content="📬 Message envoyé en **message privé**.", ephemeral=True)
+                await self._reply(ctx, content=i18n.t("tracker.list_sent", lg), ephemeral=True)
             return
 
-        view = TrackClearConfirmView(self, ctx.author.id)
+        view = TrackClearConfirmView(self, ctx.author.id, lg)
+        prompt = i18n.t("tracker.clear_prompt", lg)
         if getattr(ctx, "interaction", None):
             await self._reply(
                 ctx,
-                content="⚠️ **Supprimer toute ta liste de suivi ?**",
+                content=prompt,
                 view=view,
                 ephemeral=True,
             )
         else:
-            await ctx.send("⚠️ **Supprimer toute ta liste de suivi ?**", view=view)
+            await ctx.send(prompt, view=view)
 
     # ----------------- Recherche AniList -----------------
 
@@ -498,7 +499,8 @@ class Tracker(commands.Cog):
                 try:
                     tname = anime.get("title_romaji") or anime.get("title_english") or "Anime"
                     ep_txt = core.format_episode_line_part(anime.get("episode"), anime)
-                    line = f"📺 **Sortie** — **{tname}** · Épisode **{ep_txt}**"
+                    _al = i18n.guild_lang(None)
+                    line = i18n.t("tracker.alert_release", _al, title=tname, ep=ep_txt)
                     if img_path:
                         await user.send(
                             line,

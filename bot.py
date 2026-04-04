@@ -17,6 +17,7 @@ from discord import app_commands
 
 from modules import core
 from modules import user_reply
+from modules.app_cmd_locale import AppCommandTranslator
 # ========= LOGGING (unique) =========
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -138,6 +139,7 @@ class AnimeBot(commands.Bot):
 
     # ---------- Setup ----------
     async def setup_hook(self) -> None:
+        await self.tree.set_translator(AppCommandTranslator())
         await self._load_extensions()
         await self._sync_slash_commands()
         self._start_tasks()

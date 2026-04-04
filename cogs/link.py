@@ -21,7 +21,9 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from modules import core
+from modules import i18n
 from modules import user_reply
+from modules.app_cmd_locale import ui_str
 
 
 def _anime_status_count(statuses: List[Dict[str, Any]] | None, key: str) -> int:
@@ -86,18 +88,19 @@ class Link(commands.Cog):
         """
         self.bot = bot
 
-    @commands.hybrid_command(name="linkanilist", description="Lie ton compte AniList à ton compte Discord.")
-    @app_commands.describe(pseudo="Ton pseudo AniList (respecte la casse si possible)")
+    @commands.hybrid_command(name="linkanilist", description=ui_str("slash.link_linkanilist"))
+    @app_commands.describe(pseudo=ui_str("slash.link_param_pseudo"))
     async def link_anilist(self, ctx: commands.Context, pseudo: str) -> None:
         # Anti-timeout côté slash
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
 
+        lg = i18n.ctx_lang(ctx)
         # 1) Vérifier que le compte existe sur AniList (et récupérer la casse exacte)
         user = core.query_anilist_user(pseudo.strip())
         if not user:
             # Réponse propre dans les deux modes
-            msg = "❌ Aucun compte AniList trouvé avec ce pseudo."
+            msg = i18n.t("link.not_found", lg)
             if ctx.interaction:
                 await ctx.interaction.followup.send(msg, ephemeral=True)
             else:
@@ -108,16 +111,13 @@ class Link(commands.Cog):
         existing = core.get_linked_username(ctx.author.id)
         if existing:
             if existing.lower() == resolved.lower():
-                msg = f"ℹ️ Ton compte est déjà lié à **{existing}**."
+                msg = i18n.t("link.already_same", lg, existing=existing)
                 if ctx.interaction:
                     await ctx.interaction.followup.send(msg, ephemeral=True)
                 else:
                     await ctx.reply(msg, mention_author=False)
                 return
-            msg = (
-                f"Tu es déjà lié à **{existing}**.\n"
-                "Utilise **`/unlink`**, puis refais **`/linkanilist`** pour changer de pseudo AniList."
-            )
+            msg = i18n.t("link.already_other", lg, existing=existing)
             if ctx.interaction:
                 await ctx.interaction.followup.send(msg, ephemeral=True)
             else:
@@ -126,10 +126,7 @@ class Link(commands.Cog):
 
         other = core.discord_id_for_linked_anilist_username(resolved)
         if other is not None and other != ctx.author.id:
-            msg = (
-                "❌ Ce pseudo AniList est **déjà lié** à un autre compte Discord.\n"
-                "Si c’est bien ton profil, contacte le support du bot : le lien doit être libéré."
-            )
+            msg = i18n.t("link.taken_other_discord", lg)
             if ctx.interaction:
                 await ctx.interaction.followup.send(msg, ephemeral=True)
             else:
@@ -139,13 +136,7 @@ class Link(commands.Cog):
         token = f"ANBOT-{secrets.token_hex(4).upper()}"
         core.anilist_set_link_pending(ctx.author.id, resolved, token)
 
-        msg = (
-            f"**Étape 1/2** — pseudo **{resolved}** reconnu sur AniList.\n\n"
-            f"1. Ouvre ton profil AniList → **Paramètres** → colle exactement ce code dans "
-            f"**« About » / « À propos »** (bio publique) :\n```{token}```\n"
-            "2. Enregistre, puis lance **`/verifyanilist`** ici.\n\n"
-            "_Le code expire après **30 minutes**. Tu peux le retirer de ta bio une fois lié._"
-        )
+        msg = i18n.t("link.step1_body", lg, resolved=resolved, token=token)
         if ctx.interaction:
             await ctx.interaction.followup.send(msg, ephemeral=True)
         else:
@@ -153,15 +144,16 @@ class Link(commands.Cog):
 
     @commands.hybrid_command(
         name="verifyanilist",
-        description="Après /linkanilist : confirme que la bio AniList contient le code.",
+        description=ui_str("slash.link_verifyanilist"),
     )
     async def verify_anilist(self, ctx: commands.Context) -> None:
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True, ephemeral=True)
 
+        lg = i18n.ctx_lang(ctx)
         pending = core.anilist_get_link_pending(ctx.author.id)
         if not pending:
-            msg = "❌ Aucune vérification en cours. Commence par **`/linkanilist <pseudo>`**."
+            msg = i18n.t("link.verify_none", lg)
             if ctx.interaction:
                 await ctx.interaction.followup.send(msg, ephemeral=True)
             else:
@@ -172,7 +164,7 @@ class Link(commands.Cog):
 
         if time.time() - created > 1800:
             core.anilist_clear_link_pending(ctx.author.id)
-            msg = "❌ Code expiré (30 min). Relance **`/linkanilist`** avec ton pseudo."
+            msg = i18n.t("link.verify_expired", lg)
             if ctx.interaction:
                 await ctx.interaction.followup.send(msg, ephemeral=True)
             else:
@@ -181,10 +173,7 @@ class Link(commands.Cog):
 
         about = core.fetch_anilist_user_about(username) or ""
         if token not in about:
-            msg = (
-                f"❌ Je ne vois pas encore le code **`{token}`** sur le profil **{username}**.\n"
-                "Vérifie la section **About** (publique), enregistre, attends quelques secondes, réessaie."
-            )
+            msg = i18n.t("link.verify_not_in_bio", lg, token=token, username=username)
             if ctx.interaction:
                 await ctx.interaction.followup.send(msg, ephemeral=True)
             else:
@@ -196,9 +185,9 @@ class Link(commands.Cog):
         except ValueError as e:
             code = str(e)
             if "anilist_username_taken" in code or "taken" in code.lower():
-                msg = "❌ Ce pseudo AniList vient d’être lié ailleurs. Réessaie ou contacte un admin."
+                msg = i18n.t("link.error_taken", lg)
             else:
-                msg = "❌ Impossible d’enregistrer le lien pour le moment."
+                msg = i18n.t("link.error_save", lg)
             core.anilist_clear_link_pending(ctx.author.id)
             if ctx.interaction:
                 await ctx.interaction.followup.send(msg, ephemeral=True)
@@ -207,13 +196,13 @@ class Link(commands.Cog):
             return
 
         core.anilist_clear_link_pending(ctx.author.id)
-        ok = f"✅ **Étape 2/2** — compte **{username}** confirmé et lié à ton Discord !"
+        ok = i18n.t("link.step2_ok", lg, username=username)
         if ctx.interaction:
             await ctx.interaction.followup.send(ok, ephemeral=True)
         else:
             await ctx.reply(ok, mention_author=False)
 
-    @commands.hybrid_command(name="unlink")
+    @commands.hybrid_command(name="unlink", description=ui_str("slash.link_unlink"))
     async def unlink(self, ctx: commands.Context) -> None:
         """Supprime la liaison entre le compte Discord et AniList.
 
@@ -224,24 +213,26 @@ class Link(commands.Cog):
         Args:
             ctx: Le contexte de la commande
         """
+        lg = i18n.ctx_lang(ctx)
         core.anilist_clear_link_pending(ctx.author.id)
         if core.unlink_linked_username(ctx.author.id):
-            msg = "🔗 Ton lien AniList a bien été supprimé."
+            msg = i18n.t("link.unlink_ok", lg)
         else:
-            msg = "❌ Aucun compte AniList n'était lié à ce profil."
+            msg = i18n.t("link.unlink_none", lg)
         await user_reply.send_ephemeral_or_private(ctx, msg)
 
     @commands.hybrid_command(
         name="duelstats",
-        description="Compare ton engagement AniList avec un ami (complétés, en cours, temps, épisodes).",
+        description=ui_str("slash.link_duelstats"),
     )
     @commands.cooldown(1, 15, commands.BucketType.user)
-    @app_commands.describe(adversaire="Le membre à affronter (compte AniList lié)")
+    @app_commands.describe(adversaire=ui_str("slash.link_param_adversaire"))
     async def duelstats(self, ctx: commands.Context, adversaire: discord.Member | None = None) -> None:
         """Compare l’engagement AniList (complétés, en cours, temps, épisodes) — pas le genre ni un score vide."""
+        lg = i18n.ctx_lang(ctx)
         opponent = adversaire
         if opponent is None:
-            await ctx.send("❌ Utilise : **`/duelstats @ami`** pour lancer un duel de stats.")
+            await ctx.send(i18n.t("link.duel_usage", lg))
             return
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(thinking=True)
@@ -249,7 +240,7 @@ class Link(commands.Cog):
         user1 = core.get_linked_username(ctx.author.id)
         user2 = core.get_linked_username(opponent.id)
         if not user1 or not user2:
-            await ctx.send("❗ Les deux joueurs doivent avoir lié leur compte avec `/linkanilist`.")
+            await ctx.send(i18n.t("link.duel_both_link", lg))
             return
 
         query = """
@@ -281,7 +272,7 @@ class Link(commands.Cog):
                     "mean": round(float(a.get("meanScore") or 0), 1),
                 }
             except Exception:
-                await ctx.send("❌ Impossible de récupérer les statistiques AniList.")
+                await ctx.send(i18n.t("link.duel_fetch_error", lg))
                 return
 
         s1, s2 = stats[user1], stats[user2]
@@ -292,10 +283,10 @@ class Link(commands.Cog):
         pts_a = pts_b = 0
 
         for label, key in (
-            ("Complétés", "completed"),
-            ("En cours", "watching"),
-            ("Épisodes vus", "episodes"),
-            ("Jours visionnés", "days"),
+            (i18n.t("link.duel_l_completed", lg), "completed"),
+            (i18n.t("link.duel_l_watching", lg), "watching"),
+            (i18n.t("link.duel_l_episodes", lg), "episodes"),
+            (i18n.t("link.duel_l_days", lg), "days"),
         ):
             va, vb = s1[key], s2[key]
             text, pa, pb = _duel_compact(label, float(va), float(vb), n_a, n_b, higher_wins=True)
@@ -305,7 +296,7 @@ class Link(commands.Cog):
 
         if _mean_bonus_ok(s1["mean"], s2["mean"]):
             text, pa, pb = _duel_compact(
-                "Note moy. (bonus)",
+                i18n.t("link.duel_l_mean_bonus", lg),
                 float(s1["mean"]),
                 float(s2["mean"]),
                 n_a,
@@ -317,13 +308,13 @@ class Link(commands.Cog):
             pts_b += pb
 
         if pts_a > pts_b:
-            verdict = f"**{n_a}** gagne **{pts_a}**–**{pts_b}**"
+            verdict = i18n.t("link.duel_win", lg, winner=n_a, hi=pts_a, lo=pts_b)
             color = discord.Color.from_rgb(220, 90, 90)
         elif pts_b > pts_a:
-            verdict = f"**{n_b}** gagne **{pts_b}**–**{pts_a}**"
+            verdict = i18n.t("link.duel_win", lg, winner=n_b, hi=pts_b, lo=pts_a)
             color = discord.Color.from_rgb(90, 130, 220)
         else:
-            verdict = f"**Match nul** · **{pts_a}**–**{pts_b}**"
+            verdict = i18n.t("link.duel_draw", lg, p=pts_a, p2=pts_b)
             color = discord.Color.from_rgb(180, 140, 60)
 
         board = "\n".join(lines)
@@ -331,17 +322,14 @@ class Link(commands.Cog):
             board = board[:997] + "…"
 
         embed = discord.Embed(
-            title="⚔️ Duel AniList",
-            description=(
-                f"**{n_a}** · `{user1}`  ×  **{n_b}** · `{user2}`\n"
-                "Engagement réel (pas genre / pas moyenne biaisée)."
-            ),
+            title=i18n.t("link.duel_title", lg),
+            description=i18n.t("link.duel_desc", lg, n_a=n_a, user1=user1, n_b=n_b, user2=user2),
             color=color,
         )
-        embed.add_field(name="🎮 Tableau", value=board, inline=False)
-        embed.add_field(name="🏆 Verdict", value=verdict, inline=False)
-        embed.set_footer(text="AniList · /linkanilist · note bonus si 0 < moy. < 100 pour les deux")
-        embed.set_author(name="Arène stats", icon_url=ctx.author.display_avatar.url)
+        embed.add_field(name=i18n.t("link.duel_field_board", lg), value=board, inline=False)
+        embed.add_field(name=i18n.t("link.duel_field_verdict", lg), value=verdict, inline=False)
+        embed.set_footer(text=i18n.t("link.duel_footer", lg))
+        embed.set_author(name=i18n.t("link.duel_author", lg), icon_url=ctx.author.display_avatar.url)
         embed.set_thumbnail(url=opponent.display_avatar.url)
 
         await ctx.send(embed=embed)

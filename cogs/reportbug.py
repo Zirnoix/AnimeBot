@@ -12,6 +12,8 @@ from discord.ext import commands
 
 from modules import bug_report as br
 from modules import core
+from modules import i18n
+from modules.app_cmd_locale import ui_str
 
 LOG = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ def _cleanup_drafts() -> None:
         _draft_body.pop(k, None)
 
 
-def _reject_cooldown_message(user_id: int) -> str:
+def _reject_cooldown_message(user_id: int, lang: str) -> str:
     uid = str(int(user_id))
     with core.DATA_JSON_LOCK:
         st = br.load_store()
@@ -52,57 +54,47 @@ def _reject_cooldown_message(user_id: int) -> str:
         except (TypeError, ValueError):
             ru = 0.0
     if ru <= 0:
-        return "⏳ Tu dois attendre encore un peu avant de refaire un signalement."
+        return i18n.t("reportbug.reject_wait_short", lang)
     dt = datetime.fromtimestamp(ru, tz=timezone.utc)
-    # Afficher la fin du cooldown en heure locale
     try:
         local = dt.astimezone(core.TIMEZONE)
         until = local.strftime("%d/%m/%Y à %H:%M")
     except Exception:
         until = dt.strftime("%d/%m/%Y %H:%M UTC")
-    return (
-        "⏳ **Signalement temporairement indisponible**\n\n"
-        "Ton dernier rapport a été **refusé avec sanction** (faux signalement **volontaire** / troll / "
-        "abus évident). Tu pourras refaire un **`/reportbug`** après le **"
-        f"{until}** (heure de Paris).\n\n"
-        "Les signalements de **bonne foi** qui ne sont finalement pas des bugs sont traités **sans** cette sanction."
-    )
+    return i18n.t("reportbug.reject_cooldown", lang, until=until)
 
 
-def _daily_message() -> str:
-    return (
-        "📅 **Quota journalier atteint**\n\n"
-        "Tu as déjà envoyé un signalement **aujourd’hui** (fuseau horaire de Paris). "
-        "Un seul report par jour — **un bug** à la fois. Réessaie **demain après minuit**."
-    )
+def _daily_message(lang: str) -> str:
+    return i18n.t("reportbug.daily", lang)
 
 
-class BugReportModal(discord.ui.Modal, title="Décrire le bug"):
-    def __init__(self, bot: commands.Bot) -> None:
-        super().__init__(timeout=300)
+class BugReportModal(discord.ui.Modal):
+    def __init__(self, bot: commands.Bot, lang: str) -> None:
+        super().__init__(title=i18n.t("reportbug.modal_title", lang)[:45], timeout=300)
         self.bot = bot
+        self.lang = lang
         self.cmd = discord.ui.TextInput(
-            label="Commande ou système concerné",
-            placeholder="Ex. /quiz, /opening, module de profil…",
+            label=i18n.t("reportbug.modal_cmd", lang)[:45],
+            placeholder=i18n.t("reportbug.modal_cmd_ph", lang)[:100],
             required=True,
             max_length=200,
             style=discord.TextStyle.short,
         )
         self.prob = discord.ui.TextInput(
-            label="Problème observé",
+            label=i18n.t("reportbug.modal_prob", lang)[:45],
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=2000,
         )
         self.exp = discord.ui.TextInput(
-            label="Comportement attendu",
+            label=i18n.t("reportbug.modal_exp", lang)[:45],
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=2000,
         )
         self.repro = discord.ui.TextInput(
-            label="Étapes pour reproduire",
-            placeholder="Si tu ne peux pas reproduire, explique pourquoi (≥12 caractères).",
+            label=i18n.t("reportbug.modal_repro", lang)[:45],
+            placeholder=i18n.t("reportbug.modal_repro_ph", lang)[:100],
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=2000,
@@ -113,6 +105,7 @@ class BugReportModal(discord.ui.Modal, title="Décrire le bug"):
         self.add_item(self.repro)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        lg = self.lang
         ok, code = br.validate_bug_text_parts(
             str(self.cmd.value),
             str(self.prob.value),
@@ -121,18 +114,11 @@ class BugReportModal(discord.ui.Modal, title="Décrire le bug"):
         )
         if not ok:
             if code == "command_empty":
-                hint = "Indique **quelle commande ou quel système** est concerné (ce champ peut rester court, ex. `/quiz`)."
+                hint = i18n.t("reportbug.hint_cmd", lg)
             elif code == "too_short":
-                hint = (
-                    f"Le texte **au total** doit faire au moins **{br.MIN_TOTAL_CHARS} caractères** "
-                    "(tous champs confondus)."
-                )
+                hint = i18n.t("reportbug.hint_total", lg, min=br.MIN_TOTAL_CHARS)
             else:
-                hint = (
-                    f"Les champs **problème observé**, **comportement attendu** et **étapes pour reproduire** "
-                    f"doivent avoir au moins **{br.MIN_FIELD_CHARS} caractères** chacun. "
-                    "Le champ **commande / système** peut rester court."
-                )
+                hint = i18n.t("reportbug.hint_fields", lg, min=br.MIN_FIELD_CHARS)
             await interaction.response.send_message(hint, ephemeral=True)
             return
         body = br.format_bug_body(
@@ -147,47 +133,50 @@ class BugReportModal(discord.ui.Modal, title="Décrire le bug"):
         _draft_expires[uid] = time.time() + _DRAFT_TTL
 
         preview = discord.Embed(
-            title="📋 Aperçu de ton signalement",
+            title=i18n.t("reportbug.preview_title", lg),
             description=body[:4000],
             color=discord.Color.orange(),
         )
-        preview.set_footer(text="Un seul bug par report — vérifie avant d’envoyer.")
+        preview.set_footer(text=i18n.t("reportbug.preview_footer", lg))
         await interaction.response.send_message(
             embed=preview,
-            view=SendReportView(self.bot, uid),
+            view=SendReportView(self.bot, uid, lg),
         )
 
 
 class SendReportView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, author_id: int) -> None:
+    def __init__(self, bot: commands.Bot, author_id: int, lang: str) -> None:
         super().__init__(timeout=600)
         self.bot = bot
         self.author_id = author_id
+        self.lang = lang
+        self.send.label = i18n.t("reportbug.btn_send", lang)[:80]
 
     @discord.ui.button(label="Envoyer le report", style=discord.ButtonStyle.success, emoji="📤")
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        lg = self.lang
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("Ce bouton n’est pas pour toi.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.btn_not_you", lg), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         _cleanup_drafts()
         body = _draft_body.get(self.author_id)
         if not body or _draft_expires.get(self.author_id, 0) < time.time():
             await interaction.followup.send(
-                "⏱️ Ce brouillon a expiré. Relance **`/reportbug`** depuis le serveur.",
+                i18n.t("reportbug.draft_expired", lg),
                 ephemeral=True,
             )
             return
         ok, reason = br.can_user_submit_bug(self.author_id)
         if not ok:
             if reason == "blacklist":
-                await interaction.followup.send(_msg_blacklist(), ephemeral=True)
+                await interaction.followup.send(_msg_blacklist(lg), ephemeral=True)
                 return
             if reason == "reject_cooldown":
-                await interaction.followup.send(_reject_cooldown_message(self.author_id), ephemeral=True)
+                await interaction.followup.send(_reject_cooldown_message(self.author_id, lg), ephemeral=True)
                 return
             if reason == "daily_limit":
-                await interaction.followup.send(_daily_message(), ephemeral=True)
+                await interaction.followup.send(_daily_message(lg), ephemeral=True)
                 return
         rid = br.create_pending_report(
             self.author_id,
@@ -197,12 +186,12 @@ class SendReportView(discord.ui.View):
         if rid is None:
             ok2, reason2 = br.can_user_submit_bug(self.author_id)
             if reason2 == "daily_limit":
-                await interaction.followup.send(_daily_message(), ephemeral=True)
+                await interaction.followup.send(_daily_message(lg), ephemeral=True)
             elif reason2 == "reject_cooldown":
-                await interaction.followup.send(_reject_cooldown_message(self.author_id), ephemeral=True)
+                await interaction.followup.send(_reject_cooldown_message(self.author_id, lg), ephemeral=True)
             else:
                 await interaction.followup.send(
-                    "❌ Impossible d’enregistrer le signalement pour le moment. Réessaie plus tard.",
+                    i18n.t("reportbug.save_fail", lg),
                     ephemeral=True,
                 )
             return
@@ -210,32 +199,39 @@ class SendReportView(discord.ui.View):
         oid = _owner_id()
         if oid is None:
             br.rollback_report(self.author_id, rid)
-            await interaction.followup.send("❌ Configuration owner invalide.", ephemeral=True)
+            await interaction.followup.send(i18n.t("reportbug.owner_config", lg), ephemeral=True)
             return
+        # DM owner : pas de guilde → langue par défaut (FR) pour le panneau owner
+        owner_lang = i18n.guild_lang(None)
         owner = self.bot.get_user(oid) or await self.bot.fetch_user(oid)
         embed = discord.Embed(
-            title=f"🐞 Nouveau bug report #{rid}",
+            title=i18n.t("reportbug.embed_new_title", owner_lang, rid=rid),
             description=body[:4000],
             color=discord.Color.red(),
         )
-        embed.add_field(name="Auteur", value=f"{interaction.user} (`{interaction.user.id}`)", inline=False)
-        embed.add_field(name="État", value="**En attente** de validation", inline=True)
         embed.add_field(
-            name="Date (UTC)",
+            name=i18n.t("reportbug.embed_author", owner_lang),
+            value=f"{interaction.user} (`{interaction.user.id}`)",
+            inline=False,
+        )
+        embed.add_field(
+            name=i18n.t("reportbug.embed_state", owner_lang),
+            value=i18n.t("reportbug.embed_state_pending", owner_lang),
+            inline=True,
+        )
+        embed.add_field(
+            name=i18n.t("reportbug.embed_date_utc", owner_lang),
             value=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             inline=True,
         )
-        embed.set_footer(
-            text="🔍 Analysé = pas un bug sans sanction · ✖️ Refus = troll/faux volontaire (7j) · ✅ Confirmer = XP"
-        )
+        embed.set_footer(text=i18n.t("reportbug.embed_footer_owner", owner_lang))
         try:
-            await owner.send(embed=embed, view=OwnerDecisionView(self.bot, rid))
+            await owner.send(embed=embed, view=OwnerDecisionView(self.bot, rid, owner_lang))
         except discord.HTTPException as e:
             LOG.exception("owner DM failed for report %s: %s", rid, e)
             br.rollback_report(self.author_id, rid)
             await interaction.followup.send(
-                "❌ Le propriétaire n’a pas pu être contacté en **message privé** pour le moment. "
-                "Ton signalement **n’a pas été enregistré**. Réessaie plus tard.",
+                i18n.t("reportbug.owner_dm_fail", lg),
                 ephemeral=True,
             )
             return
@@ -249,24 +245,24 @@ class SendReportView(discord.ui.View):
         except Exception:
             pass
         await interaction.followup.send(
-            "✅ **Signalement envoyé** au propriétaire. Tu recevras une réponse en **message privé** "
-            "dès qu’il aura traité ton rapport.",
+            i18n.t("reportbug.sent_ok", lg),
             ephemeral=True,
         )
 
 
-def _msg_blacklist() -> str:
-    return (
-        "🚫 **Accès au signalement désactivé**\n\n"
-        "Tu n’as plus accès au système de signalement de bugs."
-    )
+def _msg_blacklist(lang: str) -> str:
+    return i18n.t("reportbug.blacklist", lang)
 
 
 class OwnerDecisionView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, report_id: int) -> None:
+    def __init__(self, bot: commands.Bot, report_id: int, lang: str) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.report_id = report_id
+        self.lang = lang
+        self.dismiss_no_sanction.label = i18n.t("reportbug.btn_dismiss", lang)[:80]
+        self.refuse.label = i18n.t("reportbug.btn_refuse", lang)[:80]
+        self.confirm.label = i18n.t("reportbug.btn_confirm_bug", lang)[:80]
 
     @discord.ui.button(
         label="Analysé — pas un bug",
@@ -276,12 +272,13 @@ class OwnerDecisionView(discord.ui.View):
     )
     async def dismiss_no_sanction(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         """Déjà réglé, API, redémarrage, cas rare : pas de cooldown 7 jours."""
+        lg = self.lang
         if not _is_owner(interaction.user.id):
-            await interaction.response.send_message("Réservé au propriétaire du bot.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.owner_only", lg), ephemeral=True)
             return
         key = f"dis:{self.report_id}"
         if key in _owner_lock:
-            await interaction.response.send_message("Traitement déjà en cours.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.processing", lg), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         _owner_lock.add(key)
@@ -289,7 +286,7 @@ class OwnerDecisionView(discord.ui.View):
             ok, rep = br.dismiss_report_no_sanction(self.report_id, interaction.user.id)
             if not ok:
                 await interaction.followup.send(
-                    "Ce rapport n’est plus en attente (déjà traité ou introuvable).",
+                    i18n.t("reportbug.report_gone", lg),
                     ephemeral=True,
                 )
                 return
@@ -298,17 +295,8 @@ class OwnerDecisionView(discord.ui.View):
             try:
                 await u.send(
                     embed=discord.Embed(
-                        title="Signalement analysé",
-                        description=(
-                            "Merci pour ton retour — il a bien été **lu et analysé**.\n\n"
-                            "Dans ce cas, ce n’était **pas un bug** côté bot au sens d’un défaut à corriger "
-                            "avec récompense : par exemple **redémarrage** du bot, **API AniList** temporairement "
-                            "indisponible, **comportement déjà corrigé**, ou un cas **extrêmement rare**.\n\n"
-                            "**Aucune sanction** n’est appliquée : tu peux continuer à utiliser **`/reportbug`** "
-                            "normalement (sous réserve du quota journalier).\n\n"
-                            "_La sanction de **7 jours** ne concerne que les faux signalements **volontaires** "
-                            "(troll / abus évident)._"
-                        ),
+                        title=i18n.t("reportbug.dismiss_title", lg),
+                        description=i18n.t("reportbug.dismiss_body", lg),
                         color=discord.Color.blue(),
                     )
                 )
@@ -318,24 +306,25 @@ class OwnerDecisionView(discord.ui.View):
                 child.disabled = True
             try:
                 await interaction.message.edit(
-                    content="**Analysé** — pas un bug réel, **sans sanction** (joueur notifié).",
+                    content=i18n.t("reportbug.dismiss_edit", lg),
                     embed=interaction.message.embeds[0] if interaction.message.embeds else None,
                     view=self,
                 )
             except Exception:
                 pass
-            await interaction.followup.send("✅ Clôture sans sanction enregistrée.", ephemeral=True)
+            await interaction.followup.send(i18n.t("reportbug.dismiss_followup", lg), ephemeral=True)
         finally:
             _owner_lock.discard(key)
 
     @discord.ui.button(label="Refuser (sanction 7j)", style=discord.ButtonStyle.danger, emoji="✖️", row=1)
     async def refuse(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        lg = self.lang
         if not _is_owner(interaction.user.id):
-            await interaction.response.send_message("Réservé au propriétaire du bot.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.owner_only", lg), ephemeral=True)
             return
         key = f"ref:{self.report_id}"
         if key in _owner_lock:
-            await interaction.response.send_message("Traitement déjà en cours.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.processing", lg), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         _owner_lock.add(key)
@@ -343,7 +332,7 @@ class OwnerDecisionView(discord.ui.View):
             ok, rep = br.refuse_report(self.report_id, interaction.user.id)
             if not ok:
                 await interaction.followup.send(
-                    "Ce rapport n’est plus en attente (déjà traité ou introuvable).",
+                    i18n.t("reportbug.report_gone", lg),
                     ephemeral=True,
                 )
                 return
@@ -352,14 +341,8 @@ class OwnerDecisionView(discord.ui.View):
             try:
                 await u.send(
                     embed=discord.Embed(
-                        title="Signalement refusé — sanction",
-                        description=(
-                            "Ton signalement a été **refusé avec sanction** : il s’agissait d’un **faux rapport "
-                            "volontaire**, d’un **troll** ou d’un **abus évident** (pas d’un simple malentendu).\n\n"
-                            "Tu ne pourras pas utiliser **`/reportbug`** pendant **7 jours**.\n\n"
-                            "_Les signalements pris au sérieux mais qui ne sont pas des bugs (API, redémarrage, etc.) "
-                            "sont traités **sans** cette sanction._"
-                        ),
+                        title=i18n.t("reportbug.refuse_title", lg),
+                        description=i18n.t("reportbug.refuse_body", lg),
                         color=discord.Color.dark_red(),
                     )
                 )
@@ -369,43 +352,60 @@ class OwnerDecisionView(discord.ui.View):
                 child.disabled = True
             try:
                 await interaction.message.edit(
-                    content="**Refusé (sanction 7j)** — faux signalement volontaire / troll.",
+                    content=i18n.t("reportbug.refuse_edit", lg),
                     embed=interaction.message.embeds[0] if interaction.message.embeds else None,
                     view=self,
                 )
             except Exception:
                 pass
-            await interaction.followup.send("✅ Refus enregistré.", ephemeral=True)
+            await interaction.followup.send(i18n.t("reportbug.refuse_followup", lg), ephemeral=True)
         finally:
             _owner_lock.discard(key)
 
     @discord.ui.button(label="Confirmer le bug", style=discord.ButtonStyle.success, emoji="✅", row=1)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        lg = self.lang
         if not _is_owner(interaction.user.id):
-            await interaction.response.send_message("Réservé au propriétaire du bot.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.owner_only", lg), ephemeral=True)
             return
         rep = br.get_report(self.report_id)
         if not rep or str(rep.get("status")) != "pending":
-            await interaction.response.send_message("Ce rapport n’est plus en attente.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.pending_only", lg), ephemeral=True)
             return
         emb: discord.Embed | None = None
         if interaction.message and interaction.message.embeds:
             emb = interaction.message.embeds[0].copy()
             emb.add_field(
-                name="Validation",
-                value="Choisis la **gravité** et si le bug était **difficile à trouver**, puis **Attribuer la récompense**.",
+                name=i18n.t("reportbug.validation_field", lg),
+                value=i18n.t("reportbug.validation_hint", lg),
                 inline=False,
             )
-        await interaction.response.edit_message(embed=emb, view=OwnerRewardView(self.bot, self.report_id))
+        await interaction.response.edit_message(embed=emb, view=OwnerRewardView(self.bot, self.report_id, lg))
 
 
 class OwnerRewardView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, report_id: int) -> None:
+    def __init__(self, bot: commands.Bot, report_id: int, lang: str) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.report_id = report_id
+        self.lang = lang
         self.severity: str | None = None
         self.bug_hard: bool | None = None
+        self.select_severity.placeholder = i18n.t("reportbug.sev_placeholder", lang)[:150]
+        self.select_hard.placeholder = i18n.t("reportbug.hard_placeholder", lang)[:150]
+        self.apply_xp.label = i18n.t("reportbug.btn_apply_xp", lang)[:80]
+        opts = self.select_severity.options
+        if len(opts) >= 3:
+            opts[0].label = i18n.t("reportbug.sev_small", lang)[:100]
+            opts[0].description = i18n.t("reportbug.sev_small_desc", lang)[:100]
+            opts[1].label = i18n.t("reportbug.sev_med", lang)[:100]
+            opts[1].description = i18n.t("reportbug.sev_med_desc", lang)[:100]
+            opts[2].label = i18n.t("reportbug.sev_big", lang)[:100]
+            opts[2].description = i18n.t("reportbug.sev_big_desc", lang)[:100]
+        hopts = self.select_hard.options
+        if len(hopts) >= 2:
+            hopts[0].label = i18n.t("reportbug.hard_no", lang)[:100]
+            hopts[1].label = i18n.t("reportbug.hard_yes", lang)[:100]
 
     @discord.ui.select(
         placeholder="Gravité du bug",
@@ -417,8 +417,9 @@ class OwnerRewardView(discord.ui.View):
         row=0,
     )
     async def select_severity(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
+        lg = self.lang
         if not _is_owner(interaction.user.id):
-            await interaction.response.send_message("Réservé au propriétaire.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.owner_only_short", lg), ephemeral=True)
             return
         self.severity = select.values[0]
         await interaction.response.defer()
@@ -432,26 +433,28 @@ class OwnerRewardView(discord.ui.View):
         row=1,
     )
     async def select_hard(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
+        lg = self.lang
         if not _is_owner(interaction.user.id):
-            await interaction.response.send_message("Réservé au propriétaire.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.owner_only_short", lg), ephemeral=True)
             return
         self.bug_hard = select.values[0] == "1"
         await interaction.response.defer()
 
     @discord.ui.button(label="Attribuer la récompense", style=discord.ButtonStyle.primary, row=2)
     async def apply_xp(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        lg = self.lang
         if not _is_owner(interaction.user.id):
-            await interaction.response.send_message("Réservé au propriétaire.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.owner_only_short", lg), ephemeral=True)
             return
         if self.severity is None or self.bug_hard is None:
             await interaction.response.send_message(
-                "Choisis la **gravité** et si le bug était **difficile à trouver** avant de valider.",
+                i18n.t("reportbug.pick_sev_hard", lg),
                 ephemeral=True,
             )
             return
         key = f"ok:{self.report_id}"
         if key in _owner_lock:
-            await interaction.response.send_message("Traitement déjà en cours.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.processing", lg), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         _owner_lock.add(key)
@@ -463,28 +466,37 @@ class OwnerRewardView(discord.ui.View):
                 self.bug_hard,
             )
             if not ok or not rep:
-                await interaction.followup.send("❌ Impossible de confirmer (déjà traité ?).", ephemeral=True)
+                await interaction.followup.send(i18n.t("reportbug.confirm_fail", lg), ephemeral=True)
                 return
             uid = int(rep.get("user_id") or 0)
             await core.add_xp(self.bot, None, uid, xp, announce=False)
             u = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
             try:
                 sev = str(rep.get("severity") or "")
-                sev_fr = {"petit": "Petit bug (300 XP)", "moyen": "Bug moyen (600 XP)", "gros": "Gros bug (1000 XP)"}
+                sev_map = {
+                    "petit": i18n.t("reportbug.sev_label_petit", lg),
+                    "moyen": i18n.t("reportbug.sev_label_moyen", lg),
+                    "gros": i18n.t("reportbug.sev_label_gros", lg),
+                }
                 hard = bool(rep.get("hard_to_find"))
                 base = xp - (br.HARD_BONUS_XP if hard else 0)
+                hard_txt = (
+                    i18n.t("reportbug.confirm_user_hard_yes", lg)
+                    if hard
+                    else i18n.t("reportbug.confirm_user_hard_no", lg)
+                )
                 lines = [
-                    "Ton signalement a été **validé**.",
+                    i18n.t("reportbug.confirm_user_line1", lg),
                     "",
-                    f"**Gravité** : {sev_fr.get(sev, sev)}",
-                    f"**Difficile à trouver** : {'Oui (+300 XP)' if hard else 'Non'}",
-                    f"**Total** : **{xp} XP** (dont **{base}** de base).",
+                    i18n.t("reportbug.confirm_user_sev", lg, label=sev_map.get(sev, sev)),
+                    i18n.t("reportbug.confirm_user_hard", lg, hard=hard_txt),
+                    i18n.t("reportbug.confirm_user_total", lg, xp=xp, base=base),
                     "",
-                    "Merci d’aider à améliorer le bot !",
+                    i18n.t("reportbug.confirm_user_thanks", lg),
                 ]
                 await u.send(
                     embed=discord.Embed(
-                        title="Bug confirmé — merci !",
+                        title=i18n.t("reportbug.confirm_user_title", lg),
                         description="\n".join(lines),
                         color=discord.Color.green(),
                     )
@@ -495,25 +507,27 @@ class OwnerRewardView(discord.ui.View):
                 child.disabled = True
             try:
                 await interaction.message.edit(
-                    content=f"**Confirmé** — **{xp} XP** attribués à `{uid}`.",
+                    content=i18n.t("reportbug.confirm_edit", lg, xp=xp, uid=uid),
                     embed=interaction.message.embeds[0] if interaction.message.embeds else None,
                     view=self,
                 )
             except Exception:
                 pass
-            await interaction.followup.send(f"✅ OK — {xp} XP attribués.", ephemeral=True)
+            await interaction.followup.send(i18n.t("reportbug.confirm_followup", lg, xp=xp), ephemeral=True)
         finally:
             _owner_lock.discard(key)
 
 
 class IntroView(discord.ui.View):
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: commands.Bot, lang: str) -> None:
         super().__init__(timeout=600)
         self.bot = bot
+        self.lang = lang
+        self.open_modal.label = i18n.t("reportbug.btn_compose", lang)[:80]
 
     @discord.ui.button(label="Rédiger mon report", style=discord.ButtonStyle.primary, emoji="📝")
     async def open_modal(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await interaction.response.send_modal(BugReportModal(self.bot))
+        await interaction.response.send_modal(BugReportModal(self.bot, self.lang))
 
 
 class ReportBugCog(commands.Cog):
@@ -522,119 +536,108 @@ class ReportBugCog(commands.Cog):
 
     blacklist = app_commands.Group(
         name="blacklist",
-        description="Blacklist des signalements de bugs (propriétaire uniquement).",
+        description=ui_str("slash.reportbug_blacklist_group"),
         extras={"owner_only": True},
     )
 
     @app_commands.command(
         name="reportbug",
-        description="Signaler un bug en privé (MP) — un bug par jour, détails par message privé.",
+        description=ui_str("slash.reportbug"),
     )
     async def reportbug(self, interaction: discord.Interaction) -> None:
         uid = interaction.user.id
+        lg = i18n.interaction_lang(interaction)
         _cleanup_drafts()
         ok, reason = br.can_user_submit_bug(uid)
         if not ok:
             if reason == "blacklist":
-                await interaction.response.send_message(_msg_blacklist(), ephemeral=bool(interaction.guild))
+                await interaction.response.send_message(_msg_blacklist(lg), ephemeral=bool(interaction.guild))
                 return
             if reason == "reject_cooldown":
                 await interaction.response.send_message(
-                    _reject_cooldown_message(uid),
+                    _reject_cooldown_message(uid, lg),
                     ephemeral=bool(interaction.guild),
                 )
                 return
             if reason == "daily_limit":
-                await interaction.response.send_message(_daily_message(), ephemeral=bool(interaction.guild))
+                await interaction.response.send_message(_daily_message(lg), ephemeral=bool(interaction.guild))
                 return
         embed = discord.Embed(
-            title="📋 Signalement de bug",
-            description=(
-                "Merci de participer à l’amélioration du bot.\n\n"
-                "• **Un seul bug par report** — ne mélange pas plusieurs problèmes.\n"
-                "• **Un signalement par jour** (reset à minuit, heure de Paris).\n"
-                "• En cas d’**abus** (faux signalements **volontaires** / troll), le propriétaire peut appliquer "
-                "un **refus avec sanction 7 jours**. Les retours de **bonne foi** qui ne sont finalement pas des bugs "
-                "(API, redémarrage, etc.) sont traités **sans** cette sanction.\n\n"
-                "Clique sur **Rédiger mon report** : un formulaire te demandera :\n"
-                "• la commande ou le système concerné ;\n"
-                "• le problème observé ;\n"
-                "• le comportement attendu ;\n"
-                "• les étapes pour reproduire (ou pourquoi c’est impossible à reproduire).\n\n"
-                "Ensuite, vérifie l’aperçu et envoie avec **Envoyer le report**."
-            ),
+            title=i18n.t("reportbug.intro_title", lg),
+            description=i18n.t("reportbug.intro_body", lg),
             color=discord.Color.blue(),
         )
-        embed.set_footer(text="AnimeBot — signalements privés (MP)")
+        embed.set_footer(text=i18n.t("reportbug.intro_footer", lg))
         in_guild = interaction.guild is not None
         if not in_guild:
-            await interaction.response.send_message(embed=embed, view=IntroView(self.bot))
+            await interaction.response.send_message(embed=embed, view=IntroView(self.bot, lg))
             return
         try:
-            await interaction.user.send(embed=embed, view=IntroView(self.bot))
+            await interaction.user.send(embed=embed, view=IntroView(self.bot, lg))
         except discord.HTTPException:
             await interaction.response.send_message(
-                "🔒 **Impossible d’ouvrir ton signalement**\n\n"
-                "Tes **messages privés** sont fermés ou le bot ne peut pas t’écrire.\n\n"
-                "**Ouvre tes MP** (Paramètres → Confidentialité → messages privés) pour que le bot "
-                "puisse t’envoyer le formulaire **en privé**. Cela évite de publier un bug dans le "
-                "serveur et limite que d’autres copient le même report.\n\n"
-                "Il n’y a **pas** d’envoi dans un salon : tout passe par MP.",
+                i18n.t("reportbug.dm_blocked", lg),
                 ephemeral=True,
             )
             return
         await interaction.response.send_message(
-            "📬 **Regarde tes messages privés** — le bot t’a envoyé la suite pour rédiger ton signalement.",
+            i18n.t("reportbug.dm_sent_hint", lg),
             ephemeral=True,
         )
 
-    @blacklist.command(name="add", description="Ajouter un utilisateur à la blacklist des signalements.")
-    @app_commands.describe(user_id="Identifiant Discord (nombre) de l’utilisateur")
+    @blacklist.command(name="add", description=ui_str("slash.reportbug_bl_add"))
+    @app_commands.describe(user_id=ui_str("slash.reportbug_bl_user_param"))
     async def blacklist_add(self, interaction: discord.Interaction, user_id: str) -> None:
+        lg = i18n.interaction_lang(interaction)
         if not _is_owner(interaction.user.id):
-            await interaction.response.send_message("❌ Réservé au propriétaire du bot.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_owner", lg), ephemeral=True)
             return
         raw = (user_id or "").strip()
         if not raw.isdigit():
-            await interaction.response.send_message("❌ ID invalide (nombre attendu).", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_id_bad", lg), ephemeral=True)
             return
         uid = int(raw)
         if uid == interaction.user.id:
-            await interaction.response.send_message("❌ Tu ne peux pas te blacklist toi-même.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_self", lg), ephemeral=True)
             return
         if br.blacklist_add(uid):
-            await interaction.response.send_message(f"✅ `{uid}` ajouté à la blacklist.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_added", lg, uid=uid), ephemeral=True)
         else:
-            await interaction.response.send_message(f"ℹ️ `{uid}` était déjà blacklist.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_already", lg, uid=uid), ephemeral=True)
 
-    @blacklist.command(name="remove", description="Retirer un utilisateur de la blacklist des signalements.")
-    @app_commands.describe(user_id="Identifiant Discord (nombre)")
+    @blacklist.command(name="remove", description=ui_str("slash.reportbug_bl_remove"))
+    @app_commands.describe(user_id=ui_str("slash.reportbug_bl_user_param_short"))
     async def blacklist_remove(self, interaction: discord.Interaction, user_id: str) -> None:
+        lg = i18n.interaction_lang(interaction)
         if not _is_owner(interaction.user.id):
-            await interaction.response.send_message("❌ Réservé au propriétaire du bot.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_owner", lg), ephemeral=True)
             return
         raw = (user_id or "").strip()
         if not raw.isdigit():
-            await interaction.response.send_message("❌ ID invalide.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_id_bad_short", lg), ephemeral=True)
             return
         uid = int(raw)
         if br.blacklist_remove(uid):
-            await interaction.response.send_message(f"✅ `{uid}` retiré de la blacklist.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_removed", lg, uid=uid), ephemeral=True)
         else:
-            await interaction.response.send_message(f"ℹ️ `{uid}` n’était pas blacklist.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_not_in", lg, uid=uid), ephemeral=True)
 
-    @blacklist.command(name="list", description="Voir la blacklist des signalements (IDs).")
+    @blacklist.command(name="list", description=ui_str("slash.reportbug_bl_list"))
     async def blacklist_list(self, interaction: discord.Interaction) -> None:
+        lg = i18n.interaction_lang(interaction)
         if not _is_owner(interaction.user.id):
-            await interaction.response.send_message("❌ Réservé au propriétaire du bot.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_owner", lg), ephemeral=True)
             return
         bl = br.get_blacklist()
         if not bl:
-            await interaction.response.send_message("Blacklist vide.", ephemeral=True)
+            await interaction.response.send_message(i18n.t("reportbug.bl_empty", lg), ephemeral=True)
             return
         chunk = ", ".join(f"`{x}`" for x in bl[:50])
         more = f" (+{len(bl) - 50} autres)" if len(bl) > 50 else ""
-        await interaction.response.send_message(f"**Blacklist** : {chunk}{more}", ephemeral=True)
+        await interaction.response.send_message(
+            i18n.t("reportbug.bl_list", lg, chunk=chunk, more=more),
+            ephemeral=True,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -9,6 +9,7 @@ from discord.ext import commands
 from discord import app_commands
 
 from modules import i18n
+from modules.app_cmd_locale import help_ac_choice, ui_str
 
 PER_PAGE = 24
 OWNER_HINTS = ("owner", "admin", "dev", "maintenance")
@@ -155,7 +156,7 @@ async def _ac_help_command(interaction: discord.Interaction, current: str) -> li
         if key in seen:
             continue
         if match(key):
-            out.append(app_commands.Choice(name=disp[:100], value=value))
+            out.append(app_commands.Choice(name=help_ac_choice(disp, value), value=value))
             seen.add(key)
         if len(out) >= 20:
             break
@@ -165,12 +166,28 @@ async def _ac_help_command(interaction: discord.Interaction, current: str) -> li
             key = _normalize_query(value)
             if key in seen:
                 continue
-            out.append(app_commands.Choice(name=disp[:100], value=value))
+            out.append(app_commands.Choice(name=help_ac_choice(disp, value), value=value))
             if len(out) >= 10:
                 break
     return out
 
 # ===== Vues (navigation) =====
+async def _dismiss_help_message(interaction: discord.Interaction, view: discord.ui.View) -> None:
+    """Supprime le message d’aide (embed + boutons) au lieu de seulement désactiver la vue."""
+    view.stop()
+    try:
+        await interaction.response.defer()
+    except discord.InteractionResponded:
+        pass
+    try:
+        if interaction.message is not None:
+            await interaction.message.delete()
+        else:
+            await interaction.delete_original_response()
+    except (discord.NotFound, discord.HTTPException):
+        pass
+
+
 class HelpNavigator(discord.ui.View):
     def __init__(
         self,
@@ -206,7 +223,7 @@ class HelpNavigator(discord.ui.View):
         self.index = (self.index + 1) % len(self.pages)
         await interaction.response.edit_message(embed=self._with_footer(self.pages[self.index]), view=self)
 
-    @discord.ui.select(placeholder="Aller à…")
+    @discord.ui.select(placeholder="…")
     async def jump_select(self, interaction: discord.Interaction, select: discord.ui.Select):
         try:
             self.index = int(select.values[0])
@@ -214,11 +231,9 @@ class HelpNavigator(discord.ui.View):
             self.index = 0
         await interaction.response.edit_message(embed=self._with_footer(self.pages[self.index]), view=self)
 
-    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="×", style=discord.ButtonStyle.danger)
     async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(view=self)
+        await _dismiss_help_message(interaction, self)
 
     def _with_footer(self, em: discord.Embed) -> discord.Embed:
         em = em.copy()
@@ -239,7 +254,7 @@ class CoreHelpView(discord.ui.View):
         self.show_all_dm.label = i18n.t("help.ui.btn_all_dm", lang)[:80]
         self.close_button.label = i18n.t("help.ui.btn_close", lang)[:80]
 
-    @discord.ui.button(label="Voir tout (MP)", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="MP", style=discord.ButtonStyle.primary)
     async def show_all_dm(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         try:
@@ -253,11 +268,9 @@ class CoreHelpView(discord.ui.View):
         except Exception:
             await interaction.followup.send(i18n.t("help.ui.dm_error", self.lang), ephemeral=True)
 
-    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="×", style=discord.ButtonStyle.danger)
     async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(view=self)
+        await _dismiss_help_message(interaction, self)
 
 # ===== Cog =====
 class Help(commands.Cog):
@@ -476,8 +489,8 @@ class Help(commands.Cog):
         )
 
     # --- Commandes publiques d’aide
-    @commands.hybrid_command(name="help", description="Aide Essentiel. /help [commande] pour le détail.")
-    @app_commands.describe(commande="Nom d'une commande slash pour l'aide détaillée (auto-complétion).")
+    @commands.hybrid_command(name="help", description=ui_str("slash.help"))
+    @app_commands.describe(commande=ui_str("slash.help_param_commande"))
     @app_commands.autocomplete(commande=_ac_help_command)
     async def help(self, ctx: commands.Context, commande: Optional[str] = None):
         is_slash = bool(getattr(ctx, "interaction", None))
@@ -532,11 +545,11 @@ class Help(commands.Cog):
 
     @commands.hybrid_command(
         name="help_admin",
-        description="Aide administrateur : configuration serveur, /airings, raid (réservé aux admins).",
+        description=ui_str("slash.help_admin"),
     )
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
-    @app_commands.describe(commande="Nom d'une commande slash pour l'aide détaillée (auto-complétion).")
+    @app_commands.describe(commande=ui_str("slash.help_param_commande"))
     @app_commands.autocomplete(commande=_ac_help_command)
     async def help_admin(self, ctx: commands.Context, commande: Optional[str] = None):
         is_slash = bool(getattr(ctx, "interaction", None))
