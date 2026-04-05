@@ -193,15 +193,18 @@ def _next_reset_dt(tz) -> datetime:
     month = 1 if now.month == 12 else now.month + 1
     return datetime(year, month, 1, 0, 0, tzinfo=tz)
 
-def _human_td(delta: timedelta) -> str:
+def _human_td(delta: timedelta, lang: str) -> str:
     s = max(0, int(delta.total_seconds()))
     d, r = divmod(s, 86400)
     h, r = divmod(r, 3600)
     m, _ = divmod(r, 60)
     parts = []
-    if d: parts.append(f"{d}j")
-    if h: parts.append(f"{h}h")
-    if m or not parts: parts.append(f"{m}m")
+    if d:
+        parts.append(i18n.t("common.td_day", lang, n=d))
+    if h:
+        parts.append(i18n.t("common.td_hour", lang, n=h))
+    if m or not parts:
+        parts.append(i18n.t("common.td_min", lang, n=m))
     return " ".join(parts)
 
 
@@ -525,7 +528,7 @@ class Quiz(commands.Cog):
 
             anime = await self._fetch_random_anilist_media(sort_option, queue_ctx=ctx)
             if not anime:
-                await ctx.send(core.anilist_error_user_message())
+                await ctx.send(core.anilist_error_user_message(lg))
                 return
 
             correct_titles = self._titles_set(anime)
@@ -862,7 +865,7 @@ class Quiz(commands.Cog):
             for i in range(1, manches + 1):
                 anime = await self._fetch_random_anilist_media(sort_option, queue_ctx=ctx)
                 if not anime:
-                    await ctx.send(core.anilist_error_user_message())
+                    await ctx.send(core.anilist_error_user_message(lg))
                     continue
     
                 correct_titles = self._titles_set(anime)
@@ -1129,7 +1132,7 @@ class Quiz(commands.Cog):
             # Compte à rebours vers le prochain reset (1er du mois 00:00)
             tz = getattr(core, "TIMEZONE", timezone.utc)
             nxt = _next_reset_dt(tz)
-            left = _human_td(nxt - datetime.now(tz))
+            left = _human_td(nxt - datetime.now(tz), lg)
             ft = i18n.t("quiz.quiztop_footer", lg, date=f"{nxt:%d/%m %H:%M}", left=left)
             alu = core.get_linked_username(ctx.author.id)
             if alu:
@@ -1153,8 +1156,36 @@ class Quiz(commands.Cog):
         lg = i18n.ctx_lang(ctx)
         try:
             await _maybe_defer(ctx, ephemeral=False)
-            q_lines = [f"**{score}+** pts → {title}" for score, title in core.LEVEL_TITLES_QUIZ]
-            g_lines = [f"**Niveau {lvl}+** → {title}" for lvl, title in core.LEVEL_TITLES_GLOBAL]
+            def _level_embed_lines(pairs_raw: object, *, kind: str) -> list[str]:
+                out: list[str] = []
+                if not isinstance(pairs_raw, list):
+                    return out
+                for row in pairs_raw:
+                    if not isinstance(row, (list, tuple)) or len(row) < 2:
+                        continue
+                    try:
+                        n = int(row[0])
+                    except (TypeError, ValueError):
+                        continue
+                    title = str(row[1])
+                    if kind == "quiz":
+                        out.append(i18n.t("quiz.level_line_quiz", lg, score=n, title=title))
+                    else:
+                        out.append(i18n.t("quiz.level_line_xp", lg, lvl=n, title=title))
+                return out
+
+            q_lines = _level_embed_lines(i18n.value("xp.titles_quiz", lg), kind="quiz")
+            g_lines = _level_embed_lines(i18n.value("xp.titles_global", lg), kind="xp")
+            if not q_lines:
+                q_lines = [
+                    i18n.t("quiz.level_line_quiz", lg, score=s, title=t)
+                    for s, t in core.LEVEL_TITLES_QUIZ
+                ]
+            if not g_lines:
+                g_lines = [
+                    i18n.t("quiz.level_line_xp", lg, lvl=l, title=t)
+                    for l, t in core.LEVEL_TITLES_GLOBAL
+                ]
             em_quiz = discord.Embed(
                 title=i18n.t("quiz.levels_quiz_title", lg),
                 description=i18n.t("quiz.levels_quiz_desc", lg),

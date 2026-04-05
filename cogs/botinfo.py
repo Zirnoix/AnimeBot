@@ -40,7 +40,7 @@ class BotInfo(commands.Cog):
 
     @app_commands.command(name="botinfo", description=ui_str("slash.botinfo"))
     async def botinfo(self, interaction: discord.Interaction):
-        lg = i18n.guild_lang(interaction.guild)
+        lg = i18n.interaction_lang(interaction)
         version = os.getenv("BOT_VERSION")
         if not version:
             version = getattr(core, "__version__", None)

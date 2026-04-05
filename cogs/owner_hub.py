@@ -9,7 +9,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from modules import i18n, owner_actions
+from modules import i18n
+from modules import owner_actions
 from modules.app_cmd_locale import ui_str
 
 LOG = __import__("logging").getLogger(__name__)
@@ -24,11 +25,11 @@ class OwnerActionSelect(discord.ui.Select):
     def __init__(self, bot: commands.Bot, lang: str) -> None:
         self.lang = lang
         opts: list[discord.SelectOption] = []
-        for val, label, desc in owner_actions.ACTIONS:
+        for val in owner_actions.ACTION_IDS:
             opts.append(
                 discord.SelectOption(
-                    label=label[:100],
-                    description=(desc[:100] if desc else None),
+                    label=i18n.t(f"owner.actions.{val}.label", lang)[:100],
+                    description=i18n.t(f"owner.actions.{val}.description", lang)[:100],
                     value=val,
                 )
             )
@@ -41,7 +42,7 @@ class OwnerActionSelect(discord.ui.Select):
         self.bot = bot
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        lg = i18n.guild_lang(interaction.guild)
+        lg = i18n.interaction_lang(interaction)
         if not _is_owner_id(interaction.user.id):
             await interaction.response.send_message(i18n.t("owner.denied", lg), ephemeral=True)
             return
@@ -96,14 +97,20 @@ class OwnerHub(commands.Cog):
         description=ui_str("owner.cmd_desc"),
     )
     async def owner_panel(self, interaction: discord.Interaction) -> None:
-        lg = i18n.guild_lang(interaction.guild)
+        lg = i18n.interaction_lang(interaction)
         if not _is_owner_id(interaction.user.id):
             await interaction.response.send_message(
                 i18n.t("owner.panel_denied", lg),
                 ephemeral=True,
             )
             return
-        lines = [f"**{label}** — {desc}" for _, label, desc in owner_actions.ACTIONS]
+        lines = [
+            "**{label}** — {desc}".format(
+                label=i18n.t(f"owner.actions.{val}.label", lg),
+                desc=i18n.t(f"owner.actions.{val}.description", lg),
+            )
+            for val in owner_actions.ACTION_IDS
+        ]
         embed = discord.Embed(
             title=i18n.t("owner.panel_title", lg),
             description=(i18n.t("owner.panel_desc", lg) + "\n".join(lines)[:4000]),

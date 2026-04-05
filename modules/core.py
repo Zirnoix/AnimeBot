@@ -73,11 +73,12 @@ LOG = logger
 DATA_JSON_LOCK = threading.RLock()
 
 
-def anilist_error_user_message() -> str:
+def anilist_error_user_message(lang: str = "fr") -> str:
     """Message Discord unifié quand l’API AniList est indisponible ou ne renvoie rien d’exploitable."""
-    return (
-        "❌ L’API AniList ne répond pas pour le moment. Réessaie dans quelques minutes."
-    )
+    from modules import i18n
+
+    lg = lang if lang in ("fr", "en") else "fr"
+    return i18n.t("core.anilist_error", lg)
 
 # ================= CONFIG & PATHS =================
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY")
@@ -1493,9 +1494,11 @@ async def query_anilist_async(
     notify = os.getenv("ANILIST_QUEUE_NOTIFY", "").strip().lower() in ("1", "true", "yes", "on")
     if notify and queue_ctx is not None and _anilist_slots_available() <= 0:
         try:
-            await queue_ctx.send(
-                "⏳ **File AniList** — beaucoup de requêtes en cours. Ta commande démarre dès qu’une place se libère…"
-            )
+            from modules import i18n as _i18n
+
+            _g = getattr(queue_ctx, "guild", None)
+            _lg = _i18n.guild_lang(_g)
+            await queue_ctx.send(_i18n.t("core.anilist_queue_wait", _lg))
         except Exception:
             pass
     return await asyncio.to_thread(query_anilist, query, variables)
@@ -1515,17 +1518,6 @@ async def maybe_defer_hybrid(ctx: Any, *, ephemeral: bool = False) -> None:
 _DAILY_TRIVIA_CACHE: dict[str, str] = {}
 _DAILY_TRIVIA_LOCK = threading.Lock()
 
-_ANIME_TRIVIA_FALLBACK = [
-    "Au Japon, le mot « anime » désigne toute l’animation, pas seulement les séries qu’on regarde ici.",
-    "Beaucoup de génériques d’anime sont des chansons originales créées pour la série.",
-    "Les saisons d’anime sont souvent nommées d’après les mois (ex. janvier, avril, juillet, octobre).",
-    "Les studios d’animation collaborent souvent : une série peut mélanger plusieurs maisons de production.",
-    "Le format « cours » désigne un bloc de diffusion d’environ 11–13 épisodes.",
-    "Les light novels et mangas restent des sources très courantes pour les adaptations en anime.",
-    "La qualité d’un épisode peut varier selon les invités réalisateurs ou les équipes par épisode.",
-    "Les simulcasts permettent de suivre une série en même temps que sa diffusion au Japon.",
-]
-
 _ANIME_TRIVIA_QUERY = """
 query ($page: Int) {
   Page(page: $page, perPage: 50) {
@@ -1541,26 +1533,29 @@ query ($page: Int) {
 """
 
 
-def _format_anime_anniversary_line(kind: str, title: str, year: int, today: date) -> str:
-    """Une ligne courte en français ; `kind` = 'start' ou 'end'."""
+def _format_anime_anniversary_line(kind: str, title: str, year: int, today: date, lang: str) -> str:
+    """Une ligne courte ; `kind` = 'start' ou 'end'."""
+    from modules import i18n
+
+    lg = lang if lang in ("fr", "en") else "fr"
     safe = discord.utils.escape_markdown((title or "?").strip()[:120] or "?")
     if year > today.year:
         return ""
     if year == today.year:
         if kind == "start":
-            return f"À cette date en **{year}**, **{safe}** ouvrait sa diffusion."
-        return f"À cette date en **{year}**, **{safe}** diffusait son dernier épisode."
+            return i18n.t("daily_trivia.anniv_start_this_year", lg, year=year, title=safe)
+        return i18n.t("daily_trivia.anniv_end_this_year", lg, year=year, title=safe)
     n = today.year - year
-    if n == 1:
-        lead = "Il y a **1** an"
-    else:
-        lead = f"Il y a **{n}** ans"
     if kind == "start":
-        return f"{lead}, **{safe}** débutait sa diffusion (**{year}**)."
-    return f"{lead}, **{safe}** diffusait son dernier épisode (**{year}**)."
+        if n == 1:
+            return i18n.t("daily_trivia.anniv_start_ago_one", lg, title=safe, year=year)
+        return i18n.t("daily_trivia.anniv_start_ago_many", lg, n=n, title=safe, year=year)
+    if n == 1:
+        return i18n.t("daily_trivia.anniv_end_ago_one", lg, title=safe, year=year)
+    return i18n.t("daily_trivia.anniv_end_ago_many", lg, n=n, title=safe, year=year)
 
 
-def _compute_daily_anime_trivia_line(today: date) -> str | None:
+def _compute_daily_anime_trivia_line(today: date, lang: str) -> str | None:
     """Cherche un anime populaire dont la date de début ou de fin tombe sur ce jour calendaire."""
     month, day = today.month, today.day
     candidates: list[tuple[str, int, str]] = []
@@ -1599,27 +1594,36 @@ def _compute_daily_anime_trivia_line(today: date) -> str | None:
         return None
     rng = random.Random(today.toordinal())
     kind, y, title = rng.choice(candidates)
-    line = _format_anime_anniversary_line(kind, title, y, today)
+    line = _format_anime_anniversary_line(kind, title, y, today, lang)
     return line or None
 
 
-def get_daily_anime_trivia_line() -> str:
+def get_daily_anime_trivia_line(lang: str = "fr") -> str:
     """
     Une courte phrase « animé » pour le jour courant (fuseau BOT_TIMEZONE).
-    Mise en cache une fois par date ; essaie un fait historique via AniList, sinon une phrase générique.
+    Mise en cache une fois par date et langue ; essaie un fait historique via AniList, sinon une phrase générique.
     """
+    from modules import i18n
+
+    lg = lang if lang in ("fr", "en") else "fr"
     with _DAILY_TRIVIA_LOCK:
         today = datetime.now(TIMEZONE).date()
-        key = today.isoformat()
+        key = f"{today.isoformat()}|{lg}"
         if key in _DAILY_TRIVIA_CACHE:
             return _DAILY_TRIVIA_CACHE[key]
         line = ""
         try:
-            line = _compute_daily_anime_trivia_line(today) or ""
+            line = _compute_daily_anime_trivia_line(today, lg) or ""
         except Exception as e:
             LOG.debug("get_daily_anime_trivia_line: %s", e)
         if not line:
-            line = random.Random(today.toordinal()).choice(_ANIME_TRIVIA_FALLBACK)
+            fb = i18n.value("daily_trivia.fallback", lg)
+            opts: list[str] = []
+            if isinstance(fb, list):
+                opts = [str(x) for x in fb if isinstance(x, str) and x.strip()]
+            if not opts:
+                return ""
+            line = random.Random(today.toordinal()).choice(opts)
         _DAILY_TRIVIA_CACHE[key] = line
         return line
 

@@ -1,0 +1,49 @@
+{
+  "core": {
+    "anilist_error": "❌ The AniList API isn’t responding right now. Try again in a few minutes.",
+    "anilist_queue_wait": "⏳ **AniList queue** — many requests in flight. Your command starts as soon as a slot frees up…"
+  },
+  "anilist_gate": {
+    "down": "📡 **The AniList API is unavailable** right now. Try again later.\nMinigames that use AniList can’t start until the service responds."
+  },
+  "recap_dm": {
+    "title": "🗓️ Releases on {weekday}",
+    "intro_linked": "📌 Digest based on **your AniList list** ({name}) — what you follow as **Watching** / **Rewatching**.\n\n",
+    "intro_nolink": "📌 Digest based on **your AniList list** — use `/linkanilist` to link your account and personalize this list.\n\n",
+    "line": "• {title} — {ep_word} {ep_lbl}",
+    "ep_word": "Episode",
+    "did_you_know": "💡 **Did you know?** {trivia}",
+    "footer": "“Releases today” digest — `/recap` + `/setalert` (time) + `/linkanilist`. /help"
+  },
+  "daily_trivia": {
+    "fallback": [
+      "In Japan, “anime” refers to all animation, not only the series we usually watch here.",
+      "Many anime openings and endings are original songs made for the show.",
+      "Anime seasons are often named after months (e.g. January, April, July, October).",
+      "Animation studios often collaborate: one series can involve several production houses.",
+      "A TV “cour” is typically a broadcast block of about 11–13 episodes.",
+      "Light novels and manga are still very common sources for anime adaptations.",
+      "Episode quality can vary depending on guest directors or per-episode teams.",
+      "Simulcasts let you follow a series alongside its Japanese broadcast."
+    ],
+    "anniv_start_this_year": "On this date in **{year}**, **{title}** began airing.",
+    "anniv_end_this_year": "On this date in **{year}**, **{title}** aired its final episode.",
+    "anniv_start_ago_one": "**1** year ago, **{title}** started airing (**{year}**).",
+    "anniv_start_ago_many": "**{n}** years ago, **{title}** started airing (**{year}**).",
+    "anniv_end_ago_one": "**1** year ago, **{title}** aired its final episode (**{year}**).",
+    "anniv_end_ago_many": "**{n}** years ago, **{title}** aired its final episode (**{year}**)."
+  },
+  "common": {
+    "datetime_until": "%b %d, %Y at %H:%M",
+    "td_day": "{n}d",
+    "td_hour": "{n}h",
+    "td_min": "{n}m"
+  },
+  "quiz": {
+    "level_line_quiz": "**{score}+** points → {title}",
+    "level_line_xp": "**Level {lvl}+** → {title}"
+  },
+  "community_games": {
+    "status_slot_body": "**{weekday}** at **{time}**\n`{tz}`"
+  }
+}

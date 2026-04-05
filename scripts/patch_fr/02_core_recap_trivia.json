@@ -1,0 +1,49 @@
+{
+  "core": {
+    "anilist_error": "❌ L'API AniList ne répond pas pour le moment. Réessaie dans quelques minutes.",
+    "anilist_queue_wait": "⏳ **File AniList** — beaucoup de requêtes en cours. Ta commande démarre dès qu'une place se libère…"
+  },
+  "anilist_gate": {
+    "down": "📡 **L'API AniList est indisponible** pour le moment. Réessaie plus tard.\nLes mini-jeux qui utilisent AniList ne peuvent pas être lancés tant que le service ne répond pas."
+  },
+  "recap_dm": {
+    "title": "🗓️ Sorties du {weekday}",
+    "intro_linked": "📌 Récap basé sur **ta liste AniList** ({name}) — ce qui correspond à ce que tu suis en **En cours** / **En relecture**.\n\n",
+    "intro_nolink": "📌 Récap basé sur **ta liste AniList** — utilise `/linkanilist` pour lier ton compte et personnaliser cette liste.\n\n",
+    "line": "• {title} — {ep_word} {ep_lbl}",
+    "ep_word": "Épisode",
+    "did_you_know": "💡 **Le saviez-vous ?** {trivia}",
+    "footer": "Récap « Sorties du jour » — `/recap` + `/setalert` (heure) + `/linkanilist`. /help"
+  },
+  "daily_trivia": {
+    "fallback": [
+      "Au Japon, le mot « anime » désigne toute l'animation, pas seulement les séries qu'on regarde ici.",
+      "Beaucoup de génériques d'anime sont des chansons originales créées pour la série.",
+      "Les saisons d'anime sont souvent nommées d'après les mois (ex. janvier, avril, juillet, octobre).",
+      "Les studios d'animation collaborent souvent : une série peut mélanger plusieurs maisons de production.",
+      "Le format « cours » désigne un bloc de diffusion d'environ 11–13 épisodes.",
+      "Les light novels et mangas restent des sources très courantes pour les adaptations en anime.",
+      "La qualité d'un épisode peut varier selon les invités réalisateurs ou les équipes par épisode.",
+      "Les simulcasts permettent de suivre une série en même temps que sa diffusion au Japon."
+    ],
+    "anniv_start_this_year": "À cette date en **{year}**, **{title}** ouvrait sa diffusion.",
+    "anniv_end_this_year": "À cette date en **{year}**, **{title}** diffusait son dernier épisode.",
+    "anniv_start_ago_one": "Il y a **1** an, **{title}** débutait sa diffusion (**{year}**).",
+    "anniv_start_ago_many": "Il y a **{n}** ans, **{title}** débutait sa diffusion (**{year}**).",
+    "anniv_end_ago_one": "Il y a **1** an, **{title}** diffusait son dernier épisode (**{year}**).",
+    "anniv_end_ago_many": "Il y a **{n}** ans, **{title}** diffusait son dernier épisode (**{year}**)."
+  },
+  "common": {
+    "datetime_until": "%d/%m/%Y à %H:%M",
+    "td_day": "{n}j",
+    "td_hour": "{n}h",
+    "td_min": "{n}m"
+  },
+  "quiz": {
+    "level_line_quiz": "**{score}+** pts → {title}",
+    "level_line_xp": "**Niveau {lvl}+** → {title}"
+  },
+  "community_games": {
+    "status_slot_body": "**{weekday}** à **{time}**\n`{tz}`"
+  }
+}

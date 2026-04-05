@@ -58,7 +58,8 @@ def _reject_cooldown_message(user_id: int, lang: str) -> str:
     dt = datetime.fromtimestamp(ru, tz=timezone.utc)
     try:
         local = dt.astimezone(core.TIMEZONE)
-        until = local.strftime("%d/%m/%Y à %H:%M")
+        fmt = i18n.t("common.datetime_until", lang)
+        until = local.strftime(fmt)
     except Exception:
         until = dt.strftime("%d/%m/%Y %H:%M UTC")
     return i18n.t("reportbug.reject_cooldown", lang, until=until)
@@ -152,7 +153,7 @@ class SendReportView(discord.ui.View):
         self.lang = lang
         self.send.label = i18n.t("reportbug.btn_send", lang)[:80]
 
-    @discord.ui.button(label="Envoyer le report", style=discord.ButtonStyle.success, emoji="📤")
+    @discord.ui.button(label="Send report", style=discord.ButtonStyle.success, emoji="📤")
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         lg = self.lang
         if interaction.user.id != self.author_id:
@@ -201,8 +202,8 @@ class SendReportView(discord.ui.View):
             br.rollback_report(self.author_id, rid)
             await interaction.followup.send(i18n.t("reportbug.owner_config", lg), ephemeral=True)
             return
-        # DM owner : pas de guilde → langue par défaut (FR) pour le panneau owner
-        owner_lang = i18n.guild_lang(None)
+        # Panneau owner : même logique que l’utilisateur (serveur ou locale Discord en MP)
+        owner_lang = i18n.interaction_lang(interaction)
         owner = self.bot.get_user(oid) or await self.bot.fetch_user(oid)
         embed = discord.Embed(
             title=i18n.t("reportbug.embed_new_title", owner_lang, rid=rid),
@@ -265,7 +266,7 @@ class OwnerDecisionView(discord.ui.View):
         self.confirm.label = i18n.t("reportbug.btn_confirm_bug", lang)[:80]
 
     @discord.ui.button(
-        label="Analysé — pas un bug",
+        label="Dismiss (not a bug)",
         style=discord.ButtonStyle.secondary,
         emoji="🔍",
         row=0,
@@ -316,7 +317,7 @@ class OwnerDecisionView(discord.ui.View):
         finally:
             _owner_lock.discard(key)
 
-    @discord.ui.button(label="Refuser (sanction 7j)", style=discord.ButtonStyle.danger, emoji="✖️", row=1)
+    @discord.ui.button(label="Reject (7d cooldown)", style=discord.ButtonStyle.danger, emoji="✖️", row=1)
     async def refuse(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         lg = self.lang
         if not _is_owner(interaction.user.id):
@@ -362,7 +363,7 @@ class OwnerDecisionView(discord.ui.View):
         finally:
             _owner_lock.discard(key)
 
-    @discord.ui.button(label="Confirmer le bug", style=discord.ButtonStyle.success, emoji="✅", row=1)
+    @discord.ui.button(label="Confirm bug", style=discord.ButtonStyle.success, emoji="✅", row=1)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         lg = self.lang
         if not _is_owner(interaction.user.id):
@@ -408,11 +409,11 @@ class OwnerRewardView(discord.ui.View):
             hopts[1].label = i18n.t("reportbug.hard_yes", lang)[:100]
 
     @discord.ui.select(
-        placeholder="Gravité du bug",
+        placeholder="—",
         options=[
-            discord.SelectOption(label="Petit bug", value="petit", description="300 XP"),
-            discord.SelectOption(label="Bug moyen", value="moyen", description="600 XP"),
-            discord.SelectOption(label="Gros bug", value="gros", description="1000 XP"),
+            discord.SelectOption(label="—", value="petit", description="—"),
+            discord.SelectOption(label="—", value="moyen", description="—"),
+            discord.SelectOption(label="—", value="gros", description="—"),
         ],
         row=0,
     )
@@ -425,10 +426,10 @@ class OwnerRewardView(discord.ui.View):
         await interaction.response.defer()
 
     @discord.ui.select(
-        placeholder="Difficile à trouver ?",
+        placeholder="—",
         options=[
-            discord.SelectOption(label="Non", value="0"),
-            discord.SelectOption(label="Oui (+300 XP)", value="1"),
+            discord.SelectOption(label="—", value="0"),
+            discord.SelectOption(label="—", value="1"),
         ],
         row=1,
     )
@@ -440,7 +441,7 @@ class OwnerRewardView(discord.ui.View):
         self.bug_hard = select.values[0] == "1"
         await interaction.response.defer()
 
-    @discord.ui.button(label="Attribuer la récompense", style=discord.ButtonStyle.primary, row=2)
+    @discord.ui.button(label="Apply reward", style=discord.ButtonStyle.primary, row=2)
     async def apply_xp(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         lg = self.lang
         if not _is_owner(interaction.user.id):
@@ -525,7 +526,7 @@ class IntroView(discord.ui.View):
         self.lang = lang
         self.open_modal.label = i18n.t("reportbug.btn_compose", lang)[:80]
 
-    @discord.ui.button(label="Rédiger mon report", style=discord.ButtonStyle.primary, emoji="📝")
+    @discord.ui.button(label="Write report", style=discord.ButtonStyle.primary, emoji="📝")
     async def open_modal(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         await interaction.response.send_modal(BugReportModal(self.bot, self.lang))
 

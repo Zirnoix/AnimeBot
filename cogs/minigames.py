@@ -495,7 +495,7 @@ class MiniGames(commands.Cog):
             '''
             data = await core.query_anilist_async(query, {"page": page}, queue_ctx=ctx)
             if not data or not data.get("data"):
-                await ctx.send(core.anilist_error_user_message())
+                await ctx.send(core.anilist_error_user_message(lg))
                 return
 
             media_list = data["data"]["Page"]["media"]
@@ -584,7 +584,7 @@ class MiniGames(commands.Cog):
                         continue
 
             if not anime:
-                await ctx.send(core.anilist_error_user_message())
+                await ctx.send(core.anilist_error_user_message(lg))
                 return
 
             title = anime["title"]["romaji"]
@@ -686,7 +686,7 @@ class MiniGames(commands.Cog):
                         continue
 
             if not anime:
-                await ctx.send(core.anilist_error_user_message())
+                await ctx.send(core.anilist_error_user_message(lg))
                 return
 
             title = anime["title"]["romaji"]
@@ -793,7 +793,7 @@ class MiniGames(commands.Cog):
                         continue
 
             if not anime:
-                await ctx.send(core.anilist_error_user_message())
+                await ctx.send(core.anilist_error_user_message(lg))
                 return
 
             title = anime["title"]["romaji"]
@@ -1027,7 +1027,7 @@ class MiniGames(commands.Cog):
                 '''
                 data = await core.query_anilist_async(query, {"page": page}, queue_ctx=ctx)
                 if not data or "data" not in data:
-                    await ctx.send(core.anilist_error_user_message())
+                    await ctx.send(core.anilist_error_user_message(lg))
                     return
 
                 characters = data["data"]["Page"]["characters"]

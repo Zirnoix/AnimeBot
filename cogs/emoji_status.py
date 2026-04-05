@@ -31,7 +31,7 @@ class EmojiStatus(commands.Cog):
 
     @app_commands.command(name="emojistatus", description=ui_str("emoji_status.cmd_desc"))
     async def emojistatus(self, interaction: discord.Interaction):
-        lg = i18n.guild_lang(interaction.guild)
+        lg = i18n.interaction_lang(interaction)
         if not await self._authorized(interaction):
             return await interaction.response.send_message(i18n.t("emoji_status.denied", lg), ephemeral=True)
 

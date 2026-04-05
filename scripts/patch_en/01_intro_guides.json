@@ -1,0 +1,38 @@
+{
+  "intro": {
+    "title": "👋 Thanks for adding AnimeBot!",
+    "lead": "Here is the **recommended order** so your server gets episode alerts and “server list” commands, then a **quick overview** for your members.",
+    "field_config": "⚙️ Setup (do this first)",
+    "admin_value": "**1) Fill the server list — `/airings`**\nUse **`all`** (browse releases) or add/remove one by one. This is the **list used** by **`/next`** and **`/planning`** in **server** mode. **While it’s empty**, there are no upcoming episodes on the server side and **no** “episode out” cards.\n\n**2) Pick the announcements channel — `/setchannel`**\nRun it **in the channel** where you want **cards** when a listed episode airs (same list as `/airings`).\n\n**3) Raid boss (optional) — `/raidconfig`**\nRaid channel, **day/time**, auto start or not. To try it: **`/raidstart`** (admins).\n\n**4) XP level-up channel (optional) — `/setlevelupchannel`**\nChannel where **level-up** messages are centralized (otherwise: the channel where the game runs). See **`/guide_admin`** (DM) for full staff setup.",
+    "field_players": "🎮 For players",
+    "minigames_value": "**Worth showing on the server**\n• **/next** · **/planning** — **server** mode = `/airings` list; **global** mode = all releases.\n• **/animequiz** · **/duel** · **/guessop** · **/minijeux** — **/animetop** for minigame leaderboards.\n• **Raid boss** (community minigame) once **`/raidconfig`** is set.",
+    "field_tutorial": "📘 Full tutorial",
+    "extra_tips": "Use **`/guide`** for the **player** tutorial in DMs; **`/guide_admin`** (admins) for airings, announcement channels, levels, raid, etc.",
+    "field_support": "🆘 Support",
+    "contact": "Need help? Contact **{support}** (ID `{sid}`) — I reply quickly.",
+    "footer_server": "Server: {name}",
+    "guild_join_blocked": "👋 **{mention}** thanks for adding **AnimeBot**.\nI sent you a **setup recap** in DMs, but your DMs are closed.\n**TL;DR:** fill **`/airings`** (server list), then **`/setchannel`** in the announcements channel — optional: **`/raidconfig`** for the raid boss.\nOpen your DMs or use **`/guide`** (players) / **`/guide_admin`** (staff) for the tutorials."
+  },
+  "guide": {
+    "embed_xp_title": "📈 XP, levels & badges",
+    "embed_xp_desc": "• **XP** raises your **global level** and changes your **title** (see **`/mycard`**, **`/profile`**, **`/myrank`**).\n• **`/animefav`** — your **favorite anime** on the card; **`/profile`** for details (streak, stats, trophies…).\n• Earn it by playing (**`/animequiz`**, guessing games, **`/duel`**, **raid boss**, etc.), with **`/checkin`** (daily + streak) and **`/mission`** (daily goal).\n• **`/reportbug`** — report a bug in DMs; if confirmed, **bonus XP** (counter on **`/mycard`**).\n• **`/mybadges`** — trophies by tier (Initiate→Myth) · **`/animetop`** / **`/quiztop`** — leaderboards.\n• **`/mystats`** — detailed AniList stats once your account is linked.\n• **New titles** (global XP or quiz): announced in the game channel, or in a dedicated channel with **`/setlevelupchannel`** (not one line per intermediate XP level).",
+    "embed_mini_title": "🎮 Minigames & community",
+    "embed_mini_desc": "• **/animequiz** · **/duel** · **/guessop** · **/minijeux** (guess menus / more)\n• **/higherlower** · **/guesswho** · **/chainquiz**\n• **Raid boss** — server event if **`/raidconfig`** is set (signup + rounds).\n\n_Tip: a dedicated minigames channel keeps general chat readable._",
+    "embed_anilist_title": "🔗 AniList account",
+    "embed_anilist_desc": "**Link:** `/linkanilist <username>` then paste the **code** in your AniList bio and **`/verifyanilist`**.\n**Personal:** `/mystats` · `/monnext` · `/monplanning`\n\n**Server** commands (`/next`, `/planning` server mode, alerts) use **`/airings`**, not your account. **Personal** commands need a link.",
+    "embed_reminders_title": "🛎️ Reminders (DMs)",
+    "embed_reminders_desc": "• **`/recap`** — panel (buttons + time input) to enable the **“Releases today”** digest; **`/setalert HH:MM`** for a specific time.\n• Independent from server alerts (`/setchannel`).\n\n**`/next` / `/planning`** — **server** mode = **`/airings`** list · **global** mode = broad releases.\n**`/monnext` / `/monplanning`** — **your** AniList schedule (linked account).",
+    "embed_misc_title": "🎯 Useful info",
+    "embed_misc_desc": "• **`/stats @member`** — member’s AniList card (if linked)\n• **`/botinfo`** · **`/ping`** — bot version, latency\n• **`/help`** — command list; **`/help <name>`** — details\n• **Admins:** server setup in DMs with **`/guide_admin`**.",
+    "embed_support_title": "🆘 Support",
+    "embed_support_desc": "Need help? **{support}** — ID `{sid}`\nYou can reply directly to this DM."
+  },
+  "guide_admin": {
+    "embed_srv_title": "⚙️ Server configuration (staff)",
+    "embed_srv_desc": "**1) `/airings` list** — `all`, add/remove; basis for server **`/next`** and **`/planning`** and “episode out” cards.\n**2) `/setchannel`** — channel for **episode release** cards (images).\n**3) `/setlevelupchannel`** — channel for **announcements**: **new global title** (XP) and **new quiz title** (monthly score, `/animequiz` / `/animequizmulti`); otherwise the channel where the game runs. **`/clearlevelupchannel`** to reset.\n**4) `/raidconfig`** (admins) — panel (channel, auto, day, time); **`/raid statut`** for everyone; manual **`/raidstart`** (1×/week per server after confirmation).",
+    "embed_note_title": "📌 Good to know",
+    "embed_note_desc": "• **Quiz titles** (monthly score tiers, `/quiztop`) are **separate** from global XP titles; both can post in **`/setlevelupchannel`**.\n• The **raid** announces XP at the end with `announce=False` on the raid channel (no level spam during the recap).",
+    "embed_support_title": "🆘 Support",
+    "embed_support_desc": "**{support}** — ID `{sid}`"
+  }
+}

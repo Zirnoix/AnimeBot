@@ -154,7 +154,7 @@ def weekday_name(lang: str, weekday: int) -> str:
 
 
 def guild_lang(guild: discord.Guild | None) -> str:
-    """Langue pour un salon de guilde ; hors serveur → français."""
+    """Langue pour un salon de guilde ; hors serveur → français (voir aussi ``interaction_lang`` / ``user_dm_lang``)."""
     if guild is None:
         return _DEFAULT_LANG
     from modules import locale_store
@@ -162,10 +162,85 @@ def guild_lang(guild: discord.Guild | None) -> str:
     return locale_store.get_guild_lang(guild.id)
 
 
+def lang_from_discord_locale(locale: Any) -> str:
+    """
+    Mappe la locale client Discord (interaction.locale) vers ``fr`` ou ``en``.
+    Locales non gérées → ``fr`` (seules ``fr`` et ``en`` existent dans les JSON).
+    """
+    if locale is None:
+        return _DEFAULT_LANG
+    val = getattr(locale, "value", None)
+    if not isinstance(val, str):
+        val = str(locale)
+    if val.startswith("en"):
+        return "en"
+    if val.startswith("fr"):
+        return "fr"
+    return _DEFAULT_LANG
+
+
+def user_dm_lang(user_id: int) -> str:
+    """
+    Langue pour les **MP sans interaction** (récap, alertes tracker, etc.).
+
+    Source : ``client_lang``, mise à jour automatiquement à chaque interaction Discord
+    (langue du **client** de l’utilisateur, comme pour les descriptions slash).
+
+    Repli : ancien ``digest_lang`` si présent ; sinon ``fr`` (jamais vu le bot ou locale inconnue).
+    """
+    try:
+        from modules import core
+
+        st = core.load_user_settings() or {}
+    except Exception:
+        st = {}
+    u = st.get(str(int(user_id)), {}) or {}
+    for key in ("client_lang", "digest_lang"):
+        raw = u.get(key)
+        if raw in ("fr", "en"):
+            return raw
+    return _DEFAULT_LANG
+
+
+def persist_user_locale_from_interaction(interaction: discord.Interaction) -> None:
+    """
+    Mémorise ``fr`` / ``en`` selon ``interaction.locale`` pour les prochains MP automatiques.
+    Appeler sur (presque) toute interaction utilisateur.
+    """
+    try:
+        user = interaction.user
+        if user is None or getattr(user, "bot", False):
+            return
+        loc = getattr(interaction, "locale", None)
+        if loc is None:
+            return
+        lang = lang_from_discord_locale(loc)
+        uid = str(int(user.id))
+        from modules import core
+
+        with core.DATA_JSON_LOCK:
+            data = dict(core.load_user_settings() or {})
+            u = dict(data.get(uid, {}) or {})
+            u["client_lang"] = lang
+            data[uid] = u
+            core.save_user_settings(data)
+    except Exception:
+        _LOG.debug("persist_user_locale_from_interaction failed", exc_info=True)
+
+
 def interaction_lang(interaction: discord.Interaction) -> str:
-    return guild_lang(interaction.guild)
+    """En serveur : langue du serveur. En MP : langue du **client Discord** de l’utilisateur (interaction.locale)."""
+    if interaction.guild is not None:
+        return guild_lang(interaction.guild)
+    return lang_from_discord_locale(getattr(interaction, "locale", None))
 
 
 def ctx_lang(ctx: Any) -> str:
-    """Langue pour une commande hybride / préfixe."""
-    return guild_lang(getattr(ctx, "guild", None))
+    """En serveur : langue du serveur. En MP avec slash : locale Discord ; sinon ``fr``."""
+    g = getattr(ctx, "guild", None)
+    if g is not None:
+        return guild_lang(g)
+    itx = getattr(ctx, "interaction", None)
+    if itx is not None:
+        return lang_from_discord_locale(getattr(itx, "locale", None))
+    return _DEFAULT_LANG

@@ -1,6 +1,9 @@
 """Tests du module i18n et des fichiers JSON de locale."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import discord
 import pytest
 
 from modules import i18n
@@ -36,6 +39,18 @@ def test_t_format_kwargs():
 
 def test_guild_lang_none():
     assert i18n.guild_lang(None) == "fr"
+
+
+def test_lang_from_discord_locale():
+    assert i18n.lang_from_discord_locale(None) == "fr"
+    assert i18n.lang_from_discord_locale(discord.Locale.american_english) == "en"
+    assert i18n.lang_from_discord_locale(discord.Locale.british_english) == "en"
+    assert i18n.lang_from_discord_locale(discord.Locale.french) == "fr"
+
+
+def test_interaction_lang_dm_uses_client_locale():
+    itx = SimpleNamespace(guild=None, locale=discord.Locale.american_english)
+    assert i18n.interaction_lang(itx) == "en"  # type: ignore[arg-type]
 
 
 def test_value_xp_titles():

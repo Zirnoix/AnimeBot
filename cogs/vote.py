@@ -145,7 +145,7 @@ class Vote(commands.Cog):
                 return
             raise
 
-        lg = i18n.guild_lang(interaction.guild)
+        lg = i18n.interaction_lang(interaction)
         uid = interaction.user.id
         url = topgg_vote.vote_page_url(self.bot.user.id)
         cd = topgg_vote.cooldown_seconds()

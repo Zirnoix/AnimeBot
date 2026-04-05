@@ -13,11 +13,29 @@ from datetime import datetime
 import discord
 from discord.ext import commands
 
-from modules import core
 from modules import bug_report as bug_report_store
+from modules import core
+from modules import i18n
 from modules.image import generate_next_card
 
 LOG = logging.getLogger(__name__)
+
+ACTION_IDS = [
+    "debug_tree",
+    "debug_pub",
+    "publish_global",
+    "cogs",
+    "test_alert",
+    "show_channel",
+    "recap_mensuel",
+    "raid_reset_week",
+    "raid_owner_start",
+    "guessop_stats",
+    "guessop_harvest",
+    "help_dm",
+    "setavatar_hint",
+    "reportbug_blacklist",
+]
 
 
 def _owner_id() -> int | None:
@@ -26,6 +44,7 @@ def _owner_id() -> int | None:
 
 
 async def run_debug_tree(bot: commands.Bot, interaction: discord.Interaction) -> None:
+    lg = i18n.interaction_lang(interaction)
     cmds = interaction.client.tree.get_commands()
     lines: list[str] = []
     for c in cmds:
@@ -36,12 +55,13 @@ async def run_debug_tree(bot: commands.Bot, interaction: discord.Interaction) ->
                 for sc in c.commands:
                     lines.append(f"/{c.name} {sc.name}")
             else:
-                lines.append(f"/{c.name} (group vide)")
-    chunk = "\n".join(lines) or "(aucune)"
+                lines.append(f"/{c.name}{i18n.t('owner.runner.tree_group_empty', lg)}")
+    chunk = "\n".join(lines) or i18n.t("owner.runner.tree_none", lg)
     await interaction.followup.send(f"```\n{chunk[:1900]}\n```", ephemeral=True)
 
 
 async def run_debug_pub(bot: commands.Bot, interaction: discord.Interaction) -> None:
+    lg = i18n.interaction_lang(interaction)
     try:
         global_cmds = await interaction.client.tree.fetch_commands()
         guild_cmds = await interaction.client.tree.fetch_commands(guild=interaction.guild) if interaction.guild else []
@@ -59,28 +79,40 @@ async def run_debug_pub(bot: commands.Bot, interaction: discord.Interaction) -> 
         )
         await interaction.followup.send(f"```\n{txt}\n```", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ debug_pub: {e}", ephemeral=True)
+        await interaction.followup.send(
+            i18n.t("owner.runner.pub_err", lg, err=e),
+            ephemeral=True,
+        )
 
 
 async def run_publish_global(bot: commands.Bot, interaction: discord.Interaction) -> None:
+    lg = i18n.interaction_lang(interaction)
     try:
         cmds = await interaction.client.tree.sync()
-        await interaction.followup.send(f"✅ Global sync OK — {len(cmds)} commande(s) publiées.", ephemeral=True)
+        await interaction.followup.send(
+            i18n.t("owner.runner.sync_ok", lg, n=len(cmds)),
+            ephemeral=True,
+        )
     except Exception as e:
-        await interaction.followup.send(f"❌ Global sync a échoué: {e}", ephemeral=True)
+        await interaction.followup.send(
+            i18n.t("owner.runner.sync_fail", lg, err=e),
+            ephemeral=True,
+        )
 
 
 async def run_cogs(bot: commands.Bot, interaction: discord.Interaction) -> None:
+    lg = i18n.interaction_lang(interaction)
     names = sorted(getattr(bot, "_loaded_cogs", None) or [])
-    txt = "Aucun." if not names else "\n".join(names)
+    txt = i18n.t("owner.runner.cogs_empty", lg) if not names else "\n".join(names)
     await interaction.followup.send(f"```\n{txt}\n```", ephemeral=True)
 
 
 async def run_test_alert(bot: commands.Bot, interaction: discord.Interaction) -> None:
     """Carte identique aux annonces salon ; envoi dans le salon `/setchannel` du serveur si défini."""
+    lg = i18n.interaction_lang(interaction)
     if not interaction.guild:
         await interaction.followup.send(
-            "❌ Utilise **`/owner` sur un serveur** pour tester l’envoi dans le salon des sorties (`/setchannel`).",
+            i18n.t("owner.runner.test_need_guild", lg),
             ephemeral=True,
         )
         return
@@ -88,7 +120,7 @@ async def run_test_alert(bot: commands.Bot, interaction: discord.Interaction) ->
         item = core.get_my_next_airing_one()
         if not item:
             await interaction.followup.send(
-                "Aucun prochain épisode à afficher (vérifie **`ANILIST_USERNAME`** dans `.env` / API AniList).",
+                i18n.t("owner.runner.test_no_episode", lg),
                 ephemeral=True,
             )
             return
@@ -109,8 +141,7 @@ async def run_test_alert(bot: commands.Bot, interaction: discord.Interaction) ->
         target = await core.fetch_guild_alert_text_channel(bot, interaction.guild)
         if configured_id is not None and target is None:
             await interaction.followup.send(
-                "❌ Le salon d’annonces configuré pour ce serveur est **introuvable** (supprimé ou bot sans accès). "
-                "Refais **`/setchannel`** dans le bon salon, ou vérifie les permissions.",
+                i18n.t("owner.runner.test_channel_gone", lg),
                 ephemeral=True,
             )
             return
@@ -119,11 +150,14 @@ async def run_test_alert(bot: commands.Bot, interaction: discord.Interaction) ->
             ch = interaction.channel
             target = ch if isinstance(ch, discord.TextChannel) else None
         if target is None:
-            await interaction.followup.send("❌ Impossible de trouver un salon texte pour l’envoi.", ephemeral=True)
+            await interaction.followup.send(
+                i18n.t("owner.runner.test_no_text", lg),
+                ephemeral=True,
+            )
             return
 
         # Même format que `cogs/alerts` (fichier PNG seul) + ligne pour repérer le test.
-        header = "📺 **Sortie** — l’épisode est disponible !\n`🧪 Test owner`"
+        header = i18n.t("owner.runner.test_header", lg)
         try:
             await target.send(
                 header,
@@ -131,44 +165,48 @@ async def run_test_alert(bot: commands.Bot, interaction: discord.Interaction) ->
             )
         except discord.Forbidden:
             await interaction.followup.send(
-                f"❌ Envoi refusé dans {target.mention} — vérifie que le bot peut **écrire** et **joindre des fichiers**.",
+                i18n.t("owner.runner.test_forbidden", lg, ch=target.mention),
                 ephemeral=True,
             )
             return
 
         where = target.mention
         if not via_setchannel:
-            where += " _(aucun salon `/setchannel` sur ce serveur — test dans le salon où tu as ouvert /owner)_"
+            where += i18n.t("owner.runner.test_ok_extra", lg)
         await interaction.followup.send(
-            f"✅ Carte envoyée dans {where}.\n"
-            "_L’image vient du **prochain épisode** de la liste **`ANILIST_USERNAME`** du bot — ce n’est pas forcément la même série que les annonces automatiques du serveur._",
+            i18n.t("owner.runner.test_ok", lg, where=where),
             ephemeral=True,
         )
     except Exception as e:
-        await interaction.followup.send(f"❌ Erreur : `{type(e).__name__}: {e}`", ephemeral=True)
+        await interaction.followup.send(
+            i18n.t("owner.runner.test_err", lg, err=f"{type(e).__name__}: {e}"),
+            ephemeral=True,
+        )
 
 
 async def run_show_channel(bot: commands.Bot, interaction: discord.Interaction) -> None:
+    lg = i18n.interaction_lang(interaction)
     if not interaction.guild:
         await interaction.followup.send(
-            "❌ Utilise cette action **sur un serveur** (pas en message privé).",
+            i18n.t("owner.runner.show_need_guild", lg),
             ephemeral=True,
         )
         return
     try:
         summary = core.format_guild_channels_config_summary(interaction.client, interaction.guild.id)
         await interaction.followup.send(
-            "**Salons de notification (ce serveur)**\n" + summary,
+            i18n.t("owner.runner.show_header", lg) + summary,
             ephemeral=True,
         )
     except Exception:
         await interaction.followup.send(
-            "❌ Impossible de lire la config.",
+            i18n.t("owner.runner.show_fail", lg),
             ephemeral=True,
         )
 
 
 async def run_recap_mensuel(bot: commands.Bot, interaction: discord.Interaction) -> None:
+    lg = i18n.interaction_lang(interaction)
     try:
         core.owner_telemetry_refresh_peaks(interaction.client)
     except Exception:
@@ -179,19 +217,16 @@ async def run_recap_mensuel(bot: commands.Bot, interaction: discord.Interaction)
     cmds_cur = cur.get("commands") or {}
     top_cur = sorted(cmds_cur.items(), key=lambda x: (-x[1], x[0]))[:15]
     lines = [
-        f"**Mois courant** `{cur_m}`",
-        f"· Pic **serveurs** : **{cur.get('peak_guilds', 0)}**",
-        f"· Pic **membres** (somme des guilds, max vu) : **{cur.get('peak_members', 0)}**",
+        i18n.t("owner.runner.recap_cur", lg, m=cur_m),
+        i18n.t("owner.runner.recap_peak_g", lg, n=cur.get("peak_guilds", 0)),
+        i18n.t("owner.runner.recap_peak_m", lg, n=cur.get("peak_members", 0)),
     ]
     if top_cur:
-        lines.append("· **Top commandes slash** (comptage local, depuis la dernière rotation de mois) :")
+        lines.append(i18n.t("owner.runner.recap_top_head", lg))
         for k, v in top_cur:
-            lines.append(f"  – `{k}` — **{v}**")
+            lines.append(i18n.t("owner.runner.recap_top_line", lg, k=k, v=v))
     else:
-        lines.append(
-            "· Aucun usage slash enregistré pour ce mois (le compteur démarre après mise à jour ; "
-            "les membres rejoignent une guilde où le bot voit du trafic)."
-        )
+        lines.append(i18n.t("owner.runner.recap_no_slash", lg))
     prev_m = data.get("previous_month")
     prev = data.get("previous") or {}
     if prev_m and prev:
@@ -199,19 +234,27 @@ async def run_recap_mensuel(bot: commands.Bot, interaction: discord.Interaction)
         ptop = sorted(pc.items(), key=lambda x: (-x[1], x[0]))[:10]
         lines.append("")
         lines.append(
-            f"**Mois précédent** `{prev_m}` — pic serveurs **{prev.get('peak_guilds', 0)}**, "
-            f"membres **{prev.get('peak_members', 0)}**"
+            i18n.t(
+                "owner.runner.recap_prev",
+                lg,
+                m=prev_m,
+                pg=prev.get("peak_guilds", 0),
+                pm=prev.get("peak_members", 0),
+            )
         )
         if ptop:
-            lines.append("· Top : " + " · ".join(f"`{a}`×{b}" for a, b in ptop))
+            joiner = i18n.t("owner.runner.recap_prev_top_join", lg)
+            items = joiner.join(f"`{a}`×{b}" for a, b in ptop)
+            lines.append(i18n.t("owner.runner.recap_prev_top", lg, items=items))
     await interaction.followup.send("\n".join(lines)[:1950], ephemeral=True)
 
 
 async def run_raid_reset_week(_bot: commands.Bot, interaction: discord.Interaction) -> None:
     """Efface les compteurs hebdo raid (alerte 1 h, auto, /raidstart) pour le serveur courant."""
+    lg = i18n.interaction_lang(interaction)
     if not interaction.guild:
         await interaction.followup.send(
-            "❌ Utilise cette action **sur un serveur** (pas en MP).",
+            i18n.t("owner.runner.raid_reset_need_guild", lg),
             ephemeral=True,
         )
         return
@@ -238,21 +281,24 @@ async def run_raid_reset_week(_bot: commands.Bot, interaction: discord.Interacti
             core.save_json(core.FileConfig.BOSS_RAID, cfg)
     if missing_entry:
         await interaction.followup.send(
-            "ℹ️ Aucune entrée raid pour ce serveur — rien à réinitialiser.",
+            i18n.t("owner.runner.raid_reset_no_entry", lg),
             ephemeral=True,
         )
         return
     if not removed:
         await interaction.followup.send(
-            "ℹ️ Aucun état de semaine n’était enregistré (alerte auto, lancement auto, limite /raidstart).",
+            i18n.t("owner.runner.raid_reset_no_state", lg),
             ephemeral=True,
         )
         return
+    keys_join = "`, `".join(removed)
     await interaction.followup.send(
-        f"✅ **Raid — état hebdo réinitialisé** pour **{interaction.guild.name}**.\n"
-        f"Champs effacés : `{'`, `'.join(removed)}`.\n"
-        "• Rappel **~1 h avant** + lancement **auto** : peuvent à nouveau s’appliquer pour la **semaine ISO en cours**.\n"
-        "• **`/raidstart`** (admin) : la limite **1× / semaine** est aussi effacée pour cette semaine.",
+        i18n.t(
+            "owner.runner.raid_reset_ok",
+            lg,
+            guild=interaction.guild.name,
+            keys=keys_join,
+        ),
         ephemeral=True,
     )
 
@@ -265,28 +311,37 @@ async def run_raid_owner_start(bot: commands.Bot, interaction: discord.Interacti
         _week_key,
     )
 
+    lg = i18n.interaction_lang(interaction)
     if not interaction.guild:
-        await interaction.followup.send("❌ Serveur uniquement.", ephemeral=True)
+        await interaction.followup.send(
+            i18n.t("owner.runner.raid_start_need_guild", lg),
+            ephemeral=True,
+        )
         return
     if _active_raids.get(interaction.guild.id):
-        await interaction.followup.send("Un raid est déjà en cours sur ce serveur.", ephemeral=True)
+        await interaction.followup.send(
+            i18n.t("owner.runner.raid_start_busy", lg),
+            ephemeral=True,
+        )
         return
     target = _raid_target_channel(interaction.guild)
     if target is None:
         await interaction.followup.send(
-            "❌ Aucun salon de raid configuré. Utilise **`/raidconfig`** avec le paramètre **salon**.",
+            i18n.t("owner.runner.raid_start_no_ch", lg),
             ephemeral=True,
         )
         return
     cog = bot.get_cog("CommunityGames")
     if not cog:
-        await interaction.followup.send("❌ Module CommunityGames indisponible.", ephemeral=True)
+        await interaction.followup.send(
+            i18n.t("owner.runner.raid_start_no_cog", lg),
+            ephemeral=True,
+        )
         return
     wk = _week_key(datetime.now(core.TIMEZONE))
     await cog._start_boss_raid(interaction.guild, target, wk)  # type: ignore[attr-defined]
     await interaction.followup.send(
-        f"✅ **Raid lancé** (owner) dans {target.mention}.\n"
-        "_La limite **`/raidstart`** des admins **n’est pas** consommée._",
+        i18n.t("owner.runner.raid_start_ok", lg, ch=target.mention),
         ephemeral=True,
     )
 
@@ -294,17 +349,23 @@ async def run_raid_owner_start(bot: commands.Bot, interaction: discord.Interacti
 async def run_guessop_stats(_bot: commands.Bot, interaction: discord.Interaction) -> None:
     from modules import guessop_catalog as gopc  # noqa: PLC0415
 
+    lg = i18n.interaction_lang(interaction)
     st = gopc.stats()
-    lines = "\n".join(f"• **{s}** : {c}" for s, c in st.get("by_source", [])) or "—"
+    dash = i18n.t("owner.runner.gop_dash", lg)
+    lines = "\n".join(
+        i18n.t("owner.runner.gop_line", lg, s=s, c=c) for s, c in st.get("by_source", [])
+    ) or dash
     top = gopc.top_used(5)
-    top_txt = "\n".join(f"• {t} — {u}×" for t, u in top) if top else "—"
+    top_txt = "\n".join(
+        i18n.t("owner.runner.gop_top_line", lg, t=t, u=u) for t, u in top
+    ) or dash
     em = discord.Embed(
-        title="📚 Catalogue Guess OP",
-        description=f"**{st['total']}** openings uniques (URL) — même base sur **tous** les serveurs.",
+        title=i18n.t("owner.runner.gop_title", lg),
+        description=i18n.t("owner.runner.gop_desc", lg, n=st["total"]),
         color=discord.Color.blue(),
     )
-    em.add_field(name="Par source", value=lines[:1024], inline=False)
-    em.add_field(name="Plus tirés", value=top_txt[:1024], inline=False)
+    em.add_field(name=i18n.t("owner.runner.gop_field_src", lg), value=lines[:1024], inline=False)
+    em.add_field(name=i18n.t("owner.runner.gop_field_top", lg), value=top_txt[:1024], inline=False)
     await interaction.followup.send(embed=em, ephemeral=True)
 
 
@@ -312,6 +373,7 @@ async def run_guessop_harvest(bot: commands.Bot, interaction: discord.Interactio
     from modules import animethemes  # noqa: PLC0415
     from modules import guessop_catalog as gopc  # noqa: PLC0415
 
+    lg = i18n.interaction_lang(interaction)
     before = gopc.count()
     new_inserts = 0
     max_page = await animethemes.anime_catalog_max_page(35)
@@ -343,74 +405,62 @@ async def run_guessop_harvest(bot: commands.Bot, interaction: discord.Interactio
         await asyncio.sleep(1.0)
     after = gopc.count()
     await interaction.followup.send(
-        f"✅ Catalogue : **{before}** → **{after}** openings.\n"
-        f"**+{new_inserts}** nouvelles URLs (le reste était déjà en base — normal avec ~2000+ entrées).",
+        i18n.t(
+            "owner.runner.harvest_ok",
+            lg,
+            before=before,
+            after=after,
+            ins=new_inserts,
+        ),
         ephemeral=True,
     )
 
 
 async def run_help_dm(bot: commands.Bot, interaction: discord.Interaction) -> None:
+    lg = i18n.interaction_lang(interaction)
     cog = bot.get_cog("Help")
     if not cog:
-        await interaction.followup.send("❌ Module d’aide indisponible.", ephemeral=True)
+        await interaction.followup.send(i18n.t("owner.runner.help_no_cog", lg), ephemeral=True)
         return
     try:
-        from modules import i18n  # noqa: PLC0415
-
-        lang = i18n.interaction_lang(interaction)
-        pages, labels = cog._build_owner_pages(lang)  # type: ignore[attr-defined]
+        pages, labels = cog._build_owner_pages(lg)  # type: ignore[attr-defined]
         from cogs.help import HelpNavigator  # noqa: PLC0415
 
-        nav = HelpNavigator(pages, labels, help_cmd="help", lang=lang)
+        nav = HelpNavigator(pages, labels, help_cmd="help", lang=lg)
         first = nav._with_footer(pages[0])
         await interaction.user.send(embed=first, view=nav)
-        await interaction.followup.send("📬 Aide owner/admin envoyée en **message privé**.", ephemeral=True)
+        await interaction.followup.send(i18n.t("owner.runner.help_sent", lg), ephemeral=True)
     except discord.Forbidden:
-        await interaction.followup.send("❌ Impossible d’envoyer un MP (paramètres).", ephemeral=True)
+        await interaction.followup.send(i18n.t("owner.runner.help_dm_block", lg), ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ Erreur : `{e}`", ephemeral=True)
+        await interaction.followup.send(
+            i18n.t("owner.runner.help_err", lg, err=f"{e}"),
+            ephemeral=True,
+        )
 
 
 async def run_reportbug_blacklist(_bot: commands.Bot, interaction: discord.Interaction) -> None:
     """Récap blacklist /reportbug + rappel des commandes slash."""
+    lg = i18n.interaction_lang(interaction)
     bl = bug_report_store.get_blacklist()
     n = len(bl)
     preview = ", ".join(f"`{x}`" for x in bl[:15]) or "—"
     if n > 15:
-        preview += f" … (+{n - 15})"
+        preview += i18n.t("owner.runner.bl_more", lg, n=n - 15)
     await interaction.followup.send(
-        "**Blacklist signalements de bugs**\n\n"
-        f"Entrées : **{n}**\n{preview}\n\n"
-        "Commandes : **`/blacklist add`** (ID), **`/blacklist remove`** (ID), **`/blacklist list`**.\n"
-        "Réservé au propriétaire (`OWNER_ID`).",
+        i18n.t("owner.runner.bl_title", lg)
+        + i18n.t("owner.runner.bl_body", lg, n=n, preview=preview),
         ephemeral=True,
     )
 
 
 async def run_setavatar_hint(_bot: commands.Bot, interaction: discord.Interaction) -> None:
+    lg = i18n.interaction_lang(interaction)
     await interaction.followup.send(
-        "**Avatar du bot** : envoie en **message privé** au bot une image avec la commande **`!setavatar`** "
-        "(préfixe + pièce jointe sur le même message).",
+        i18n.t("owner.runner.avatar_hint", lg),
         ephemeral=True,
     )
 
-
-ACTIONS: list[tuple[str, str, str]] = [
-    ("debug_tree", "Debug tree", "Liste locale des commandes slash (tree)"),
-    ("debug_pub", "Debug publié", "GLOBAL vs GUILD sur ce serveur"),
-    ("publish_global", "Sync globale", "Republie toutes les commandes en GLOBAL (rare)"),
-    ("cogs", "Cogs chargés", "Liste des extensions Python chargées"),
-    ("test_alert", "Test carte alerte", "Envoie la carte dans le salon /setchannel (sinon salon actuel)"),
-    ("show_channel", "Salons config", "Récap salons alertes / XP / raid (ce serveur)"),
-    ("recap_mensuel", "Stats internes", "Pics, usages slash, mois courant / précédent"),
-    ("raid_reset_week", "Raid — reset semaine", "Efface alerte 1 h / auto / limite /raidstart (ce serveur)"),
-    ("raid_owner_start", "Raid test (owner)", "Lance un raid sans consommer /raidstart"),
-    ("guessop_stats", "Guess OP — stats", "Statistiques du catalogue openings"),
-    ("guessop_harvest", "Guess OP — enrichir", "Harvest AnimeThemes (long, ~1–2 min)"),
-    ("help_dm", "Aide owner (MP)", "Envoie l’aide restreinte owner/admin en MP"),
-    ("setavatar_hint", "Changer l’avatar", "Rappel : !setavatar + image en MP"),
-    ("reportbug_blacklist", "Reports — blacklist", "Liste /blacklist add|remove|list (signalements bugs)"),
-]
 
 RUNNERS = {
     "debug_tree": run_debug_tree,

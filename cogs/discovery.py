@@ -314,7 +314,7 @@ class DiscoverView(discord.ui.View):
         self.add_item(self._track)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        lg = i18n.guild_lang(interaction.guild)
+        lg = i18n.interaction_lang(interaction)
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
                 i18n.t("discovery.not_for_you", lg),
@@ -324,7 +324,7 @@ class DiscoverView(discord.ui.View):
         return True
 
     async def _again_cb(self, interaction: discord.Interaction) -> None:
-        lg = i18n.guild_lang(interaction.guild)
+        lg = i18n.interaction_lang(interaction)
         try:
             fetched = await self.cog._fetch_random_media()
             if not fetched:
@@ -348,7 +348,7 @@ class DiscoverView(discord.ui.View):
             )
 
     async def _track_cb(self, interaction: discord.Interaction) -> None:
-        lg = i18n.guild_lang(interaction.guild)
+        lg = i18n.interaction_lang(interaction)
         try:
             title = (
                 self.media.get("title", {}).get("romaji")

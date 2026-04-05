@@ -12,11 +12,7 @@ import discord
 from discord.ext import commands
 
 from modules import core
-
-ANILIST_DOWN_MESSAGE = (
-    "📡 **L’API AniList est indisponible** pour le moment. Réessaie plus tard.\n"
-    "Les mini-jeux qui utilisent AniList ne peuvent pas être lancés tant que le service ne répond pas."
-)
+from modules import i18n
 
 _CACHE_OK_UNTIL: float = 0.0
 _CACHE_TTL_SEC = 45.0
@@ -59,6 +55,11 @@ async def _anilist_ok(bot: discord.Client) -> bool:
     return False
 
 
+def _ctx_lang(ctx: Any) -> str:
+    g = getattr(ctx, "guild", None)
+    return i18n.guild_lang(g)
+
+
 async def _send_ctx(ctx: Any, text: str) -> None:
     itx = getattr(ctx, "interaction", None)
     if itx:
@@ -75,7 +76,7 @@ async def ensure_anilist_for_ctx(bot: commands.Bot, ctx: Any) -> bool:
     """Contexte commande (slash ou préfixe). False = message envoyé."""
     if await _anilist_ok(bot):
         return True
-    await _send_ctx(ctx, ANILIST_DOWN_MESSAGE)
+    await _send_ctx(ctx, i18n.t("anilist_gate.down", _ctx_lang(ctx)))
     return False
 
 
@@ -83,8 +84,9 @@ async def ensure_anilist_for_interaction(bot: commands.Bot, interaction: discord
     """Avant `defer` sur le menu /minijeux : réponse ephemeral si indisponible."""
     if await _anilist_ok(bot):
         return True
+    msg = i18n.t("anilist_gate.down", i18n.interaction_lang(interaction))
     if not interaction.response.is_done():
-        await interaction.response.send_message(ANILIST_DOWN_MESSAGE, ephemeral=True)
+        await interaction.response.send_message(msg, ephemeral=True)
     else:
-        await interaction.followup.send(ANILIST_DOWN_MESSAGE, ephemeral=True)
+        await interaction.followup.send(msg, ephemeral=True)
     return False

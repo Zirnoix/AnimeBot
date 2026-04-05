@@ -365,7 +365,7 @@ class AllView(discord.ui.View):
         nv = _build_airings_view(self.guild_id, self.items, self.days, self.page, self.lang)
         await interaction.response.edit_message(embed=nv.build_embed(), view=nv)
 
-    @discord.ui.button(label="Toute la page → liste", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="Add whole page", style=discord.ButtonStyle.success, row=1)
     async def add_page_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         lg = self.lang
         if not interaction.guild_id:
@@ -389,7 +389,7 @@ class AllView(discord.ui.View):
             return
         await interaction.followup.send(i18n.t("airings_admin.page_add_ok", lg, n=count), ephemeral=True)
 
-    @discord.ui.button(label="Toute la page → retirer", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(label="Remove whole page", style=discord.ButtonStyle.danger, row=1)
     async def remove_page_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         lg = self.lang
         if not interaction.guild_id:
@@ -414,15 +414,15 @@ class AllView(discord.ui.View):
             return
         await interaction.followup.send(i18n.t("airings_admin.page_rm_ok", lg, n=count), ephemeral=True)
 
-    @discord.ui.button(label="IDs manuels (ajout)", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="Manual IDs (add)", style=discord.ButtonStyle.primary, row=1)
     async def add_select_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.send_modal(SelectModal(self, mode="add"))
 
-    @discord.ui.button(label="IDs manuels (retrait)", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Manual IDs (remove)", style=discord.ButtonStyle.secondary, row=1)
     async def remove_select_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.send_modal(SelectModal(self, mode="remove"))
 
-    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Close", style=discord.ButtonStyle.secondary, row=1)
     async def close_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
         for child in self.children:
             child.disabled = True

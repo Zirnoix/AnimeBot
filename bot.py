@@ -16,6 +16,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 
 from modules import core
+from modules import i18n
 from modules import user_reply
 from modules.app_cmd_locale import AppCommandTranslator
 # ========= LOGGING (unique) =========
@@ -77,7 +78,7 @@ async def _global_tree_interaction_check(self, interaction: discord.Interaction)
         if not interaction.response.is_done():
             from modules import i18n as _i18n
 
-            _lg = _i18n.guild_lang(interaction.guild)
+            _lg = _i18n.interaction_lang(interaction)
             await interaction.response.send_message(
                 _i18n.t(
                     "common.abuse_rate_limit",
@@ -172,6 +173,10 @@ class AnimeBot(commands.Bot):
             pass
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
+        try:
+            i18n.persist_user_locale_from_interaction(interaction)
+        except Exception:
+            pass
         if interaction.type is discord.InteractionType.application_command:
             try:
                 cmd = interaction.command
@@ -407,52 +412,65 @@ class AnimeBot(commands.Bot):
                     if datetime.fromtimestamp(ep["airingAt"], tz=core.TIMEZONE).strftime("%A") == current_day
                 ]
                 if episodes_today:
-                    await self._send_summary_message(user_id, episodes_today, current_day)
+                    dm_lg = i18n.user_dm_lang(int(user_id))
+                    await self._send_summary_message(
+                        user_id, episodes_today, current_day, dm_lg,
+                    )
         except Exception as e:
             LOG.error("send_daily_summaries: %s", e)
 
-    async def _send_summary_message(self, user_id: str, episodes: list[dict], day_name: str) -> None:
+    async def _send_summary_message(
+        self, user_id: str, episodes: list[dict], day_name: str, lang: str,
+    ) -> None:
         try:
             user = await self.fetch_user(int(user_id))
             if not user:
                 return
-            day_fr = {
-                "Monday": "lundi",
-                "Tuesday": "mardi",
-                "Wednesday": "mercredi",
-                "Thursday": "jeudi",
-                "Friday": "vendredi",
-                "Saturday": "samedi",
-                "Sunday": "dimanche",
-            }.get(day_name, day_name)
+            lg = lang if lang in ("fr", "en") else "fr"
+            wd_en = (
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            )
+            try:
+                wi = wd_en.index(day_name)
+            except ValueError:
+                wi = 0
+            weekday_label = i18n.weekday_name(lg, wi)
             lines = []
+            ep_word = i18n.t("recap_dm.ep_word", lg)
             for ep in episodes[:10]:
                 title_md = core.format_anilist_episode_title_markdown(ep)
                 ep_lbl = core.format_episode_line_part(ep.get("episode"), ep)
-                lines.append(f"• {title_md} — Épisode {ep_lbl}")
-            trivia = await asyncio.to_thread(core.get_daily_anime_trivia_line)
+                lines.append(
+                    i18n.t(
+                        "recap_dm.line",
+                        lg,
+                        title=title_md,
+                        ep_word=ep_word,
+                        ep_lbl=ep_lbl,
+                    )
+                )
+            trivia = await asyncio.to_thread(core.get_daily_anime_trivia_line, lg)
             al_name = core.get_linked_username(int(user_id))
             if al_name:
                 safe_anilist = discord.utils.escape_markdown(al_name)
-                intro = (
-                    f"📌 Récap basé sur **ta liste AniList** ({safe_anilist}) — "
-                    "ce qui correspond à ce que tu suis en **En cours** / **En relecture**.\n\n"
-                )
+                intro = i18n.t("recap_dm.intro_linked", lg, name=safe_anilist)
             else:
-                intro = (
-                    "📌 Récap basé sur **ta liste AniList** — utilise `/linkanilist` pour lier ton compte "
-                    "et personnaliser cette liste.\n\n"
-                )
+                intro = i18n.t("recap_dm.intro_nolink", lg)
             body = "\n".join(lines)
-            desc = f"{intro}{body}\n\n💡 **Le saviez-vous ?** {trivia}"
+            dyk = i18n.t("recap_dm.did_you_know", lg, trivia=trivia)
+            desc = f"{intro}{body}\n\n{dyk}"
             em = discord.Embed(
-                title=f"🗓️ Sorties du {day_fr}",
+                title=i18n.t("recap_dm.title", lg, weekday=weekday_label),
                 description=desc,
                 color=discord.Color.blurple(),
             )
-            em.set_footer(
-                text="Récap « Sorties du jour » — `/recap` + `/setalert` (heure) + `/linkanilist`. /help"
-            )
+            em.set_footer(text=i18n.t("recap_dm.footer", lg))
             await user.send(embed=em)
         except Exception as e:
             LOG.error("_send_summary_message: %s", e)

@@ -67,7 +67,7 @@ class TrackClearConfirmView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Oui, tout supprimer", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Yes, delete all", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         lg = self.lang
         tracker = core.load_tracker()
@@ -82,7 +82,7 @@ class TrackClearConfirmView(discord.ui.View):
             pass
         self.stop()
 
-    @discord.ui.button(label="Non", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="No", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.edit_message(content=i18n.t("tracker.clear_cancel", self.lang), view=None)
         self.stop()
@@ -499,7 +499,7 @@ class Tracker(commands.Cog):
                 try:
                     tname = anime.get("title_romaji") or anime.get("title_english") or "Anime"
                     ep_txt = core.format_episode_line_part(anime.get("episode"), anime)
-                    _al = i18n.guild_lang(None)
+                    _al = i18n.user_dm_lang(int(uid))
                     line = i18n.t("tracker.alert_release", _al, title=tname, ep=ep_txt)
                     if img_path:
                         await user.send(

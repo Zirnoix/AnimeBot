@@ -329,7 +329,13 @@ def _raid_status_embed(guild: discord.Guild) -> discord.Embed:
     em.add_field(name=_cg(lg, "status_field_ch"), value=ch_txt, inline=False)
     em.add_field(
         name=_cg(lg, "status_field_slot"),
-        value=f"**{jname}** à **{h:02d}:{mi:02d}**\n`{tzname}`",
+        value=i18n.t(
+            "community_games.status_slot_body",
+            lg,
+            weekday=jname,
+            time=f"{h:02d}:{mi:02d}",
+            tz=tzname,
+        ),
         inline=True,
     )
     em.add_field(
@@ -2787,7 +2793,7 @@ class CommunityGames(commands.Cog):
                 sort_key = SORT_TO_ANILIST[diff]
                 anime = await qz._fetch_random_anilist_media(sort_key, queue_ctx=ctx)  # type: ignore[attr-defined]
                 if not anime:
-                    await ctx.send(core.anilist_error_user_message())
+                    await ctx.send(core.anilist_error_user_message(lg))
                     break
                 titles = qz._titles_set(anime)  # type: ignore[attr-defined]
                 embed = discord.Embed(
@@ -2890,7 +2896,7 @@ class CommunityGames(commands.Cog):
                 """
                 data = await core.query_anilist_async(query, {"page": page}, queue_ctx=ctx)
                 if not data or "data" not in data:
-                    await ctx.send(core.anilist_error_user_message())
+                    await ctx.send(core.anilist_error_user_message(lg))
                     return
                 chars = data["data"]["Page"]["characters"]
                 if not chars:

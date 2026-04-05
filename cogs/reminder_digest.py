@@ -122,7 +122,11 @@ class RecapTimeModal(Modal):
                 ephemeral=True,
             )
             return
-        _set_user_pref(interaction.user.id, daily_summary=True, alert_time=norm)
+        _set_user_pref(
+            interaction.user.id,
+            daily_summary=True,
+            alert_time=norm,
+        )
         em = _recap_embed_for_user(interaction.user.id, lg)
         view = _recap_view_for_user(interaction.user.id, lg)
         await interaction.response.edit_message(embed=em, view=view, content=None)
