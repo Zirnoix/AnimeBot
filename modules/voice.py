@@ -5,6 +5,8 @@ import os
 import discord
 
 FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
+# Discord.py défaut = 30s ; premier join vocal peut dépasser (NAT / pare-feu UDP).
+_VOICE_CONNECT_TIMEOUT = max(15.0, float(os.getenv("VOICE_CONNECT_TIMEOUT", "120")))
 
 def make_source(
     path: str,
@@ -51,7 +53,7 @@ async def ensure_connected(channel: discord.VoiceChannel) -> discord.VoiceClient
             vc: discord.VoiceClient | None = channel.guild.voice_client
             if vc and vc.channel != channel:
                 try:
-                    await vc.move_to(channel)
+                    await vc.move_to(channel, timeout=_VOICE_CONNECT_TIMEOUT)
                 except Exception:
                     try:
                         await vc.disconnect(force=True)
@@ -59,7 +61,10 @@ async def ensure_connected(channel: discord.VoiceChannel) -> discord.VoiceClient
                         pass
                     vc = None
             if vc is None:
-                vc = await channel.connect(self_deaf=True)
+                vc = await channel.connect(
+                    self_deaf=True,
+                    timeout=_VOICE_CONNECT_TIMEOUT,
+                )
             return vc
         except Exception:
             if attempt < 2:
