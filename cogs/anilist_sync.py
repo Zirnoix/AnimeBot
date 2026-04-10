@@ -19,9 +19,10 @@ class AniListSync(commands.Cog):
         names = core.get_linked_anilist_usernames_bulk()
         for name in names:
             try:
-                core.get_profile_stats(name, force=True)
-                core.get_list_total_entries(name, force=True)
-                core.get_upcoming_episodes(name, force=True)
+                # Exécuter hors du fil asyncio : query_anilist utilise requests + time.sleep en cas de 429.
+                await asyncio.to_thread(core.get_profile_stats, name, force=True)
+                await asyncio.to_thread(core.get_list_total_entries, name, force=True)
+                await asyncio.to_thread(core.get_upcoming_episodes, name, force=True)
             except Exception as e:
                 print(f"[AniListSync] {name}: {e}")
             await asyncio.sleep(1.0)  # anti rate-limit
