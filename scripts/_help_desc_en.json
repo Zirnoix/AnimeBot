@@ -38,7 +38,7 @@
   "mycard": "Panoramic image (level, XP, AniList, favourite, minigames) — no embed; details: **`/profile`**.",
   "profile": "Detailed profile: XP, streak, minigame counters, Guess genre penalties, trophy preview.",
   "animefav": "Set your favourite anime (title, ID or AniList URL) — shown on **`/mycard`**.",
-  "reportbug": "Report a bug in **DMs**; **XP** if confirmed — counter on **`/mycard`**.",
+  "reportbug": "Report an issue in **DMs** (bug, translation, typo); **XP** if confirmed — counter on **`/mycard`**.",
   "mystats": "AniList stats (watched, days, mean score, favourite genre).",
   "mybadges": "Trophies by category (Initiate → Myth tiers) and progress bars.",
   "duelstats": "AniList engagement duel: completed, airing, episodes, time (+ rating if both rate).",

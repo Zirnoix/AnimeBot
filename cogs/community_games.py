@@ -2969,6 +2969,12 @@ class CommunityGames(commands.Cog):
                 return
 
             g = (msg.content or "").strip()
+            if g.lower() in {"jsp", "je sais pas", "idk", "skip", "pass", "aucune idée", "dk"}:
+                if lg == "en":
+                    await ctx.send(f"⏭️ Pass. The correct answer was **{name}**.")
+                else:
+                    await ctx.send(f"⏭️ Pass. La bonne réponse était **{name}**.")
+                return
             qz = self.bot.get_cog("Quiz")
             ok = False
             if qz:

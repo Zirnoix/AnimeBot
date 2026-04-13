@@ -398,6 +398,89 @@ class QuizLevelsView(discord.ui.View):
                 pass
 
 
+_QUIZTOP_MODES: tuple[str, ...] = (
+    "animequiz",
+    "guessyear",
+    "guessepisodes",
+    "guessgenre",
+    "guesscharacter",
+    "guessop",
+    "guesswho",
+    "guessopchain_streak",
+)
+
+
+def _quiztop_valid_mode(mode: str) -> str:
+    m = (mode or "animequiz").strip().lower()
+    return m if m in _QUIZTOP_MODES else "animequiz"
+
+
+def _quiztop_mode_label(mode: str, lg: str) -> str:
+    m = _quiztop_valid_mode(mode)
+    if m == "animequiz":
+        return "AnimeQuiz"
+    return i18n.t(f"profile.animetop_game_{m}", lg)
+
+
+def _quiztop_select_placeholder(mode: str, lg: str) -> str:
+    return (f"{i18n.t('quiz.quiztop_title', lg)} • {_quiztop_mode_label(mode, lg)}")[:150]
+
+
+class QuizTopCategorySelect(discord.ui.Select):
+    def __init__(self, cog: "Quiz", author_id: int, guild: Optional[discord.Guild], initial: str, lang: str):
+        self.cog = cog
+        self.author_id = author_id
+        self.guild = guild
+        self.lang = lang
+        ini = _quiztop_valid_mode(initial)
+        opts: list[discord.SelectOption] = []
+        for key in _QUIZTOP_MODES:
+            emoji = "🏆" if key == "animequiz" else "🎮"
+            opts.append(
+                discord.SelectOption(
+                    label=_quiztop_mode_label(key, lang)[:100],
+                    value=key,
+                    emoji=emoji,
+                    default=(key == ini),
+                )
+            )
+        super().__init__(
+            placeholder=_quiztop_select_placeholder(ini, lang),
+            min_values=1,
+            max_values=1,
+            options=opts,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.author_id:
+            lg = i18n.interaction_lang(interaction)
+            await interaction.response.send_message(i18n.t("quiz.menu_not_yours", lg), ephemeral=True)
+            return
+        mode = _quiztop_valid_mode(self.values[0] if self.values else "animequiz")
+        emb = await self.cog._quiztop_make_embed(interaction, self.guild, mode, self.lang)
+        view = QuizTopLeaderboardView(self.cog, self.author_id, self.guild, mode, self.lang)
+        await interaction.response.edit_message(embed=emb, view=view)
+        view.message = interaction.message
+
+
+class QuizTopLeaderboardView(discord.ui.View):
+    def __init__(self, cog: "Quiz", author_id: int, guild: Optional[discord.Guild], initial: str, lang: str):
+        super().__init__(timeout=300.0)
+        self.author_id = author_id
+        self.lang = lang
+        self.add_item(QuizTopCategorySelect(cog, author_id, guild, initial, lang))
+
+    async def on_timeout(self) -> None:
+        for c in self.children:
+            if isinstance(c, discord.ui.Select):
+                c.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
+
 class Quiz(commands.Cog):
     """Cog for anime quiz commands (AniList live)."""
 
@@ -1033,42 +1116,45 @@ class Quiz(commands.Cog):
                 _mark_duel_ended(ctx.author.id, opponent.id)
 
 
-    @commands.hybrid_command(name="quiztop", description=ui_str("slash.quiz_quiztop"))
-    @commands.cooldown(1, 5, commands.BucketType.user)
-    async def quiztop(self, ctx: commands.Context) -> None:
-        lg = i18n.ctx_lang(ctx)
-        try:
-            await _maybe_defer(ctx, ephemeral=False)
+    async def _quiztop_make_embed(
+        self,
+        user_source: commands.Context | discord.Interaction,
+        guild: Optional[discord.Guild],
+        mode: str,
+        lg: str,
+    ) -> discord.Embed:
+        m = _quiztop_valid_mode(mode)
+        title = f"{i18n.t('quiz.quiztop_title', lg)} • {_quiztop_mode_label(m, lg)}"
+        em = discord.Embed(title=title[:256], color=discord.Color.gold())
 
-            # Top du mois en cours
-            scores = core.load_scores()  # {user_id_str: score_int}
-            top10 = core.compute_quiz_top(scores, n=10)  # [(uid_str, score_int), ...]
+        rows: list[tuple[int, int]] = []
+        if m == "animequiz":
+            scores = core.load_scores()
+            top10 = core.compute_quiz_top(scores, n=10)
+            rows = [(int(uid), int(sc)) for uid, sc in top10 if str(uid).isdigit()]
+        else:
+            rows = core.mini_monthly_game_leaderboard(m, n=10)
 
-            em = discord.Embed(
-                title=i18n.t("quiz.quiztop_title", lg),
-                color=discord.Color.gold()
-            )
+        if not rows:
+            em.description = i18n.t("quiz.quiztop_empty", lg)
+        else:
+            lines: List[str] = []
+            medals = ["🥇", "🥈", "🥉"]
+            for i, (uid, sc) in enumerate(rows, start=1):
+                badge = medals[i - 1] if i <= 3 else f"#{i}"
+                display = f"<@{uid}>"
+                try:
+                    member = guild.get_member(int(uid)) if guild else None
+                    if not member:
+                        member = await self.bot.fetch_user(int(uid))
+                    if member:
+                        display = member.display_name
+                except Exception:
+                    pass
+                lines.append(i18n.t("quiz.quiztop_line", lg, badge=badge, display=display, sc=sc))
+            em.add_field(name=i18n.t("quiz.quiztop_field_top", lg), value="\n".join(lines)[:1024], inline=False)
 
-            if not top10:
-                em.description = i18n.t("quiz.quiztop_empty", lg)
-            else:
-                lines: List[str] = []
-                medals = ["🥇", "🥈", "🥉"]
-                for i, (uid, sc) in enumerate(top10, start=1):
-                    badge = medals[i-1] if i <= 3 else f"#{i}"
-                    display = f"<@{uid}>"
-                    try:
-                        member = ctx.guild.get_member(int(uid)) if ctx.guild else None
-                        if not member:
-                            member = await self.bot.fetch_user(int(uid))
-                        if member:
-                            display = member.display_name
-                    except Exception:
-                        pass
-                    lines.append(i18n.t("quiz.quiztop_line", lg, badge=badge, display=display, sc=sc))
-                em.add_field(name=i18n.t("quiz.quiztop_field_top", lg), value="\n".join(lines)[:1024], inline=False)
-
-            # Mois dernier (écrit par quiz_reset) : podium + récompenses XP/badges envoyées en MP
+        if m == "animequiz":
             w = core.load_winner()
             if w and w.get("month"):
                 label = _human_month(lg, w["month"])
@@ -1085,7 +1171,7 @@ class Quiz(commands.Cog):
                         md = medals[rk - 1] if 1 <= rk <= 3 else f"#{rk}"
                         disp = f"<@{uid}>"
                         try:
-                            mem = ctx.guild.get_member(int(uid)) if ctx.guild else None
+                            mem = guild.get_member(int(uid)) if guild else None
                             if not mem:
                                 mem = await self.bot.fetch_user(int(uid))
                             if mem:
@@ -1104,45 +1190,34 @@ class Quiz(commands.Cog):
                             value=i18n.t("quiz.quiztop_rewards_val", lg),
                             inline=False,
                         )
-                else:
-                    wid = w.get("winner_user_id")
-                    wsc = int(w.get("winner_score") or 0)
-                    if wid:
-                        wname = f"<@{wid}>"
-                        try:
-                            member = ctx.guild.get_member(int(wid)) if ctx.guild else None
-                            if not member:
-                                member = await self.bot.fetch_user(int(wid))
-                            if member:
-                                wname = member.display_name
-                        except Exception:
-                            pass
-                        em.add_field(
-                            name=i18n.t("quiz.quiztop_winner", lg, month=label),
-                            value=i18n.t("quiz.quiztop_winner_line", lg, name=wname, sc=wsc),
-                            inline=False,
-                        )
-                    else:
-                        em.add_field(
-                            name=i18n.t("quiz.quiztop_winner", lg, month=label),
-                            value=i18n.t("quiz.quiztop_no_winner", lg),
-                            inline=False,
-                        )
+        else:
+            tier = core.MINI_MONTHLY_GAME_TIERS.get(m, {})
+            xp_msg = f"🥇 +{tier.get(1, 0)} XP • 🥈 +{tier.get(2, 0)} XP • 🥉 +{tier.get(3, 0)} XP"
+            em.add_field(name="Récompenses mensuelles", value=xp_msg[:1024], inline=False)
 
-            # Compte à rebours vers le prochain reset (1er du mois 00:00)
-            tz = getattr(core, "TIMEZONE", timezone.utc)
-            nxt = _next_reset_dt(tz)
-            left = _human_td(nxt - datetime.now(tz), lg)
-            ft = i18n.t("quiz.quiztop_footer", lg, date=f"{nxt:%d/%m %H:%M}", left=left)
-            alu = core.get_linked_username(ctx.author.id)
-            if alu:
-                ft += i18n.t("quiz.quiztop_footer_al", lg, alu=alu)
-            else:
-                ft += i18n.t("quiz.quiztop_footer_nolink", lg)
-            em.set_footer(text=ft[:2048])
+        tz = getattr(core, "TIMEZONE", timezone.utc)
+        nxt = _next_reset_dt(tz)
+        left = _human_td(nxt - datetime.now(tz), lg)
+        author_id = user_source.author.id if isinstance(user_source, commands.Context) else user_source.user.id
+        ft = i18n.t("quiz.quiztop_footer", lg, date=f"{nxt:%d/%m %H:%M}", left=left)
+        alu = core.get_linked_username(author_id)
+        if alu:
+            ft += i18n.t("quiz.quiztop_footer_al", lg, alu=alu)
+        else:
+            ft += i18n.t("quiz.quiztop_footer_nolink", lg)
+        em.set_footer(text=ft[:2048])
+        return em
 
-            await ctx.send(embed=em)
-
+    @commands.hybrid_command(name="quiztop", description=ui_str("slash.quiz_quiztop"))
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def quiztop(self, ctx: commands.Context) -> None:
+        lg = i18n.ctx_lang(ctx)
+        try:
+            await _maybe_defer(ctx, ephemeral=False)
+            emb = await self._quiztop_make_embed(ctx, ctx.guild, "animequiz", lg)
+            view = QuizTopLeaderboardView(self, ctx.author.id, ctx.guild, "animequiz", lg)
+            msg = await ctx.send(embed=emb, view=view)
+            view.message = msg
         except Exception as e:
             logger.error(f"Erreur dans quiztop: {e}")
             await ctx.send(i18n.t("quiz.error_generic", lg))

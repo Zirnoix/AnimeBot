@@ -16,6 +16,7 @@ LOG = logging.getLogger(__name__)
 # Gravité → XP de base (validation owner uniquement)
 SEVERITY_XP = {"petit": 300, "moyen": 600, "gros": 1000}
 HARD_BONUS_XP = 300
+REPORT_TYPES = {"bug", "translation"}
 
 # Contenu minimal (évite texte vide / spam)
 MIN_TOTAL_CHARS = 120
@@ -206,6 +207,7 @@ def create_pending_report(user_id: int, username: str, content: str) -> Optional
             "status": "pending",
             "processed_at": None,
             "treatment": None,
+            "report_type": None,
             "severity": None,
             "hard_to_find": None,
             "xp_awarded": 0,
@@ -330,6 +332,7 @@ def confirm_report(
     _owner_id: int,
     severity: str,
     hard_to_find: bool,
+    report_type: str = "bug",
 ) -> Tuple[bool, Optional[dict[str, Any]], int]:
     """
     Confirme et calcule l’XP. Retourne (ok, report_dict, xp_total).
@@ -338,6 +341,9 @@ def confirm_report(
     sev = (severity or "").lower().strip()
     if sev not in SEVERITY_XP:
         return False, None, 0
+    rtype = (report_type or "bug").strip().lower()
+    if rtype not in REPORT_TYPES:
+        rtype = "bug"
     base = SEVERITY_XP[sev]
     bonus = HARD_BONUS_XP if hard_to_find else 0
     total_xp = base + bonus
@@ -350,7 +356,8 @@ def confirm_report(
                 return False, None, 0
             r["status"] = "confirmed"
             r["processed_at"] = _now_iso()
-            r["treatment"] = "confirmed"
+            r["treatment"] = "confirmed_translation" if rtype == "translation" else "confirmed"
+            r["report_type"] = rtype
             r["severity"] = sev
             r["hard_to_find"] = bool(hard_to_find)
             r["xp_awarded"] = int(total_xp)

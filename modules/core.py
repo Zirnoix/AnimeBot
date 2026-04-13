@@ -108,6 +108,8 @@ class FileConfig:
     TITLE_CACHE   = os.path.join(DATA_DIR, "title_cache.json")
     WINNER        = os.path.join(DATA_DIR, "quiz_winner.json")
     MINI_SCORES   = os.path.join(DATA_DIR, "mini_scores.json")
+    MINI_MONTHLY_SCORES = os.path.join(DATA_DIR, "mini_scores_monthly.json")
+    MINI_MONTHLY_WINNER = os.path.join(DATA_DIR, "mini_monthly_winner.json")
     CONFIG        = os.path.join(DATA_DIR, "config.json")
     GUESSOP_SCORES  = os.path.join(DATA_DIR, "guessop_scores.json")
     GUESSCHAR_SCORES = os.path.join(DATA_DIR, "guesschar_scores.json")
@@ -2188,6 +2190,19 @@ def compute_quiz_top(scores: dict, n: int = 10) -> list[tuple[str,int]]:
 
 # Récompenses podium mensuel (classement quiz) : XP global + compteurs badges (mini:quiz_month_*)
 QUIZ_MONTHLY_XP_BY_RANK = {1: 600, 2: 350, 3: 200}
+MINI_MONTHLY_XP_BY_RANK_LOW = {1: 200, 2: 100, 3: 50}
+MINI_MONTHLY_XP_BY_RANK_MID = {1: 400, 2: 250, 3: 125}
+MINI_MONTHLY_XP_BY_RANK_HIGH = {1: 600, 2: 350, 3: 200}
+
+MINI_MONTHLY_GAME_TIERS: dict[str, dict[int, int]] = {
+    "guessyear": MINI_MONTHLY_XP_BY_RANK_LOW,
+    "guessgenre": MINI_MONTHLY_XP_BY_RANK_LOW,
+    "guessepisodes": MINI_MONTHLY_XP_BY_RANK_LOW,
+    "guesscharacter": MINI_MONTHLY_XP_BY_RANK_MID,
+    "guessop": MINI_MONTHLY_XP_BY_RANK_MID,
+    "guesswho": MINI_MONTHLY_XP_BY_RANK_HIGH,
+    "guessopchain_streak": MINI_MONTHLY_XP_BY_RANK_HIGH,
+}
 
 
 def record_month_winner_and_reset(now: datetime | None = None, tz_name: str = "Europe/Paris") -> dict:
@@ -2369,6 +2384,51 @@ def load_mini_scores() -> dict:
 def save_mini_scores(data: dict) -> None:
     save_json(FileConfig.MINI_SCORES, data)
 
+
+def load_mini_monthly_scores() -> dict:
+    return load_json(FileConfig.MINI_MONTHLY_SCORES, {})
+
+
+def save_mini_monthly_scores(data: dict) -> None:
+    save_json(FileConfig.MINI_MONTHLY_SCORES, data or {})
+
+
+def load_mini_monthly_winner() -> dict:
+    return load_json(FileConfig.MINI_MONTHLY_WINNER, {})
+
+
+def save_mini_monthly_winner(data: dict) -> None:
+    save_json(FileConfig.MINI_MONTHLY_WINNER, data or {})
+
+
+def add_mini_monthly_score(user_id: int, game: str, amount: int = 1) -> None:
+    g = (game or "").strip().lower()
+    if g not in MINI_MONTHLY_GAME_TIERS:
+        return
+    with DATA_JSON_LOCK:
+        data = load_mini_monthly_scores()
+        game_rows = data.setdefault(g, {})
+        uid = str(user_id)
+        game_rows[uid] = int(game_rows.get(uid, 0) or 0) + int(amount)
+        save_mini_monthly_scores(data)
+
+
+def upsert_mini_monthly_score_max(user_id: int, game: str, value: int) -> None:
+    g = (game or "").strip().lower()
+    if g not in MINI_MONTHLY_GAME_TIERS:
+        return
+    v = int(value)
+    if v <= 0:
+        return
+    with DATA_JSON_LOCK:
+        data = load_mini_monthly_scores()
+        game_rows = data.setdefault(g, {})
+        uid = str(user_id)
+        cur = int(game_rows.get(uid, 0) or 0)
+        if v > cur:
+            game_rows[uid] = v
+            save_mini_monthly_scores(data)
+
 def add_mini_score(user_id: int, game: str, amount: int = 1) -> None:
     with DATA_JSON_LOCK:
         data = load_mini_scores()
@@ -2376,6 +2436,7 @@ def add_mini_score(user_id: int, game: str, amount: int = 1) -> None:
         data.setdefault(uid, {})
         data[uid][game] = data[uid].get(game, 0) + amount
         save_mini_scores(data)
+    add_mini_monthly_score(user_id, game, amount)
 
 
 def upsert_mini_score_max(user_id: int, game: str, value: int) -> None:
@@ -2391,6 +2452,7 @@ def upsert_mini_score_max(user_id: int, game: str, value: int) -> None:
         if v > cur:
             data[uid][game] = v
             save_mini_scores(data)
+    upsert_mini_monthly_score_max(user_id, game, value)
 
 
 def get_mini_scores(user_id: int) -> dict:
@@ -2436,6 +2498,89 @@ def mini_game_activity_leaderboard(*, n: int = 10) -> list[tuple[int, int]]:
             totals[uid] = s
     rows = sorted(totals.items(), key=lambda x: (-x[1], x[0]))
     return rows[: max(1, int(n))]
+
+
+def mini_monthly_game_leaderboard(game: str, n: int = 10) -> list[tuple[int, int]]:
+    g = (game or "").strip().lower()
+    if g not in MINI_MONTHLY_GAME_TIERS:
+        return []
+    data = load_mini_monthly_scores()
+    game_rows = data.get(g, {}) if isinstance(data, dict) else {}
+    rows: list[tuple[int, int]] = []
+    for uid_s, score in (game_rows or {}).items():
+        try:
+            uid = int(uid_s)
+            sc = int(score)
+        except Exception:
+            continue
+        if sc > 0:
+            rows.append((uid, sc))
+    rows.sort(key=lambda x: (-x[1], x[0]))
+    return rows[: max(1, int(n))]
+
+
+def record_mini_month_winners_and_reset(now: datetime | None = None, tz_name: str = "Europe/Paris") -> dict:
+    with DATA_JSON_LOCK:
+        prev_m = _prev_month_key(now, tz_name)
+        ts = int(time.time())
+        monthly = load_mini_monthly_scores()
+        by_game: dict[str, list[dict]] = {}
+        for game in MINI_MONTHLY_GAME_TIERS:
+            rows = monthly.get(game, {}) if isinstance(monthly, dict) else {}
+            clean: list[tuple[str, int]] = []
+            for uid, val in (rows or {}).items():
+                try:
+                    v = int(val)
+                except Exception:
+                    continue
+                if v > 0:
+                    clean.append((str(uid), v))
+            clean.sort(key=lambda x: (-x[1], int(x[0]) if str(x[0]).isdigit() else 10**18))
+            top3 = clean[:3]
+            by_game[game] = [{"rank": i, "user_id": uid, "score": sc} for i, (uid, sc) in enumerate(top3, start=1)]
+        data = {"month": prev_m, "by_game": by_game, "saved_at": ts}
+        save_mini_monthly_winner(data)
+        save_mini_monthly_scores({})
+        return data
+
+
+async def grant_mini_monthly_podium_rewards(bot, data: dict | None) -> None:
+    if not data:
+        return
+    month_key = data.get("month") or "?"
+    month_fr = human_month_fr(month_key) if month_key and month_key != "?" else month_key
+    by_game = data.get("by_game") or {}
+    for game, podium in by_game.items():
+        tier = MINI_MONTHLY_GAME_TIERS.get(str(game))
+        if not tier:
+            continue
+        for row in podium or []:
+            try:
+                rank = int(row.get("rank") or 0)
+                uid_s = row.get("user_id")
+                sc = int(row.get("score") or 0)
+                if not uid_s or rank not in (1, 2, 3):
+                    continue
+                uid_int = int(uid_s)
+            except Exception:
+                continue
+            xp_amt = int(tier.get(rank, 0))
+            if xp_amt <= 0:
+                continue
+            try:
+                await add_xp(bot, None, uid_int, xp_amt, announce=False)
+            except Exception as e:
+                LOG.warning("grant_mini_monthly_podium_rewards add_xp uid=%s game=%s: %s", uid_int, game, e)
+            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, "🏅")
+            try:
+                u = await bot.fetch_user(uid_int)
+                await u.send(
+                    f"{medal} **Top mini-jeu ({game}) — {month_fr}**\n"
+                    f"Tu es **{rank}ᵉ** avec **{sc}** pts ce mois-là.\n"
+                    f"**+{xp_amt} XP** (rang global / **/mycard**)."
+                )
+            except Exception:
+                pass
 
 
 def get_guess_genre_penalty_count(user_id: int) -> int:

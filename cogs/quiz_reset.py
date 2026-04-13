@@ -59,6 +59,11 @@ class QuizMonthlyReset(commands.Cog):
                         await core.grant_quiz_monthly_podium_rewards(self.bot, data)
                     except Exception as e:
                         LOG.exception("[quiz_reset] grant podium: %s", e)
+                    try:
+                        mini_data = core.record_mini_month_winners_and_reset(now=now)
+                        await core.grant_mini_monthly_podium_rewards(self.bot, mini_data)
+                    except Exception as e:
+                        LOG.exception("[quiz_reset] grant mini podium: %s", e)
                     _save_state({"last_done_for": current_month})
             except Exception as e:
                 LOG.exception("[quiz_reset] Erreur: %s", e)

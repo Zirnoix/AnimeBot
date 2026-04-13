@@ -390,11 +390,17 @@ class OwnerRewardView(discord.ui.View):
         self.bot = bot
         self.report_id = report_id
         self.lang = lang
+        self.report_type: str = "bug"
         self.severity: str | None = None
         self.bug_hard: bool | None = None
+        self.select_type.placeholder = i18n.t("reportbug.type_placeholder", lang)[:150]
         self.select_severity.placeholder = i18n.t("reportbug.sev_placeholder", lang)[:150]
         self.select_hard.placeholder = i18n.t("reportbug.hard_placeholder", lang)[:150]
         self.apply_xp.label = i18n.t("reportbug.btn_apply_xp", lang)[:80]
+        topts = self.select_type.options
+        if len(topts) >= 2:
+            topts[0].label = i18n.t("reportbug.type_bug", lang)[:100]
+            topts[1].label = i18n.t("reportbug.type_translation", lang)[:100]
         opts = self.select_severity.options
         if len(opts) >= 3:
             opts[0].label = i18n.t("reportbug.sev_small", lang)[:100]
@@ -411,11 +417,27 @@ class OwnerRewardView(discord.ui.View):
     @discord.ui.select(
         placeholder="—",
         options=[
+            discord.SelectOption(label="—", value="bug"),
+            discord.SelectOption(label="—", value="translation"),
+        ],
+        row=0,
+    )
+    async def select_type(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
+        lg = self.lang
+        if not _is_owner(interaction.user.id):
+            await interaction.response.send_message(i18n.t("reportbug.owner_only_short", lg), ephemeral=True)
+            return
+        self.report_type = select.values[0]
+        await interaction.response.defer()
+
+    @discord.ui.select(
+        placeholder="—",
+        options=[
             discord.SelectOption(label="—", value="petit", description="—"),
             discord.SelectOption(label="—", value="moyen", description="—"),
             discord.SelectOption(label="—", value="gros", description="—"),
         ],
-        row=0,
+        row=1,
     )
     async def select_severity(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
         lg = self.lang
@@ -431,7 +453,7 @@ class OwnerRewardView(discord.ui.View):
             discord.SelectOption(label="—", value="0"),
             discord.SelectOption(label="—", value="1"),
         ],
-        row=1,
+        row=2,
     )
     async def select_hard(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
         lg = self.lang
@@ -441,7 +463,7 @@ class OwnerRewardView(discord.ui.View):
         self.bug_hard = select.values[0] == "1"
         await interaction.response.defer()
 
-    @discord.ui.button(label="Apply reward", style=discord.ButtonStyle.primary, row=2)
+    @discord.ui.button(label="Apply reward", style=discord.ButtonStyle.primary, row=3)
     async def apply_xp(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         lg = self.lang
         if not _is_owner(interaction.user.id):
@@ -465,6 +487,7 @@ class OwnerRewardView(discord.ui.View):
                 interaction.user.id,
                 self.severity,
                 self.bug_hard,
+                self.report_type,
             )
             if not ok or not rep:
                 await interaction.followup.send(i18n.t("reportbug.confirm_fail", lg), ephemeral=True)
@@ -487,7 +510,10 @@ class OwnerRewardView(discord.ui.View):
                     else i18n.t("reportbug.confirm_user_hard_no", lg)
                 )
                 lines = [
-                    i18n.t("reportbug.confirm_user_line1", lg),
+                    i18n.t(
+                        "reportbug.confirm_user_line1_translation" if self.report_type == "translation" else "reportbug.confirm_user_line1",
+                        lg,
+                    ),
                     "",
                     i18n.t("reportbug.confirm_user_sev", lg, label=sev_map.get(sev, sev)),
                     i18n.t("reportbug.confirm_user_hard", lg, hard=hard_txt),
@@ -497,7 +523,10 @@ class OwnerRewardView(discord.ui.View):
                 ]
                 await u.send(
                     embed=discord.Embed(
-                        title=i18n.t("reportbug.confirm_user_title", lg),
+                        title=i18n.t(
+                            "reportbug.confirm_user_title_translation" if self.report_type == "translation" else "reportbug.confirm_user_title",
+                            lg,
+                        ),
                         description="\n".join(lines),
                         color=discord.Color.green(),
                     )
@@ -508,7 +537,12 @@ class OwnerRewardView(discord.ui.View):
                 child.disabled = True
             try:
                 await interaction.message.edit(
-                    content=i18n.t("reportbug.confirm_edit", lg, xp=xp, uid=uid),
+                    content=i18n.t(
+                        "reportbug.confirm_edit_translation" if self.report_type == "translation" else "reportbug.confirm_edit",
+                        lg,
+                        xp=xp,
+                        uid=uid,
+                    ),
                     embed=interaction.message.embeds[0] if interaction.message.embeds else None,
                     view=self,
                 )
