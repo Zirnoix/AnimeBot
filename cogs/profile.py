@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 import discord
@@ -23,6 +24,8 @@ from modules.text_bars import pct_bar_parallelogram
 _EMBED_OVERVIEW = discord.Color.from_rgb(88, 101, 242)
 _EMBED_MINIS = discord.Color.from_rgb(52, 58, 64)
 _EMBED_BADGES = discord.Color.from_rgb(155, 89, 182)
+_LEADERBOARD_TTL_SEC = 120.0
+_ANIMETOP_ACTIVE_UNTIL: dict[int, float] = {}
 
 _ANILIST_ANIME_URL_RE = re.compile(r"https?://(www\.)?anilist\.co/anime/(\d+)", re.I)
 _ANIME_FAV_CLEAR_WORDS = frozenset(
@@ -1241,6 +1244,24 @@ class Profile(commands.Cog):
     async def animetop(self, ctx: commands.Context, classement: str = "all") -> None:
         lg = i18n.ctx_lang(ctx)
         key = _animetop_valid_mode((classement or "all").strip().lower())
+        scope_key = int(ctx.guild.id) if ctx.guild else int(ctx.author.id)
+        now = time.monotonic()
+        exp = float(_ANIMETOP_ACTIVE_UNTIL.get(scope_key, 0.0))
+        if exp > now:
+            left = int(exp - now) + 1
+            msg = (
+                f"⏳ `/animetop` déjà actif. Réessaie dans **{left}s**."
+                if lg != "en"
+                else f"⏳ `/animetop` is already active. Try again in **{left}s**."
+            )
+            is_slash_busy = bool(getattr(ctx, "interaction", None))
+            if is_slash_busy and ctx.interaction and not ctx.interaction.response.is_done():
+                await ctx.interaction.response.send_message(msg, ephemeral=True)
+            elif is_slash_busy and ctx.interaction:
+                await ctx.interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.send(msg)
+            return
         is_slash = bool(getattr(ctx, "interaction", None))
         if is_slash and ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer()
@@ -1254,7 +1275,16 @@ class Profile(commands.Cog):
             return
 
         emb = await self._animetop_make_embed(self.bot, ctx.guild, key, lg)
-        view = AnimetopLeaderboardView(self, ctx.author.id, ctx.guild, key, lg)
+        _ANIMETOP_ACTIVE_UNTIL[scope_key] = now + _LEADERBOARD_TTL_SEC
+        view = AnimetopLeaderboardView(
+            self,
+            ctx.author.id,
+            ctx.guild,
+            key,
+            lg,
+            lock_store=_ANIMETOP_ACTIVE_UNTIL,
+            lock_key=scope_key,
+        )
         if is_slash and ctx.interaction:
             msg = await ctx.interaction.followup.send(embed=emb, view=view, wait=True)
         else:
@@ -1450,15 +1480,20 @@ class AnimetopCategorySelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         lg = self.lang
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                i18n.t("profile.animetop_menu_reserved", lg),
-                ephemeral=True,
-            )
-            return
         mode = self.values[0]
         emb = await self.cog._animetop_make_embed(interaction.client, self.guild, mode, lg)
-        new_view = AnimetopLeaderboardView(self.cog, self.author_id, self.guild, mode, lg)
+        parent = self.view
+        lock_store = parent.lock_store if isinstance(parent, AnimetopLeaderboardView) else None
+        lock_key = parent.lock_key if isinstance(parent, AnimetopLeaderboardView) else None
+        new_view = AnimetopLeaderboardView(
+            self.cog,
+            self.author_id,
+            self.guild,
+            mode,
+            lg,
+            lock_store=lock_store,
+            lock_key=lock_key,
+        )
         await interaction.response.edit_message(embed=emb, view=new_view)
         new_view._message = interaction.message
 
@@ -1471,9 +1506,14 @@ class AnimetopLeaderboardView(discord.ui.View):
         guild: Optional[discord.Guild],
         initial: str,
         lang: str,
+        *,
+        lock_store: Optional[dict[int, float]] = None,
+        lock_key: Optional[int] = None,
     ):
-        super().__init__(timeout=300.0)
+        super().__init__(timeout=_LEADERBOARD_TTL_SEC)
         ph = _animetop_select_placeholder(initial, lang)
+        self.lock_store = lock_store
+        self.lock_key = lock_key
         self.add_item(
             AnimetopCategorySelect(
                 cog,
@@ -1487,11 +1527,11 @@ class AnimetopLeaderboardView(discord.ui.View):
         self._message: Optional[discord.Message] = None
 
     async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
+        if self.lock_store is not None and self.lock_key is not None:
+            self.lock_store.pop(self.lock_key, None)
         if self._message:
             try:
-                await self._message.edit(view=self)
+                await self._message.delete()
             except Exception:
                 pass
 

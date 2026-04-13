@@ -408,6 +408,8 @@ _QUIZTOP_MODES: tuple[str, ...] = (
     "guesswho",
     "guessopchain_streak",
 )
+_QUIZTOP_TTL_SEC = 120.0
+_QUIZTOP_ACTIVE_UNTIL: dict[int, float] = {}
 
 
 def _quiztop_valid_mode(mode: str) -> str:
@@ -452,31 +454,49 @@ class QuizTopCategorySelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.author_id:
-            lg = i18n.interaction_lang(interaction)
-            await interaction.response.send_message(i18n.t("quiz.menu_not_yours", lg), ephemeral=True)
-            return
         mode = _quiztop_valid_mode(self.values[0] if self.values else "animequiz")
         emb = await self.cog._quiztop_make_embed(interaction, self.guild, mode, self.lang)
-        view = QuizTopLeaderboardView(self.cog, self.author_id, self.guild, mode, self.lang)
+        parent = self.view
+        lock_store = parent.lock_store if isinstance(parent, QuizTopLeaderboardView) else None
+        lock_key = parent.lock_key if isinstance(parent, QuizTopLeaderboardView) else None
+        view = QuizTopLeaderboardView(
+            self.cog,
+            self.author_id,
+            self.guild,
+            mode,
+            self.lang,
+            lock_store=lock_store,
+            lock_key=lock_key,
+        )
         await interaction.response.edit_message(embed=emb, view=view)
         view.message = interaction.message
 
 
 class QuizTopLeaderboardView(discord.ui.View):
-    def __init__(self, cog: "Quiz", author_id: int, guild: Optional[discord.Guild], initial: str, lang: str):
-        super().__init__(timeout=300.0)
+    def __init__(
+        self,
+        cog: "Quiz",
+        author_id: int,
+        guild: Optional[discord.Guild],
+        initial: str,
+        lang: str,
+        *,
+        lock_store: Optional[dict[int, float]] = None,
+        lock_key: Optional[int] = None,
+    ):
+        super().__init__(timeout=_QUIZTOP_TTL_SEC)
         self.author_id = author_id
         self.lang = lang
+        self.lock_store = lock_store
+        self.lock_key = lock_key
         self.add_item(QuizTopCategorySelect(cog, author_id, guild, initial, lang))
 
     async def on_timeout(self) -> None:
-        for c in self.children:
-            if isinstance(c, discord.ui.Select):
-                c.disabled = True
+        if self.lock_store is not None and self.lock_key is not None:
+            self.lock_store.pop(self.lock_key, None)
         if self.message:
             try:
-                await self.message.edit(view=self)
+                await self.message.delete()
             except Exception:
                 pass
 
@@ -1213,9 +1233,36 @@ class Quiz(commands.Cog):
     async def quiztop(self, ctx: commands.Context) -> None:
         lg = i18n.ctx_lang(ctx)
         try:
+            scope_key = int(ctx.guild.id) if ctx.guild else int(ctx.author.id)
+            now = time.monotonic()
+            exp = float(_QUIZTOP_ACTIVE_UNTIL.get(scope_key, 0.0))
+            if exp > now:
+                left = int(exp - now) + 1
+                msg = (
+                    f"⏳ `/quiztop` déjà actif. Réessaie dans **{left}s**."
+                    if lg != "en"
+                    else f"⏳ `/quiztop` is already active. Try again in **{left}s**."
+                )
+                is_slash_busy = bool(getattr(ctx, "interaction", None))
+                if is_slash_busy and ctx.interaction and not ctx.interaction.response.is_done():
+                    await ctx.interaction.response.send_message(msg, ephemeral=True)
+                elif is_slash_busy and ctx.interaction:
+                    await ctx.interaction.followup.send(msg, ephemeral=True)
+                else:
+                    await ctx.send(msg)
+                return
             await _maybe_defer(ctx, ephemeral=False)
             emb = await self._quiztop_make_embed(ctx, ctx.guild, "animequiz", lg)
-            view = QuizTopLeaderboardView(self, ctx.author.id, ctx.guild, "animequiz", lg)
+            _QUIZTOP_ACTIVE_UNTIL[scope_key] = now + _QUIZTOP_TTL_SEC
+            view = QuizTopLeaderboardView(
+                self,
+                ctx.author.id,
+                ctx.guild,
+                "animequiz",
+                lg,
+                lock_store=_QUIZTOP_ACTIVE_UNTIL,
+                lock_key=scope_key,
+            )
             msg = await ctx.send(embed=emb, view=view)
             view.message = msg
         except Exception as e:

@@ -183,12 +183,20 @@ def format_bug_body(
     )
 
 
-def create_pending_report(user_id: int, username: str, content: str) -> Optional[int]:
+def create_pending_report(
+    user_id: int,
+    username: str,
+    content: str,
+    report_type: str = "bug",
+) -> Optional[int]:
     """
     Réserve le quota journalier et crée un report « pending ».
     Retourne l’id ou None si impossible.
     """
     uid = str(int(user_id))
+    rtype = (report_type or "bug").strip().lower()
+    if rtype not in REPORT_TYPES:
+        rtype = "bug"
     today = paris_today_str()
     with core.DATA_JSON_LOCK:
         st = load_store()
@@ -207,7 +215,7 @@ def create_pending_report(user_id: int, username: str, content: str) -> Optional
             "status": "pending",
             "processed_at": None,
             "treatment": None,
-            "report_type": None,
+            "report_type": rtype,
             "severity": None,
             "hard_to_find": None,
             "xp_awarded": 0,

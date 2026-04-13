@@ -19,6 +19,7 @@ LOG = logging.getLogger(__name__)
 
 # Brouillon avant envoi (MP) — évite re-saisie ; pas de persistance disque
 _draft_body: dict[int, str] = {}
+_draft_type: dict[int, str] = {}
 _draft_expires: dict[int, float] = {}
 _DRAFT_TTL = 3600.0
 
@@ -42,6 +43,7 @@ def _cleanup_drafts() -> None:
     for k in dead:
         _draft_expires.pop(k, None)
         _draft_body.pop(k, None)
+        _draft_type.pop(k, None)
 
 
 def _reject_cooldown_message(user_id: int, lang: str) -> str:
@@ -67,6 +69,17 @@ def _reject_cooldown_message(user_id: int, lang: str) -> str:
 
 def _daily_message(lang: str) -> str:
     return i18n.t("reportbug.daily", lang)
+
+
+def _format_translation_body(cmd: str, where: str, expected: str) -> str:
+    return (
+        "**Commande concernée**\n"
+        + (cmd or "").strip()
+        + "\n\n**Texte actuel (phrase/mot)**\n"
+        + (where or "").strip()
+        + "\n\n**Correction proposée**\n"
+        + (expected or "").strip()
+    )
 
 
 class BugReportModal(discord.ui.Modal):
@@ -131,10 +144,64 @@ class BugReportModal(discord.ui.Modal):
         uid = interaction.user.id
         _cleanup_drafts()
         _draft_body[uid] = body
+        _draft_type[uid] = "bug"
         _draft_expires[uid] = time.time() + _DRAFT_TTL
 
         preview = discord.Embed(
             title=i18n.t("reportbug.preview_title", lg),
+            description=body[:4000],
+            color=discord.Color.orange(),
+        )
+        preview.set_footer(text=i18n.t("reportbug.preview_footer", lg))
+        await interaction.response.send_message(
+            embed=preview,
+            view=SendReportView(self.bot, uid, lg),
+        )
+
+
+class TranslationReportModal(discord.ui.Modal):
+    def __init__(self, bot: commands.Bot, lang: str) -> None:
+        super().__init__(title=i18n.t("reportbug.modal_translation_title", lang)[:45], timeout=300)
+        self.bot = bot
+        self.lang = lang
+        self.cmd = discord.ui.TextInput(
+            label=i18n.t("reportbug.modal_translation_cmd", lang)[:45],
+            placeholder=i18n.t("reportbug.modal_translation_cmd_ph", lang)[:100],
+            required=True,
+            style=discord.TextStyle.short,
+        )
+        self.where = discord.ui.TextInput(
+            label=i18n.t("reportbug.modal_translation_where", lang)[:45],
+            placeholder=i18n.t("reportbug.modal_translation_where_ph", lang)[:100],
+            required=True,
+            style=discord.TextStyle.paragraph,
+        )
+        self.fix = discord.ui.TextInput(
+            label=i18n.t("reportbug.modal_translation_fix", lang)[:45],
+            placeholder=i18n.t("reportbug.modal_translation_fix_ph", lang)[:100],
+            required=True,
+            style=discord.TextStyle.paragraph,
+        )
+        self.add_item(self.cmd)
+        self.add_item(self.where)
+        self.add_item(self.fix)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        lg = self.lang
+        cmd = str(self.cmd.value).strip()
+        where = str(self.where.value).strip()
+        fix = str(self.fix.value).strip()
+        if not cmd or not where or not fix:
+            await interaction.response.send_message(i18n.t("reportbug.translation_hint_required", lg), ephemeral=True)
+            return
+        body = _format_translation_body(cmd, where, fix)
+        uid = interaction.user.id
+        _cleanup_drafts()
+        _draft_body[uid] = body
+        _draft_type[uid] = "translation"
+        _draft_expires[uid] = time.time() + _DRAFT_TTL
+        preview = discord.Embed(
+            title=i18n.t("reportbug.preview_title_translation", lg),
             description=body[:4000],
             color=discord.Color.orange(),
         )
@@ -162,6 +229,7 @@ class SendReportView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         _cleanup_drafts()
         body = _draft_body.get(self.author_id)
+        report_type = (_draft_type.get(self.author_id) or "bug").strip().lower()
         if not body or _draft_expires.get(self.author_id, 0) < time.time():
             await interaction.followup.send(
                 i18n.t("reportbug.draft_expired", lg),
@@ -183,6 +251,7 @@ class SendReportView(discord.ui.View):
             self.author_id,
             str(interaction.user),
             body,
+            report_type=report_type,
         )
         if rid is None:
             ok2, reason2 = br.can_user_submit_bug(self.author_id)
@@ -220,6 +289,12 @@ class SendReportView(discord.ui.View):
             value=i18n.t("reportbug.embed_state_pending", owner_lang),
             inline=True,
         )
+        type_label_key = "reportbug.type_translation" if report_type == "translation" else "reportbug.type_bug"
+        embed.add_field(
+            name=i18n.t("reportbug.type_placeholder", owner_lang),
+            value=i18n.t(type_label_key, owner_lang),
+            inline=True,
+        )
         embed.add_field(
             name=i18n.t("reportbug.embed_date_utc", owner_lang),
             value=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -238,6 +313,7 @@ class SendReportView(discord.ui.View):
             return
 
         _draft_body.pop(self.author_id, None)
+        _draft_type.pop(self.author_id, None)
         _draft_expires.pop(self.author_id, None)
         for child in self.children:
             child.disabled = True
@@ -381,16 +457,20 @@ class OwnerDecisionView(discord.ui.View):
                 value=i18n.t("reportbug.validation_hint", lg),
                 inline=False,
             )
-        await interaction.response.edit_message(embed=emb, view=OwnerRewardView(self.bot, self.report_id, lg))
+        report_type = str(rep.get("report_type") or "bug").strip().lower()
+        await interaction.response.edit_message(
+            embed=emb,
+            view=OwnerRewardView(self.bot, self.report_id, lg, initial_type=report_type),
+        )
 
 
 class OwnerRewardView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, report_id: int, lang: str) -> None:
+    def __init__(self, bot: commands.Bot, report_id: int, lang: str, *, initial_type: str = "bug") -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.report_id = report_id
         self.lang = lang
-        self.report_type: str = "bug"
+        self.report_type: str = "translation" if (initial_type or "").strip().lower() == "translation" else "bug"
         self.severity: str | None = None
         self.bug_hard: bool | None = None
         self.select_type.placeholder = i18n.t("reportbug.type_placeholder", lang)[:150]
@@ -401,6 +481,8 @@ class OwnerRewardView(discord.ui.View):
         if len(topts) >= 2:
             topts[0].label = i18n.t("reportbug.type_bug", lang)[:100]
             topts[1].label = i18n.t("reportbug.type_translation", lang)[:100]
+            topts[0].default = self.report_type == "bug"
+            topts[1].default = self.report_type == "translation"
         opts = self.select_severity.options
         if len(opts) >= 3:
             opts[0].label = i18n.t("reportbug.sev_small", lang)[:100]
@@ -559,10 +641,15 @@ class IntroView(discord.ui.View):
         self.bot = bot
         self.lang = lang
         self.open_modal.label = i18n.t("reportbug.btn_compose", lang)[:80]
+        self.open_translation_modal.label = i18n.t("reportbug.btn_compose_translation", lang)[:80]
 
     @discord.ui.button(label="Write report", style=discord.ButtonStyle.primary, emoji="📝")
     async def open_modal(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         await interaction.response.send_modal(BugReportModal(self.bot, self.lang))
+
+    @discord.ui.button(label="Translation/typo report", style=discord.ButtonStyle.secondary, emoji="🌍")
+    async def open_translation_modal(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await interaction.response.send_modal(TranslationReportModal(self.bot, self.lang))
 
 
 class ReportBugCog(commands.Cog):
