@@ -2169,6 +2169,23 @@ def human_month_fr(year_month: str) -> str:
     m_idx = max(1, min(12, int(m)))
     return f"{months[m_idx-1]} {y}"
 
+
+def human_month_label(lang: str, year_month: str) -> str:
+    """Libellé mois FR/EN (podiums, MP)."""
+    lg = lang if lang in ("fr", "en") else "fr"
+    if lg == "en":
+        months = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        ]
+        try:
+            y, m = year_month.split("-")
+            mi = max(1, min(12, int(m)))
+            return f"{months[mi - 1]} {y}"
+        except Exception:
+            return year_month
+    return human_month_fr(year_month)
+
 def load_winner() -> dict:
     return load_json(FileConfig.WINNER, {})
 
@@ -2203,6 +2220,106 @@ MINI_MONTHLY_GAME_TIERS: dict[str, dict[int, int]] = {
     "guesswho": MINI_MONTHLY_XP_BY_RANK_HIGH,
     "guessopchain_streak": MINI_MONTHLY_XP_BY_RANK_HIGH,
 }
+
+# Ordre d’affichage du récap MP mensuel (aligné sur /quiztop).
+MONTHLY_PODIUM_CATEGORY_ORDER: tuple[str, ...] = (
+    "animequiz",
+    "guessyear",
+    "guessepisodes",
+    "guessgenre",
+    "guesscharacter",
+    "guessop",
+    "guesswho",
+    "guessopchain_streak",
+)
+
+
+def _quiztop_category_label(category: str, lang: str) -> str:
+    from modules import i18n
+
+    lg = lang if lang in ("fr", "en") else "fr"
+    key = (category or "").strip().lower()
+    if key == "animequiz":
+        return "AnimeQuiz"
+    if key in MINI_MONTHLY_GAME_TIERS:
+        return i18n.t(f"profile.animetop_game_{key}", lg)
+    return key
+
+
+def _monthly_podium_rank_label(lang: str, rank: int) -> str:
+    lg = lang if lang in ("fr", "en") else "fr"
+    if lg == "en":
+        return {1: "1st", 2: "2nd", 3: "3rd"}.get(rank, f"{rank}th")
+    return f"{rank}ᵉ"
+
+
+def _collect_monthly_podium_by_user(
+    quiz_data: dict | None,
+    mini_data: dict | None,
+) -> dict[int, list[dict[str, Any]]]:
+    """Regroupe les podiums (animequiz + mini-jeux) par utilisateur."""
+    by_uid: dict[int, list[dict[str, Any]]] = {}
+
+    def _add(uid_int: int, entry: dict[str, Any]) -> None:
+        by_uid.setdefault(uid_int, []).append(entry)
+
+    for row in (quiz_data or {}).get("podium") or []:
+        try:
+            rank = int(row.get("rank") or 0)
+            uid_s = row.get("user_id")
+            sc = int(row.get("score") or 0)
+            if not uid_s or rank not in (1, 2, 3):
+                continue
+            uid_int = int(uid_s)
+        except Exception:
+            continue
+        xp_amt = int(QUIZ_MONTHLY_XP_BY_RANK.get(rank, 0))
+        _add(
+            uid_int,
+            {
+                "category": "animequiz",
+                "rank": rank,
+                "score": sc,
+                "xp": xp_amt,
+                "quiz_badges": True,
+            },
+        )
+
+    by_game = (mini_data or {}).get("by_game") or {}
+    for game in MINI_MONTHLY_GAME_TIERS:
+        tier = MINI_MONTHLY_GAME_TIERS.get(str(game))
+        if not tier:
+            continue
+        for row in by_game.get(game) or []:
+            try:
+                rank = int(row.get("rank") or 0)
+                uid_s = row.get("user_id")
+                sc = int(row.get("score") or 0)
+                if not uid_s or rank not in (1, 2, 3):
+                    continue
+                uid_int = int(uid_s)
+            except Exception:
+                continue
+            xp_amt = int(tier.get(rank, 0))
+            if xp_amt <= 0:
+                continue
+            _add(
+                uid_int,
+                {
+                    "category": str(game),
+                    "rank": rank,
+                    "score": sc,
+                    "xp": xp_amt,
+                    "quiz_badges": False,
+                },
+            )
+
+    order_idx = {k: i for i, k in enumerate(MONTHLY_PODIUM_CATEGORY_ORDER)}
+    for uid_int in by_uid:
+        by_uid[uid_int].sort(
+            key=lambda e: (order_idx.get(e.get("category", ""), 99), int(e.get("rank") or 99))
+        )
+    return by_uid
 
 
 def record_month_winner_and_reset(now: datetime | None = None, tz_name: str = "Europe/Paris") -> dict:
@@ -2244,60 +2361,37 @@ def record_month_winner_and_reset(now: datetime | None = None, tz_name: str = "E
         return data
 
 
-async def grant_quiz_monthly_podium_rewards(bot, data: dict | None) -> None:
-    """
-    Après record_month_winner_and_reset : XP global + progression trophées podium.
-    Envoie un MP si possible (MP fermés ignorés).
-    """
+async def _apply_quiz_monthly_podium_xp(bot, data: dict | None) -> None:
+    """XP global + compteurs badges (mini:quiz_month_*) — sans MP."""
     if not data:
         return
-    podium = data.get("podium") or []
-    month_key = data.get("month") or "?"
-    month_fr = human_month_fr(month_key) if month_key and month_key != "?" else month_key
     mini_keys = {1: "quiz_month_1st", 2: "quiz_month_2nd", 3: "quiz_month_3rd"}
-
-    for row in podium:
+    for row in data.get("podium") or []:
         try:
             rank = int(row.get("rank") or 0)
             uid_s = row.get("user_id")
-            sc = int(row.get("score") or 0)
             if not uid_s or rank not in (1, 2, 3):
                 continue
             uid_int = int(uid_s)
         except Exception:
             continue
-
         xp_amt = int(QUIZ_MONTHLY_XP_BY_RANK.get(rank, 0))
         if xp_amt > 0:
             try:
                 await add_xp(bot, None, uid_int, xp_amt, announce=False)
             except Exception as e:
-                LOG.warning("grant_quiz_monthly_podium_rewards add_xp uid=%s: %s", uid_int, e)
-
+                LOG.warning("_apply_quiz_monthly_podium_xp add_xp uid=%s: %s", uid_int, e)
         mk = mini_keys.get(rank)
         if mk:
             try:
                 add_mini_score(uid_int, mk, 1)
             except Exception as e:
-                LOG.warning("grant_quiz_monthly_podium_rewards mini uid=%s: %s", uid_int, e)
+                LOG.warning("_apply_quiz_monthly_podium_xp mini uid=%s: %s", uid_int, e)
 
-        medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, "🏅")
-        try:
-            u = await bot.fetch_user(uid_int)
-            await u.send(
-                f"{medal} **Classement quiz — {month_fr}**\n"
-                f"Tu es **{rank}ᵉ** avec **{sc}** pts ce mois-là.\n"
-                f"**+{xp_amt} XP** (rang global / **/mycard**) et progression trophée **/mybadges**."
-            )
-        except Exception:
-            pass
 
-    if podium:
-        LOG.info(
-            "Quiz mensuel %s : récompenses podium envoyées (%d joueur(s)).",
-            month_key,
-            len(podium),
-        )
+async def grant_quiz_monthly_podium_rewards(bot, data: dict | None) -> None:
+    """Après record_month_winner_and_reset : XP + badges uniquement (MP via grant_monthly_podium_rewards)."""
+    await _apply_quiz_monthly_podium_xp(bot, data)
 
 # ---- Stats profil (User.statistics) ----
 def get_anilist_stats(username: str) -> Optional[Dict[str, Any]]:
@@ -2544,11 +2638,10 @@ def record_mini_month_winners_and_reset(now: datetime | None = None, tz_name: st
         return data
 
 
-async def grant_mini_monthly_podium_rewards(bot, data: dict | None) -> None:
+async def _apply_mini_monthly_podium_xp(bot, data: dict | None) -> None:
+    """XP des podiums mini-jeux — sans MP."""
     if not data:
         return
-    month_key = data.get("month") or "?"
-    month_fr = human_month_fr(month_key) if month_key and month_key != "?" else month_key
     by_game = data.get("by_game") or {}
     for game, podium in by_game.items():
         tier = MINI_MONTHLY_GAME_TIERS.get(str(game))
@@ -2558,7 +2651,6 @@ async def grant_mini_monthly_podium_rewards(bot, data: dict | None) -> None:
             try:
                 rank = int(row.get("rank") or 0)
                 uid_s = row.get("user_id")
-                sc = int(row.get("score") or 0)
                 if not uid_s or rank not in (1, 2, 3):
                     continue
                 uid_int = int(uid_s)
@@ -2570,17 +2662,99 @@ async def grant_mini_monthly_podium_rewards(bot, data: dict | None) -> None:
             try:
                 await add_xp(bot, None, uid_int, xp_amt, announce=False)
             except Exception as e:
-                LOG.warning("grant_mini_monthly_podium_rewards add_xp uid=%s game=%s: %s", uid_int, game, e)
-            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, "🏅")
-            try:
-                u = await bot.fetch_user(uid_int)
-                await u.send(
-                    f"{medal} **Top mini-jeu ({game}) — {month_fr}**\n"
-                    f"Tu es **{rank}ᵉ** avec **{sc}** pts ce mois-là.\n"
-                    f"**+{xp_amt} XP** (rang global / **/mycard**)."
-                )
-            except Exception:
-                pass
+                LOG.warning("_apply_mini_monthly_podium_xp add_xp uid=%s game=%s: %s", uid_int, game, e)
+
+
+async def grant_mini_monthly_podium_rewards(bot, data: dict | None) -> None:
+    """Après record_mini_month_winners_and_reset : XP uniquement (MP via grant_monthly_podium_rewards)."""
+    await _apply_mini_monthly_podium_xp(bot, data)
+
+
+async def _send_monthly_podium_recap_dms(
+    bot,
+    quiz_data: dict | None,
+    mini_data: dict | None,
+) -> None:
+    """Un seul embed MP par joueur : uniquement les catégories /quiztop où il est sur le podium."""
+    from modules import i18n
+
+    by_uid = _collect_monthly_podium_by_user(quiz_data, mini_data)
+    if not by_uid:
+        return
+
+    month_key = "?"
+    for src in (quiz_data, mini_data):
+        if src and src.get("month"):
+            month_key = str(src["month"])
+            break
+
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    sent = 0
+    for uid_int, entries in by_uid.items():
+        if not entries:
+            continue
+        lg = i18n.user_dm_lang(uid_int)
+        month_label = human_month_label(lg, month_key) if month_key != "?" else month_key
+        em = discord.Embed(
+            title=i18n.t("quiz.monthly_podium_dm_title", lg, month=month_label)[:256],
+            description=i18n.t("quiz.monthly_podium_dm_desc", lg),
+            color=discord.Color.gold(),
+        )
+        has_quiz_badges = False
+        for ent in entries:
+            rank = int(ent.get("rank") or 0)
+            cat = str(ent.get("category") or "")
+            sc = int(ent.get("score") or 0)
+            xp_amt = int(ent.get("xp") or 0)
+            medal = medals.get(rank, "🏅")
+            if ent.get("quiz_badges"):
+                has_quiz_badges = True
+            em.add_field(
+                name=_quiztop_category_label(cat, lg)[:256],
+                value=i18n.t(
+                    "quiz.monthly_podium_dm_field",
+                    lg,
+                    medal=medal,
+                    rank_label=_monthly_podium_rank_label(lg, rank),
+                    score=sc,
+                    xp=xp_amt,
+                )[:1024],
+                inline=False,
+            )
+        if has_quiz_badges:
+            em.add_field(
+                name="\u200b",
+                value=i18n.t("quiz.monthly_podium_dm_badges", lg)[:1024],
+                inline=False,
+            )
+        em.set_footer(text=i18n.t("quiz.monthly_podium_dm_footer", lg)[:2048])
+        try:
+            u = await bot.fetch_user(uid_int)
+            await u.send(embed=em)
+            sent += 1
+        except Exception:
+            pass
+
+    LOG.info(
+        "Podiums mensuels %s : récap MP envoyé (%d joueur(s), %d catégorie(s) max).",
+        month_key,
+        sent,
+        max(len(v) for v in by_uid.values()) if by_uid else 0,
+    )
+
+
+async def grant_monthly_podium_rewards(
+    bot,
+    quiz_data: dict | None = None,
+    mini_data: dict | None = None,
+) -> None:
+    """
+    Récompenses fin de mois (/quiztop) : XP + badges, puis **un** MP embed par joueur
+    (seulement les catégories où il est 1ʳᵉ–3ᵉ).
+    """
+    await _apply_quiz_monthly_podium_xp(bot, quiz_data)
+    await _apply_mini_monthly_podium_xp(bot, mini_data)
+    await _send_monthly_podium_recap_dms(bot, quiz_data, mini_data)
 
 
 def get_guess_genre_penalty_count(user_id: int) -> int:
